@@ -1,0 +1,28 @@
+name: Fantasia
+options:
+  bundleIdPrefix: com.fantasia
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "15"
+targets:
+  Fantasia:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [Fantasia]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fantasia.app
+        PRODUCT_NAME: Fantasia
+        MARKETING_VERSION: 0.0.1
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 5.9
+        IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    info:
+      path: Fantasia/Info.plist
+      properties:
+        CFBundleDisplayName: Fantasia
+        UILaunchScreen:
+          UIColorName: ''
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
