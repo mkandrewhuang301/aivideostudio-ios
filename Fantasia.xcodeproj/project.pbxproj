@@ -95,8 +95,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -107,6 +105,10 @@
 			);
 			mainGroup = 96DEDC2B08262C1BE0B33DE4;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				91B2C95E2FE6E6510002F7DA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				91B2C95F2FE6E94C0002F7DA /* XCRemoteSwiftPackageReference "purchases-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C1DF6D5DA8F4695C0DE8ADB7 /* Products */;
 			projectDirPath = "";
@@ -315,6 +317,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		91B2C95E2FE6E6510002F7DA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
+		91B2C95F2FE6E94C0002F7DA /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.79.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = CCAD4F3D9AC75FDC06C728E5 /* Project object */;
 }
