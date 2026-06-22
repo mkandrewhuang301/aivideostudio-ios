@@ -216,12 +216,10 @@ struct SignInView: View {
         } catch let error as NSError {
             let code = AuthErrorCode(rawValue: error.code)
             switch code {
-            case .wrongPassword, .invalidCredential:
-                passwordError = "Incorrect password"
-            case .invalidEmail:
-                emailError = "Enter a valid email address"
-            case .userNotFound:
-                // Account doesn't exist — attempt creation
+            case .wrongPassword, .invalidCredential, .userNotFound:
+                // Newer Firebase SDKs return invalidCredential for both wrong password and
+                // non-existent accounts (userNotFound is kept for older SDK compat).
+                // Try createUser: if emailAlreadyInUse → wrong password; if success → new account.
                 do {
                     _ = try await Auth.auth().createUser(withEmail: email, password: password)
                 } catch let createError as NSError {
@@ -230,11 +228,13 @@ struct SignInView: View {
                     case .weakPassword:
                         passwordError = "Password must be at least 6 characters"
                     case .emailAlreadyInUse:
-                        emailError = "Account already exists. Try signing in."
+                        passwordError = "Incorrect password"
                     default:
                         emailError = "Account creation failed. Try again."
                     }
                 }
+            case .invalidEmail:
+                emailError = "Enter a valid email address"
             case .tooManyRequests:
                 emailError = "Too many attempts. Please wait and try again."
             case .networkError:
