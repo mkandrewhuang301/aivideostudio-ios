@@ -7,8 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
+		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
+		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
+		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D982E3DBBB56BABEB652202 /* AppConfig.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 /* End PBXBuildFile section */
@@ -17,10 +21,24 @@
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0BA7A9AA216E00B083E79B48 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */,
+				989874F0945BA7356528F19E /* RevenueCat in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		18291AFE74B0A76F2381C9F7 /* Network */ = {
@@ -47,12 +65,22 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		AD9775C4F23E94D2318D185A /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
 		AEB226F422F4B0AB19C75850 /* Fantasia */ = {
 			isa = PBXGroup;
 			children = (
 				8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */,
 				27960EB90112C73C94A802EC /* FantasiaApp.swift */,
+				65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */,
 				3DA93D5A4C686554C519842D /* Info.plist */,
+				AD9775C4F23E94D2318D185A /* Auth */,
 				99A35D5F4CE9CB83BD2485E1 /* Config */,
 				18291AFE74B0A76F2381C9F7 /* Network */,
 			);
@@ -75,6 +103,8 @@
 			buildConfigurationList = 5FDE6D73BED1B9B623DF73A2 /* Build configuration list for PBXNativeTarget "Fantasia" */;
 			buildPhases = (
 				B42B8A454C43C494DEA0F920 /* Sources */,
+				5F428DE7BEC1498EA98D3271 /* Resources */,
+				0BA7A9AA216E00B083E79B48 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -82,6 +112,8 @@
 			);
 			name = Fantasia;
 			packageProductDependencies = (
+				EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */,
+				449957FC49E746A99AC14325 /* RevenueCat */,
 			);
 			productName = Fantasia;
 			productReference = 73AB21366AA28409EB76A559 /* Fantasia.app */;
@@ -95,6 +127,8 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -106,8 +140,8 @@
 			mainGroup = 96DEDC2B08262C1BE0B33DE4;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				91B2C95E2FE6E6510002F7DA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
-				91B2C95F2FE6E94C0002F7DA /* XCRemoteSwiftPackageReference "purchases-ios" */,
+				FB232EB0C1A9536B782E87FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C1DF6D5DA8F4695C0DE8ADB7 /* Products */;
@@ -119,6 +153,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		5F428DE7BEC1498EA98D3271 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		B42B8A454C43C494DEA0F920 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -126,6 +171,7 @@
 			files = (
 				65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */,
 				B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */,
+				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 			);
@@ -319,15 +365,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		91B2C95E2FE6E6510002F7DA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.0.0;
-			};
-		};
-		91B2C95F2FE6E94C0002F7DA /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
+		1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios";
 			requirement = {
@@ -335,7 +373,28 @@
 				minimumVersion = 5.79.0;
 			};
 		};
+		FB232EB0C1A9536B782E87FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		449957FC49E746A99AC14325 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCat;
+		};
+		EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FB232EB0C1A9536B782E87FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CCAD4F3D9AC75FDC06C728E5 /* Project object */;
 }
