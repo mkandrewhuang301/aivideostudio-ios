@@ -16,6 +16,7 @@
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D982E3DBBB56BABEB652202 /* AppConfig.swift */; };
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
+		D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A65D5512DE91F2D2D1BC1B /* SignInView.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 /* End PBXBuildFile section */
 
@@ -24,6 +25,7 @@
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -49,6 +51,7 @@
 			isa = PBXGroup;
 			children = (
 				AD06EBDDED984EC354B17EC5 /* MainTabView.swift */,
+				63A65D5512DE91F2D2D1BC1B /* SignInView.swift */,
 				C2752AF2A62657566B211B9B /* SplashView.swift */,
 			);
 			path = Views;
@@ -189,6 +192,7 @@
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
+				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
