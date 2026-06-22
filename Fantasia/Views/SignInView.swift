@@ -216,7 +216,7 @@ struct SignInView: View {
         } catch let error as NSError {
             let code = AuthErrorCode(rawValue: error.code)
             switch code {
-            case .wrongPassword:
+            case .wrongPassword, .invalidCredential:
                 passwordError = "Incorrect password"
             case .invalidEmail:
                 emailError = "Enter a valid email address"
