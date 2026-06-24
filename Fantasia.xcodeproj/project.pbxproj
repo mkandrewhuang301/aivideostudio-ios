@@ -8,7 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
+		0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F17BD017E319CD6B181876C /* PurchaseManager.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
+		3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D880315248963AAE05C9C2 /* CreditManager.swift */; };
+		43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
@@ -25,10 +28,13 @@
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		60D880315248963AAE05C9C2 /* CreditManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditManager.swift; sourceTree = "<group>"; };
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementLevel.swift; sourceTree = "<group>"; };
 		AD06EBDDED984EC354B17EC5 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		C2752AF2A62657566B211B9B /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -81,6 +87,14 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		9AD43FA858F66606AE0A3230 /* Managers */ = {
+			isa = PBXGroup;
+			children = (
+				6F17BD017E319CD6B181876C /* PurchaseManager.swift */,
+			);
+			path = Managers;
+			sourceTree = "<group>";
+		};
 		AD9775C4F23E94D2318D185A /* Auth */ = {
 			isa = PBXGroup;
 			children = (
@@ -98,6 +112,8 @@
 				3DA93D5A4C686554C519842D /* Info.plist */,
 				AD9775C4F23E94D2318D185A /* Auth */,
 				99A35D5F4CE9CB83BD2485E1 /* Config */,
+				C7AFE8FBDBC3A4D5E4E5A485 /* Credits */,
+				9AD43FA858F66606AE0A3230 /* Managers */,
 				18291AFE74B0A76F2381C9F7 /* Network */,
 				13CC4AB7951EED84A3605C02 /* Views */,
 			);
@@ -110,6 +126,15 @@
 				73AB21366AA28409EB76A559 /* Fantasia.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C7AFE8FBDBC3A4D5E4E5A485 /* Credits */ = {
+			isa = PBXGroup;
+			children = (
+				60D880315248963AAE05C9C2 /* CreditManager.swift */,
+				9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */,
+			);
+			path = Credits;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -190,8 +215,11 @@
 				B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */,
 				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,
+				3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */,
+				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
+				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
 			);

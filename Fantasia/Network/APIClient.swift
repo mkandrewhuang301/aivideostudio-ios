@@ -48,11 +48,38 @@ actor APIClient {
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
+
+    func fetchMe() async throws -> MeResponse {
+        return try await authorizedRequest(path: "api/me")
+    }
 }
 
 struct HealthResponse: Decodable {
     let status: String
     let checks: [String: String]
+}
+
+// MeResponse — returned by GET /api/me (extended in Phase 3)
+struct MeResponse: Decodable {
+    let user: UserInfo
+    let creditsBalance: Int
+    let subscriptionAllotment: Int
+    let activeTopupBalance: Int
+    let entitlementLevel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case user
+        case creditsBalance = "credits_balance"
+        case subscriptionAllotment = "subscription_allotment"
+        case activeTopupBalance = "active_topup_balance"
+        case entitlementLevel = "entitlement_level"
+    }
+}
+
+struct UserInfo: Decodable {
+    let uid: String
+    let email: String?
+    let dbUserId: String?
 }
 
 enum APIError: Error, LocalizedError {
