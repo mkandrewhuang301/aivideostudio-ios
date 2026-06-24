@@ -9,10 +9,12 @@
 /* Begin PBXBuildFile section */
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
 		0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F17BD017E319CD6B181876C /* PurchaseManager.swift */; };
+		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
 		3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D880315248963AAE05C9C2 /* CreditManager.swift */; };
 		43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
+		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
 		85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06EBDDED984EC354B17EC5 /* MainTabView.swift */; };
@@ -25,6 +27,7 @@
 
 /* Begin PBXFileReference section */
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
+		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
@@ -34,6 +37,7 @@
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementLevel.swift; sourceTree = "<group>"; };
 		AD06EBDDED984EC354B17EC5 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		C2752AF2A62657566B211B9B /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
@@ -59,6 +63,8 @@
 				AD06EBDDED984EC354B17EC5 /* MainTabView.swift */,
 				63A65D5512DE91F2D2D1BC1B /* SignInView.swift */,
 				C2752AF2A62657566B211B9B /* SplashView.swift */,
+				53184DDF5C85560F33C29D1E /* Onboarding */,
+				BAA9F733EF9638C0A3B62619 /* Paywall */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -69,6 +75,14 @@
 				F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */,
 			);
 			path = Network;
+			sourceTree = "<group>";
+		};
+		53184DDF5C85560F33C29D1E /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				2B5077D8688B1538D3C4D849 /* OnboardingView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 		96DEDC2B08262C1BE0B33DE4 = {
@@ -118,6 +132,14 @@
 				13CC4AB7951EED84A3605C02 /* Views */,
 			);
 			path = Fantasia;
+			sourceTree = "<group>";
+		};
+		BAA9F733EF9638C0A3B62619 /* Paywall */ = {
+			isa = PBXGroup;
+			children = (
+				8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */,
+			);
+			path = Paywall;
 			sourceTree = "<group>";
 		};
 		C1DF6D5DA8F4695C0DE8ADB7 /* Products */ = {
@@ -219,6 +241,8 @@
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
+				58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */,
+				2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
