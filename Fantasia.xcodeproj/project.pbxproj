@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
 		0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F17BD017E319CD6B181876C /* PurchaseManager.swift */; };
+		1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6313B0A55581090BEA6B4A13 /* PlanCardView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
 		3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
@@ -34,6 +35,7 @@
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		60D880315248963AAE05C9C2 /* CreditManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditManager.swift; sourceTree = "<group>"; };
+		6313B0A55581090BEA6B4A13 /* PlanCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCardView.swift; sourceTree = "<group>"; };
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */,
+				6313B0A55581090BEA6B4A13 /* PlanCardView.swift */,
 			);
 			path = Paywall;
 			sourceTree = "<group>";
@@ -251,6 +254,7 @@
 				3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */,
 				58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */,
 				2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */,
+				1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
