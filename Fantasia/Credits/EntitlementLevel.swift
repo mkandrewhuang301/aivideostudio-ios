@@ -5,7 +5,8 @@
 import Foundation
 
 enum EntitlementLevel: String, Codable, Equatable {
-    case none  = ""      // No active subscription
-    case basic = "basic"
-    case pro   = "pro"
+    case none    = ""        // No active subscription
+    case basic   = "basic"
+    case pro     = "pro"
+    case creator = "creator"
 }

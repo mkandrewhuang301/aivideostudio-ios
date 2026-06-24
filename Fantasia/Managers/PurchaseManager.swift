@@ -64,7 +64,9 @@ final class PurchaseManager {
     }
 
     private func updateEntitlement(from customerInfo: CustomerInfo) {
-        if customerInfo.entitlements["pro"]?.isActive == true {
+        if customerInfo.entitlements["creator"]?.isActive == true {
+            creditManager.entitlementLevel = .creator
+        } else if customerInfo.entitlements["pro"]?.isActive == true {
             creditManager.entitlementLevel = .pro
         } else if customerInfo.entitlements["basic"]?.isActive == true {
             creditManager.entitlementLevel = .basic
