@@ -1,19 +1,19 @@
 // OnboardingFeaturesView.swift
 // Fantasia
 // Onboarding screen 2: 3 feature lines + "Get Started" CTA.
-// D-12: No back button. "Get Started" sets hasCompletedOnboarding via onGetStarted callback.
+// "Get Started" sets hasCompletedOnboarding via onGetStarted callback.
+// Swiping back to screen 1 is disabled (OnboardingView), so a back button is provided here instead.
 
 import SwiftUI
 
 struct OnboardingFeaturesView: View {
     var onGetStarted: () -> Void
+    var onBack: () -> Void
 
     private let backgroundGradient = LinearGradient(
         colors: [Color(red: 0.10, green: 0.10, blue: 0.18), Color(red: 0.07, green: 0.07, blue: 0.16)],
         startPoint: .top, endPoint: .bottom
     )
-    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
-
     private struct Feature {
         let icon: String
         let text: String
@@ -31,7 +31,24 @@ struct OnboardingFeaturesView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer().frame(height: 64) // 3xl — from top safe area
+                Spacer().frame(height: 56)
+
+                HStack {
+                    Button {
+                        onBack()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Back")
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+
+                Spacer().frame(height: 24)
 
                 VStack(alignment: .leading, spacing: 32) { // xl between sections
                     // Wordmark block
@@ -73,7 +90,12 @@ struct OnboardingFeaturesView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
-                            .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            }
                     }
                 }
                 .padding(.horizontal, 24)

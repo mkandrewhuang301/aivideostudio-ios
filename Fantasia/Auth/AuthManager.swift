@@ -13,9 +13,10 @@ final class AuthManager {
 
     nonisolated(unsafe) private var listenerHandle: AuthStateDidChangeListenerHandle?
 
-    init() {
-        // addStateDidChangeListener fires on main queue by default in firebase-ios-sdk 11.x
-        // Using Task @MainActor to satisfy @Observable mutation requirements
+    // Listener registration deferred to start() — must not call Auth.auth() until
+    // FirebaseApp.configure() has run. Keeps init() free of Firebase calls so the
+    // object can be created before Firebase is configured, off the app's first-frame path.
+    func start() {
         listenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else { return }
             Task { @MainActor in

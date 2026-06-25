@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		03DE4BE9123D30D92B6D6A4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 71907E2C4814D307EE0AADF4 /* Assets.xcassets */; };
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
 		0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F17BD017E319CD6B181876C /* PurchaseManager.swift */; };
 		1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6313B0A55581090BEA6B4A13 /* PlanCardView.swift */; };
@@ -20,9 +21,11 @@
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
+		6B7B16C6F9B231A89B52A6F8 /* onboarding-sample.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */; };
 		85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06EBDDED984EC354B17EC5 /* MainTabView.swift */; };
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */; };
+		B17FF15D5D571DEAB54D0EB7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 98728630D43E57BFF19C909E /* LaunchScreen.storyboard */; };
 		B3BE40EC122DDAA421952402 /* TopUpSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95BFE16F83B5A52F4899CA2D /* TopUpSheet.swift */; };
 		B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D982E3DBBB56BABEB652202 /* AppConfig.swift */; };
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
@@ -32,6 +35,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -42,12 +46,14 @@
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
-		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		71907E2C4814D307EE0AADF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		95BFE16F83B5A52F4899CA2D /* TopUpSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopUpSheet.swift; sourceTree = "<group>"; };
 		9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementLevel.swift; sourceTree = "<group>"; };
+		98728630D43E57BFF19C909E /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCreditIndicator.swift; sourceTree = "<group>"; };
 		AD06EBDDED984EC354B17EC5 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingVideoView.swift; sourceTree = "<group>"; };
@@ -110,6 +116,14 @@
 			path = Onboarding;
 			sourceTree = "<group>";
 		};
+		7FEA6F335CD22F04FD1524C6 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		96DEDC2B08262C1BE0B33DE4 = {
 			isa = PBXGroup;
 			children = (
@@ -145,15 +159,18 @@
 		AEB226F422F4B0AB19C75850 /* Fantasia */ = {
 			isa = PBXGroup;
 			children = (
+				71907E2C4814D307EE0AADF4 /* Assets.xcassets */,
 				8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */,
 				27960EB90112C73C94A802EC /* FantasiaApp.swift */,
 				65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */,
 				3DA93D5A4C686554C519842D /* Info.plist */,
+				98728630D43E57BFF19C909E /* LaunchScreen.storyboard */,
 				AD9775C4F23E94D2318D185A /* Auth */,
 				99A35D5F4CE9CB83BD2485E1 /* Config */,
 				C7AFE8FBDBC3A4D5E4E5A485 /* Credits */,
 				9AD43FA858F66606AE0A3230 /* Managers */,
 				18291AFE74B0A76F2381C9F7 /* Network */,
+				7FEA6F335CD22F04FD1524C6 /* Resources */,
 				13CC4AB7951EED84A3605C02 /* Views */,
 			);
 			path = Fantasia;
@@ -217,8 +234,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -248,7 +263,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				03DE4BE9123D30D92B6D6A4C /* Assets.xcassets in Resources */,
 				09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */,
+				B17FF15D5D571DEAB54D0EB7 /* LaunchScreen.storyboard in Resources */,
+				6B7B16C6F9B231A89B52A6F8 /* onboarding-sample.mp4 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -346,6 +364,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -353,11 +372,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.fantasia.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fantasiaai;
 				PRODUCT_NAME = Fantasia;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -430,6 +449,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -437,11 +457,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.fantasia.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fantasiaai;
 				PRODUCT_NAME = Fantasia;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};

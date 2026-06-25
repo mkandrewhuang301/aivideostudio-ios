@@ -1,6 +1,6 @@
 name: Fantasia
 options:
-  bundleIdPrefix: com.fantasia
+  bundleIdPrefix: com.fantasiaai
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "15"
@@ -24,17 +24,21 @@ targets:
         product: RevenueCat
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.fantasia.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai
         PRODUCT_NAME: Fantasia
         MARKETING_VERSION: 0.0.1
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         IPHONEOS_DEPLOYMENT_TARGET: 17.0
+        TARGETED_DEVICE_FAMILY: "1"
     info:
       path: Fantasia/Info.plist
       properties:
         CFBundleDisplayName: Fantasia
-        UILaunchScreen:
-          UIColorName: ''
+        CFBundleIconName: AppIcon
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchStoryboardName: LaunchScreen
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false

@@ -15,6 +15,10 @@ struct SignInView: View {
     @State private var showPassword = false
     @State private var passwordResetSent = false
 
+    // X button returns to onboarding — without this there's no way back from
+    // sign-in once onboarding is marked complete (ContentView routes by this flag).
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+
     @Environment(AuthManager.self) private var authManager
 
     @FocusState private var focusedField: Field?
@@ -44,6 +48,25 @@ struct SignInView: View {
                     Spacer().frame(height: 16)
                 }
             }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        hasCompletedOnboarding = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Back to onboarding")
+                    .padding(.trailing, 24)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
         }
     }
 
