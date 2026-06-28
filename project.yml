@@ -50,3 +50,15 @@ targets:
           - UIInterfaceOrientationPortrait
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
+  FantasiaTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [FantasiaTests]
+    dependencies:
+      - target: Fantasia
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai.tests
+        SWIFT_VERSION: 5.9
+        IPHONEOS_DEPLOYMENT_TARGET: 17.0

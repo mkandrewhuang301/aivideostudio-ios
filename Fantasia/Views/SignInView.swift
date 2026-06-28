@@ -129,13 +129,14 @@ struct SignInView: View {
             }
     }
 
-    /// D-05: `rgba(6, 4, 14, 0.63)` tint + .ultraThinMaterial approximating blur(23) saturate(1.25).
+    /// D-05: blur the video first (.ultraThinMaterial), then dark tint on top for readability.
+    /// Material must come before the tint so it blurs the raw video, not a dark surface.
     private var frostOverlay: some View {
         ZStack {
-            Color(red: 6.0 / 255, green: 4.0 / 255, blue: 14.0 / 255)
-                .opacity(0.63)
             Rectangle()
                 .fill(.ultraThinMaterial)
+            Color(red: 6.0 / 255, green: 4.0 / 255, blue: 14.0 / 255)
+                .opacity(0.28)
         }
         .ignoresSafeArea()
     }
@@ -173,7 +174,7 @@ struct SignInView: View {
                 .foregroundStyle(.white)
             Text("Bring your creativity to life.")
                 .font(.system(size: 13))
-                .foregroundStyle(Color.white.opacity(0.55))
+                .foregroundStyle(Color.white.opacity(0.75))
         }
         .multilineTextAlignment(.center)
     }
@@ -220,7 +221,7 @@ struct SignInView: View {
             } label: {
                 Text("Forgot password?")
                     .font(.caption)
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(Color.white.opacity(0.65))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(isAuthLoading)
@@ -265,7 +266,7 @@ struct SignInView: View {
         HStack(spacing: 4) {
             Text("Don't have an account?")
                 .font(.system(size: 12))
-                .foregroundStyle(Color.white.opacity(0.6))
+                .foregroundStyle(Color.white.opacity(0.8))
             Button("Sign up") {
                 showSignUp = true
             }
@@ -281,7 +282,7 @@ struct SignInView: View {
                 .frame(height: 1)
             Text("or")
                 .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.4))
+                .foregroundStyle(Color.white.opacity(0.6))
             Rectangle()
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 1)

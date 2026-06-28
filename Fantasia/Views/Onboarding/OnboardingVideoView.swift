@@ -149,17 +149,19 @@ struct OnboardingVideoView: View {
     // whale→anime cut at 11.7s that the first pass missed) — keeps the caption switching
     // exactly on each cut. Every caption must stay one line — verified against the chip width.
     @State private var captionController = PromptCaptionController(scenes: [
-        .init(start: 0.0,    caption: "Man riding motorcycle through desert"),
-        .init(start: 2.2333, caption: "Dragon breathing fire over battlefield"),
-        .init(start: 4.27,   caption: "Car tire splashing through rain"),
-        .init(start: 7.03,   caption: "Figure skater gliding on frozen lake"),
-        .init(start: 9.5,    caption: "Bioluminescent whale breaching at night"),
-        .init(start: 11.7,   caption: "Boy walks into portal to mystical world"),
-        .init(start: 14.57,  caption: "Woman in gown twirling outside villa"),
-        .init(start: 17.53,  caption: "Animated baby squirrel running in meadow"),
-        .init(start: 20.23,  caption: "Kung fu masters fighting on temple steps"),
-        .init(start: 22.63,  caption: "Football player gearing up for game day"),
+        .init(start: 0.0,    caption: "Man riding motorcycle through the open desert"),
+        .init(start: 2.2333, caption: "Dragon breathing fire over a burning battlefield"),
+        .init(start: 4.27,   caption: "Car tire splashing through puddles in the rain"),
+        .init(start: 7.03,   caption: "Figure skater gliding across a frozen winter lake"),
+        .init(start: 9.5,    caption: "Bioluminescent whale breaching on a starry night"),
+        .init(start: 11.7,   caption: "Anime boy steps through a door portal into a mystical world"),
+        .init(start: 14.57,  caption: "Woman in a gown twirling outside a stone villa"),
+        .init(start: 17.53,  caption: "Animated baby squirrel running through a meadow"),
+        .init(start: 20.23,  caption: "Kung fu masters fighting on ancient temple steps"),
+        .init(start: 22.63,  caption: "HS football player gearing up on game day"),
     ])
+
+    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
     private let backgroundGradient = LinearGradient(
         colors: [Color(red: 0.059, green: 0.059, blue: 0.067),
@@ -232,11 +234,16 @@ struct OnboardingVideoView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 56)
-                        .background(.ultraThinMaterial)
+                        .background {
+                            ZStack {
+                                Color.white.opacity(0.15)
+                                Rectangle().fill(.ultraThinMaterial)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.35), lineWidth: 1)
                         }
                 }
                 .accessibilityLabel("Continue to next step")
@@ -271,35 +278,38 @@ struct OnboardingVideoView: View {
     }
 
     private var promptChip: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: "sparkle")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.8))
-                Text("GENERATED FROM PROMPT")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .tracking(0.5)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("prompt")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .tracking(1.2)
+                    .textCase(.uppercase)
             }
 
-            HStack(spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(captionController.displayedText)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.92))
                 Rectangle()
-                    .fill(.white)
-                    .frame(width: 2, height: 12)
+                    .fill(.white.opacity(0.7))
+                    .frame(width: 1.5, height: 14)
                     .opacity(captionController.caretVisible ? 1 : 0)
             }
-            .frame(minHeight: 16, alignment: .leading)
+            .frame(height: 20, alignment: .leading)
+            .clipped()
         }
-        .padding(12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .background(Color.black.opacity(0.52))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .stroke(Color.white.opacity(0.16), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
         }
     }
 }

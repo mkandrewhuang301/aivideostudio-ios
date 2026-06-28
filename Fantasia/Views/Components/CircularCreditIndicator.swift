@@ -14,21 +14,22 @@ struct CircularCreditIndicator: View {
     private var clampedRatio: Double { max(0, min(1, fillRatio)) }
 
     private var ringColor: Color {
-        switch clampedRatio {
-        case 0.75...: return Color(red: 0.2,  green: 0.85, blue: 0.4)
-        case 0.50...: return Color(red: 0.7,  green: 0.85, blue: 0.2)
-        case 0.25...: return Color(red: 1.0,  green: 0.65, blue: 0.0)
-        default:      return Color(red: 1.0,  green: 0.35, blue: 0.0)
+        // Piecewise linear per spec: red(0%) → yellow(50%) → green(100%)
+        // red:    rgb(224,71,63)   = (0.878, 0.278, 0.247)
+        // yellow: rgb(232,177,63)  = (0.910, 0.694, 0.247)
+        // green:  rgb(95,191,90)   = (0.373, 0.749, 0.353)
+        let t = clampedRatio
+        if t <= 0.5 {
+            let s = t * 2.0
+            return Color(red: 0.878 + (0.910 - 0.878) * s,
+                         green: 0.278 + (0.694 - 0.278) * s,
+                         blue:  0.247)
+        } else {
+            let s = (t - 0.5) * 2.0
+            return Color(red: 0.910 + (0.373 - 0.910) * s,
+                         green: 0.694 + (0.749 - 0.694) * s,
+                         blue:  0.247 + (0.353 - 0.247) * s)
         }
-    }
-
-    // When fill == 0, show a complete red ring instead of no ring
-    private var effectiveTrim: Double {
-        clampedRatio == 0 ? 1.0 : clampedRatio
-    }
-
-    private var effectiveColor: Color {
-        clampedRatio == 0 ? Color(red: 0.95, green: 0.15, blue: 0.15) : ringColor
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -39,11 +40,12 @@ struct CircularCreditIndicator: View {
             Circle()
                 .stroke(Color.white.opacity(0.15), lineWidth: 3)
 
-            // Progress arc
+            // Progress arc — 0 credits shows empty track only
             Circle()
-                .trim(from: 0, to: effectiveTrim)
-                .stroke(effectiveColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+                .trim(from: 0, to: clampedRatio)
+                .stroke(ringColor,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(90)) // 6 o'clock start, clockwise fill
                 .animation(
                     reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.75),
                     value: clampedRatio
