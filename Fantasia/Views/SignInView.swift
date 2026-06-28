@@ -109,11 +109,7 @@ struct SignInView: View {
             .ignoresSafeArea()
             // Forward reference: SignUpView created in plan 06-04.
             .navigationDestination(isPresented: $showSignUp) {
-                // TODO(06-04): Replace stub with real SignUpView once plan 06-04 lands.
-                // This wiring is intentionally pre-registered so 06-04 only needs to
-                // supply the destination — no changes to SignInView required.
-                Text("Sign Up — Coming in 06-04")
-                    .foregroundStyle(.white)
+                SignUpView()
             }
         }
     }
