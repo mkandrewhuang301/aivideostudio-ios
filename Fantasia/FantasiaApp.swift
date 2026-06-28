@@ -11,6 +11,7 @@ struct FantasiaApp: App {
     @UIApplicationDelegateAdaptor(FantasiaAppDelegate.self) var appDelegate
     @State private var authManager: AuthManager
     @State private var creditManager = CreditManager()
+    @State private var generationManager = GenerationManager()
 
     init() {
         // UIWindow's default backgroundColor is black. Between the launch-screen snapshot
@@ -29,6 +30,7 @@ struct FantasiaApp: App {
             ContentView()
                 .environment(authManager)
                 .environment(creditManager)
+                .environment(generationManager)
                 .task {
                     // Deferred off init() so this runs after the first frame is already on
                     // screen — splash shows instantly, Firebase/RevenueCat set up behind it.
