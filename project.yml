@@ -41,6 +41,9 @@ targets:
       properties:
         CFBundleDisplayName: Fantasia
         CFBundleIconName: AppIcon
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.PLACEHOLDER_CLIENT_ID
         ITSAppUsesNonExemptEncryption: false
         UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:

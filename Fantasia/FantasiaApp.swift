@@ -4,6 +4,7 @@
 import SwiftUI
 import FirebaseCore
 import RevenueCat
+import GoogleSignIn
 
 @main
 struct FantasiaApp: App {
@@ -32,6 +33,9 @@ struct FantasiaApp: App {
                     // screen — splash shows instantly, Firebase/RevenueCat set up behind it.
                     // IMPORTANT: FirebaseApp.configure() MUST run before any Auth.auth() call.
                     FirebaseApp.configure()
+                    GIDSignIn.sharedInstance.configuration = GIDConfiguration(
+                        clientID: FirebaseApp.app()?.options.clientID ?? ""
+                    )
                     authManager.start()
 
                     // Configure RevenueCat AFTER Firebase so Firebase UID is potentially available.

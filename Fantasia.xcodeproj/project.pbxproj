@@ -16,12 +16,14 @@
 		3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
 		3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D880315248963AAE05C9C2 /* CreditManager.swift */; };
+		382D5A0AAEB4E7CF7B87CD65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 134AEB4B90258A717279F950 /* GoogleSignIn */; };
 		43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
 		6B7B16C6F9B231A89B52A6F8 /* onboarding-sample.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */; };
+		800A992332E0D1E793C4BA8A /* CreateGenerationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B964B9E5B6C4E86DE99F91 /* CreateGenerationView.swift */; };
 		85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06EBDDED984EC354B17EC5 /* MainTabView.swift */; };
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */; };
@@ -31,11 +33,12 @@
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
 		D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A65D5512DE91F2D2D1BC1B /* SignInView.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
+		E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68544EFABAD6EC84426B2794 /* GenerateView.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
+		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -45,13 +48,16 @@
 		6313B0A55581090BEA6B4A13 /* PlanCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCardView.swift; sourceTree = "<group>"; };
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		68544EFABAD6EC84426B2794 /* GenerateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateView.swift; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		71907E2C4814D307EE0AADF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		739201A04305B948BFA7474D /* Fantasia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fantasia.entitlements; sourceTree = "<group>"; };
+		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		95BFE16F83B5A52F4899CA2D /* TopUpSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopUpSheet.swift; sourceTree = "<group>"; };
+		97B964B9E5B6C4E86DE99F91 /* CreateGenerationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateGenerationView.swift; sourceTree = "<group>"; };
 		9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementLevel.swift; sourceTree = "<group>"; };
 		98728630D43E57BFF19C909E /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCreditIndicator.swift; sourceTree = "<group>"; };
@@ -69,6 +75,7 @@
 			files = (
 				58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */,
 				989874F0945BA7356528F19E /* RevenueCat in Frameworks */,
+				382D5A0AAEB4E7CF7B87CD65 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -82,6 +89,7 @@
 				63A65D5512DE91F2D2D1BC1B /* SignInView.swift */,
 				C2752AF2A62657566B211B9B /* SplashView.swift */,
 				395C7109C3476F244209ECA0 /* Components */,
+				FF9119D91C886273102943AD /* Generate */,
 				53184DDF5C85560F33C29D1E /* Onboarding */,
 				BAA9F733EF9638C0A3B62619 /* Paywall */,
 			);
@@ -161,6 +169,7 @@
 			children = (
 				71907E2C4814D307EE0AADF4 /* Assets.xcassets */,
 				8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */,
+				739201A04305B948BFA7474D /* Fantasia.entitlements */,
 				27960EB90112C73C94A802EC /* FantasiaApp.swift */,
 				65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */,
 				3DA93D5A4C686554C519842D /* Info.plist */,
@@ -202,6 +211,15 @@
 			path = Credits;
 			sourceTree = "<group>";
 		};
+		FF9119D91C886273102943AD /* Generate */ = {
+			isa = PBXGroup;
+			children = (
+				97B964B9E5B6C4E86DE99F91 /* CreateGenerationView.swift */,
+				68544EFABAD6EC84426B2794 /* GenerateView.swift */,
+			);
+			path = Generate;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -221,6 +239,7 @@
 			packageProductDependencies = (
 				EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */,
 				449957FC49E746A99AC14325 /* RevenueCat */,
+				134AEB4B90258A717279F950 /* GoogleSignIn */,
 			);
 			productName = Fantasia;
 			productReference = 73AB21366AA28409EB76A559 /* Fantasia.app */;
@@ -234,6 +253,8 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -246,6 +267,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				FB232EB0C1A9536B782E87FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				A4D8B56C89A1815B8348FBF3 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 				1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -282,9 +304,11 @@
 				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				32104E944D1A0E14E9D90D02 /* CircularCreditIndicator.swift in Sources */,
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,
+				800A992332E0D1E793C4BA8A /* CreateGenerationView.swift in Sources */,
 				3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */,
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
+				E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
 				AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */,
 				3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */,
@@ -364,7 +388,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -449,7 +472,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -497,6 +519,14 @@
 				minimumVersion = 5.79.0;
 			};
 		};
+		A4D8B56C89A1815B8348FBF3 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
 		FB232EB0C1A9536B782E87FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -508,6 +538,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		134AEB4B90258A717279F950 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4D8B56C89A1815B8348FBF3 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
 		449957FC49E746A99AC14325 /* RevenueCat */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */;
