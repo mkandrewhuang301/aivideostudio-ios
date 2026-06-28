@@ -11,6 +11,9 @@ packages:
   purchases-ios:
     url: https://github.com/RevenueCat/purchases-ios
     majorVersion: 5.79.0
+  google-signin:
+    url: https://github.com/google/GoogleSignIn-iOS
+    majorVersion: 7.0.0
 targets:
   Fantasia:
     type: application
@@ -22,6 +25,8 @@ targets:
         product: FirebaseAuth
       - package: purchases-ios
         product: RevenueCat
+      - package: google-signin
+        product: GoogleSignIn
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai
