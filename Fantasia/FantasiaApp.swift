@@ -8,6 +8,7 @@ import GoogleSignIn
 
 @main
 struct FantasiaApp: App {
+    @UIApplicationDelegateAdaptor(FantasiaAppDelegate.self) var appDelegate
     @State private var authManager: AuthManager
     @State private var creditManager = CreditManager()
 

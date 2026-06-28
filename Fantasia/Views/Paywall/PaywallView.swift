@@ -14,6 +14,7 @@ enum BillingPeriod: String, CaseIterable {
 }
 
 struct PaywallView: View {
+    @Binding var isPresented: Bool
     @Environment(CreditManager.self) private var creditManager
     @State private var purchaseManager: PurchaseManager?
     @State private var selectedPeriod: BillingPeriod = .annual   // D-02: annual pre-selected
@@ -189,6 +190,26 @@ struct PaywallView: View {
                 .padding(.top, 48)        // 2xl
                 .padding(.bottom, 64)     // 3xl
             }
+        }
+            // X dismiss button overlay (D-09: top-right, 32pt circle, white.opacity(0.08) background)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.08), in: Circle())
+                    }
+                    .accessibilityLabel("Close")
+                    .padding(.trailing, 20)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
         }
         .task {
             let manager = PurchaseManager(creditManager: creditManager)
@@ -398,6 +419,6 @@ struct PaywallView: View {
 }
 
 #Preview {
-    PaywallView()
+    PaywallView(isPresented: .constant(true))
         .environment(CreditManager())
 }
