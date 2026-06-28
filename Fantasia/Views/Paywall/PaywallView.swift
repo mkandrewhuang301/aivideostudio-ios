@@ -190,7 +190,7 @@ struct PaywallView: View {
                 .padding(.top, 48)        // 2xl
                 .padding(.bottom, 64)     // 3xl
             }
-        }
+
             // X dismiss button overlay (D-09: top-right, 32pt circle, white.opacity(0.08) background)
             VStack {
                 HStack {

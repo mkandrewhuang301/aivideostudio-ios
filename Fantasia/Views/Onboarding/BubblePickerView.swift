@@ -72,37 +72,19 @@ struct BubblePickerView: View {
 
     private func bubble(for option: OnboardingOption, index: Int) -> some View {
         let isSelected = selectedLabels.contains(option.label)
-        return Button {
+        return BubbleCell(
+            option: option,
+            isSelected: isSelected,
+            appeared: appeared,
+            index: index,
+            primaryGradient: primaryGradient
+        ) {
             if isSelected {
                 selectedLabels.remove(option.label)
             } else {
                 selectedLabels.insert(option.label)
             }
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: option.icon)
-                    .font(.system(size: 24))
-                    .foregroundStyle(.white)
-                Text(option.label)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(1.1, contentMode: .fit)
-            .background(
-                isSelected ? primaryGradient.opacity(0.18) : Color.white.opacity(0.06),
-                in: RoundedRectangle(cornerRadius: 16)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(isSelected ? AnyShapeStyle(primaryGradient) : AnyShapeStyle(Color.white.opacity(0.1)), lineWidth: isSelected ? 2 : 1)
-            }
-            .shadow(color: isSelected ? .purple.opacity(0.5) : .clear, radius: isSelected ? 10 : 0)
         }
-        .scaleEffect(appeared ? 1.0 : 0.1)
-        .opacity(appeared ? 1.0 : 0)
-        .animation(.spring(response: 0.4, dampingFraction: 0.65).delay(Double(index) * 0.05), value: appeared)
     }
 
     @ViewBuilder
@@ -129,5 +111,54 @@ struct BubblePickerView: View {
                     .background(primaryGradient, in: RoundedRectangle(cornerRadius: 14))
             }
         }
+    }
+}
+
+private struct BubbleCell: View {
+    let option: OnboardingOption
+    let isSelected: Bool
+    let appeared: Bool
+    let index: Int
+    let primaryGradient: LinearGradient
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            bubbleContent
+        }
+        .scaleEffect(appeared ? 1.0 : 0.1)
+        .opacity(appeared ? 1.0 : 0)
+        .animation(.spring(response: 0.4, dampingFraction: 0.65).delay(Double(index) * 0.05), value: appeared)
+    }
+
+    private var bubbleContent: some View {
+        VStack(spacing: 8) {
+            Image(systemName: option.icon)
+                .font(.system(size: 24))
+                .foregroundStyle(.white)
+            Text(option.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1.1, contentMode: .fit)
+        .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(bubbleStroke)
+        .shadow(color: isSelected ? .purple.opacity(0.5) : .clear, radius: isSelected ? 10 : 0)
+    }
+
+    private var bubbleBackground: AnyShapeStyle {
+        isSelected
+            ? AnyShapeStyle(primaryGradient.opacity(0.18))
+            : AnyShapeStyle(Color.white.opacity(0.06))
+    }
+
+    private var bubbleStroke: some View {
+        let strokeStyle: AnyShapeStyle = isSelected
+            ? AnyShapeStyle(primaryGradient)
+            : AnyShapeStyle(Color.white.opacity(0.1))
+        let lineWidth: CGFloat = isSelected ? 2 : 1
+        return RoundedRectangle(cornerRadius: 16).stroke(strokeStyle, lineWidth: lineWidth)
     }
 }
