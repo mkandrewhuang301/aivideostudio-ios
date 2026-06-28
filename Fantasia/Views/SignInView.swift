@@ -1,10 +1,66 @@
 // SignInView.swift
 // Fantasia
+// Cinematic glass sign-in screen — UI-SPEC Screen 2 (Option A, LOCKED per CONTEXT.md).
 //
-// TODO: Add Sign in with Apple once Apple Developer Program activates (Phase 7)
+// Layout order (CONTEXT.md items 1-9):
+//   1. Video background (onboarding-sample.mp4, 0.85x) + frost overlay (D-04, D-05)
+//   2. Wordmark "Fantasia" + tagline
+//   3. Glass email field
+//   4. Glass password field
+//   5. Sign In CTA (gradient, 52pt)
+//   6. "Don't have an account? Sign up" link
+//   7. "or" divider
+//   8. Sign in with Apple (AppleSignInCoordinator → AuthManager.signInWithApple)
+//   9. Sign in with Google (AuthManager.signInWithGoogle)
 
 import SwiftUI
 import FirebaseAuth
+import AuthenticationServices
+import AVFoundation
+
+// MARK: - AppleSignInCoordinator
+
+/// Delegate-based coordinator wrapping ASAuthorizationController.
+/// ASAuthorizationAppleIDProvider uses a callback-based API, not async/await —
+/// this coordinator bridges it into the async SignInView flow.
+@MainActor
+final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    var onCompletion: ((Result<ASAuthorizationAppleIDCredential, Error>) -> Void)?
+
+    func start(nonce: String) {
+        let provider = ASAuthorizationAppleIDProvider()
+        let request = provider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = nonce // caller passes sha256(rawNonce) per Apple anti-replay doc
+
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        controller.delegate = self
+        controller.presentationContextProvider = self
+        controller.performRequests()
+    }
+
+    nonisolated func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            Task { @MainActor in
+                self.onCompletion?(.success(credential))
+            }
+        }
+    }
+
+    nonisolated func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        Task { @MainActor in
+            self.onCompletion?(.failure(error))
+        }
+    }
+
+    nonisolated func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+}
+
+// MARK: - SignInView
 
 struct SignInView: View {
     @State private var email = ""
@@ -12,176 +68,153 @@ struct SignInView: View {
     @State private var emailError: String? = nil
     @State private var passwordError: String? = nil
     @State private var isAuthLoading = false
-    @State private var showPassword = false
     @State private var passwordResetSent = false
 
-    // X button returns to onboarding — without this there's no way back from
+    @State private var isSocialAuthLoading = false
+    @State private var socialAuthError: String? = nil
+
+    @State private var showSignUp = false
+
+    // X button returns to onboarding — without this there is no way back from
     // sign-in once onboarding is marked complete (ContentView routes by this flag).
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
 
     @Environment(AuthManager.self) private var authManager
 
-    @FocusState private var focusedField: Field?
+    @FocusState private var emailFocused: Bool
+    @FocusState private var passwordFocused: Bool
 
-    private enum Field: Hashable {
-        case email, password
-    }
+    // Video background — reuse LoopingPlayerViewModel from OnboardingVideoView (same pattern).
+    @State private var videoViewModel = LoopingPlayerViewModel(videoName: "onboarding-sample")
 
-    private let backgroundGradient = LinearGradient(
-        colors: [Color(red: 0.10, green: 0.10, blue: 0.18), Color(red: 0.07, green: 0.07, blue: 0.16)],
-        startPoint: .top, endPoint: .bottom
+    // Apple sign-in coordinator (holds delegate reference strongly to survive callback).
+    @State private var appleCoordinator = AppleSignInCoordinator()
+
+    // MARK: - Design tokens (UI-SPEC Screen 2)
+    private let ctaGradient = LinearGradient(
+        colors: [Color(red: 0.545, green: 0.427, blue: 0.839), Color(red: 0.357, green: 0.561, blue: 0.851)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
     )
-    private let surfaceColor = Color(red: 0.15, green: 0.15, blue: 0.25)
-    private let dominantColor = Color(red: 0.10, green: 0.10, blue: 0.18)
-    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
+    private let purpleAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
     var body: some View {
-        ZStack {
-            backgroundGradient
-                .ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 0) {
-                    Spacer().frame(height: 48)
-                    logoBlock
-                    Spacer().frame(height: 24)
-                    signInCard
-                    Spacer().frame(height: 16)
-                }
+        NavigationStack {
+            ZStack {
+                videoBackground
+                frostOverlay
+                mainContent
+                backToOnboardingButton
             }
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button {
-                        hasCompletedOnboarding = false
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Back to onboarding")
-                    .padding(.trailing, 24)
-                }
-                Spacer()
+            .ignoresSafeArea()
+            // Forward reference: SignUpView created in plan 06-04.
+            .navigationDestination(isPresented: $showSignUp) {
+                // TODO(06-04): Replace stub with real SignUpView once plan 06-04 lands.
+                // This wiring is intentionally pre-registered so 06-04 only needs to
+                // supply the destination — no changes to SignInView required.
+                Text("Sign Up — Coming in 06-04")
+                    .foregroundStyle(.white)
             }
-            .padding(.top, 16)
         }
+    }
+
+    // MARK: - Background layers
+
+    private var videoBackground: some View {
+        FillingVideoPlayerView(player: videoViewModel.player)
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
+            .onAppear {
+                // D-04: 0.85x playback rate — slow enough not to distract, visibly moving.
+                videoViewModel.player.rate = 0.85
+            }
+            .onDisappear {
+                videoViewModel.player.pause()
+            }
+    }
+
+    /// D-05: `rgba(6, 4, 14, 0.63)` tint + .ultraThinMaterial approximating blur(23) saturate(1.25).
+    private var frostOverlay: some View {
+        ZStack {
+            Color(red: 6.0 / 255, green: 4.0 / 255, blue: 14.0 / 255)
+                .opacity(0.63)
+            Rectangle()
+                .fill(.ultraThinMaterial)
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Main scroll content
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 80)
+                wordmarkBlock
+                Spacer().frame(height: 36)
+                fieldsSection
+                Spacer().frame(height: 16)
+                ctaButton
+                Spacer().frame(height: 14)
+                signUpLink
+                Spacer().frame(height: 24)
+                orDivider
+                Spacer().frame(height: 16)
+                socialButtons
+                Spacer().frame(height: 32)
+            }
+            .padding(.horizontal, 24)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     // MARK: - Sub-views
 
-    private var logoBlock: some View {
-        VStack(spacing: 8) {
+    private var wordmarkBlock: some View {
+        VStack(spacing: 6) {
             Text("Fantasia")
-                .font(.largeTitle.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text("Generate stunning AI videos")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white)
+            Text("Bring your creativity to life.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.white.opacity(0.55))
         }
+        .multilineTextAlignment(.center)
     }
 
-    private var signInCard: some View {
-        VStack(spacing: 16) {
-            emailFieldGroup
-            passwordFieldGroup
-            forgotPasswordSection
-            signInButton
-        }
-        .padding(24)
-        .background(surfaceColor, in: RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 24)
-    }
-
-    private var emailFieldGroup: some View {
-        VStack(spacing: 4) {
-            TextField("Email", text: $email)
-                .keyboardType(.emailAddress)
-                .textContentType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.body)
-                .padding(8)
-                .background(dominantColor, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            focusedField == .email ? accent.opacity(0.5) : Color.secondary.opacity(0.3),
-                            lineWidth: 1
-                        )
-                }
-                .focused($focusedField, equals: .email)
-                .accessibilityLabel(emailError.map { "Email, \($0)" } ?? "Email")
-
+    private var fieldsSection: some View {
+        VStack(spacing: 12) {
+            GlassTextField(
+                placeholder: "Email",
+                text: $email,
+                isSecure: false,
+                keyboardType: .emailAddress,
+                textContentType: .emailAddress,
+                isFocused: $emailFocused
+            )
             if let emailError {
                 Text(emailError)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
 
-    private var passwordFieldGroup: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 0) {
-                passwordInputField
-                eyeToggleButton
-            }
-            .background(dominantColor, in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(
-                        focusedField == .password ? accent.opacity(0.5) : Color.secondary.opacity(0.3),
-                        lineWidth: 1
-                    )
-            }
-
+            GlassTextField(
+                placeholder: "Password",
+                text: $password,
+                isSecure: true,
+                textContentType: .password,
+                isFocused: $passwordFocused
+            )
             if let passwordError {
                 Text(passwordError)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
 
-    @ViewBuilder
-    private var passwordInputField: some View {
-        if showPassword {
-            TextField("Password", text: $password)
-                .textContentType(.password)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.body)
-                .padding(8)
-                .focused($focusedField, equals: .password)
-                .accessibilityLabel(passwordError.map { "Password, \($0)" } ?? "Password")
-        } else {
-            SecureField("Password", text: $password)
-                .textContentType(.password)
-                .font(.body)
-                .padding(8)
-                .focused($focusedField, equals: .password)
-                .accessibilityLabel(passwordError.map { "Password, \($0)" } ?? "Password")
+            forgotPasswordSection
         }
-    }
-
-    private var eyeToggleButton: some View {
-        Button {
-            if !UIAccessibility.isReduceMotionEnabled {
-                withAnimation { showPassword.toggle() }
-            } else {
-                showPassword.toggle()
-            }
-        } label: {
-            Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 44, height: 44)
-        .accessibilityLabel(showPassword ? "Hide password" : "Show password")
     }
 
     private var forgotPasswordSection: some View {
@@ -191,7 +224,7 @@ struct SignInView: View {
             } label: {
                 Text("Forgot password?")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.white.opacity(0.45))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(isAuthLoading)
@@ -199,33 +232,107 @@ struct SignInView: View {
             if passwordResetSent {
                 Text("Reset email sent to \(email). Check your inbox.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.white.opacity(0.55))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private var signInButton: some View {
-        Button {
+    private var ctaButton: some View {
+        let isEmpty = email.isEmpty || password.isEmpty
+        return Button {
             Task { await submitEmailAuth() }
         } label: {
             Group {
                 if isAuthLoading {
                     ProgressView().tint(.white)
                 } else {
-                    Text("Sign In").font(.body.weight(.semibold))
+                    Text("Sign In")
+                        .font(.headline)
+                        .foregroundStyle(.white)
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 50)
-            .foregroundStyle(.white)
-            .background(accent, in: RoundedRectangle(cornerRadius: 10))
+            .frame(height: 52)
+            .background {
+                ctaGradient
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: purpleAccent.opacity(0.45), radius: 24, y: 4)
         }
-        .disabled(email.isEmpty || password.isEmpty || isAuthLoading)
-        .opacity(email.isEmpty || password.isEmpty || isAuthLoading ? 0.5 : 1.0)
+        .disabled(isEmpty || isAuthLoading)
+        .opacity(isEmpty || isAuthLoading ? 0.5 : 1.0)
     }
 
-    // MARK: - Auth Actions
+    private var signUpLink: some View {
+        HStack(spacing: 4) {
+            Text("Don't have an account?")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.6))
+            Button("Sign up") {
+                showSignUp = true
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(purpleAccent)
+        }
+    }
+
+    private var orDivider: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 1)
+            Text("or")
+                .font(.caption)
+                .foregroundStyle(Color.white.opacity(0.4))
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 1)
+        }
+    }
+
+    private var socialButtons: some View {
+        VStack(spacing: 12) {
+            SocialSignInButton(provider: .apple, action: {
+                Task { await handleAppleSignIn() }
+            }, isLoading: isSocialAuthLoading)
+
+            SocialSignInButton(provider: .google, action: {
+                Task { await handleGoogleSignIn() }
+            }, isLoading: isSocialAuthLoading)
+
+            if let socialAuthError {
+                Text(socialAuthError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var backToOnboardingButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    hasCompletedOnboarding = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Back to onboarding")
+                .padding(.trailing, 24)
+            }
+            Spacer()
+        }
+        .padding(.top, 56)
+    }
+
+    // MARK: - Auth Actions (email/password — preserved verbatim from Phase 2)
 
     private func submitEmailAuth() async {
         guard !email.isEmpty, !password.isEmpty else { return }
@@ -241,7 +348,7 @@ struct SignInView: View {
             switch code {
             case .wrongPassword, .invalidCredential, .userNotFound:
                 // Newer Firebase SDKs return invalidCredential for both wrong password and
-                // non-existent accounts (userNotFound is kept for older SDK compat).
+                // non-existent accounts (userNotFound kept for older SDK compat).
                 // Try createUser: if emailAlreadyInUse → wrong password; if success → new account.
                 do {
                     _ = try await Auth.auth().createUser(withEmail: email, password: password)
@@ -279,6 +386,49 @@ struct SignInView: View {
             passwordResetSent = true
         } catch {
             emailError = "Could not send reset email. Check the address and try again."
+        }
+    }
+
+    // MARK: - Social Auth Actions
+
+    private func handleGoogleSignIn() async {
+        isSocialAuthLoading = true
+        socialAuthError = nil
+        do {
+            try await authManager.signInWithGoogle()
+        } catch {
+            socialAuthError = error.localizedDescription
+        }
+        isSocialAuthLoading = false
+    }
+
+    /// Bridges ASAuthorizationController's delegate callbacks into async/await.
+    /// T-06-03-01: nonce generated fresh per attempt, sha256-hashed before being sent
+    /// in the ASAuthorizationAppleIDRequest — matches Apple's documented anti-replay pattern.
+    private func handleAppleSignIn() async {
+        isSocialAuthLoading = true
+        socialAuthError = nil
+        let nonce = authManager.generateNonce()
+        let hashedNonce = authManager.sha256(nonce)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            appleCoordinator.onCompletion = { result in
+                Task { @MainActor in
+                    switch result {
+                    case .success(let credential):
+                        do {
+                            try await authManager.signInWithApple(credential: credential)
+                        } catch {
+                            socialAuthError = error.localizedDescription
+                        }
+                    case .failure(let error):
+                        socialAuthError = error.localizedDescription
+                    }
+                    isSocialAuthLoading = false
+                    continuation.resume()
+                }
+            }
+            appleCoordinator.start(nonce: hashedNonce)
         }
     }
 }
