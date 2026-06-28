@@ -52,6 +52,35 @@ actor APIClient {
     func fetchMe() async throws -> MeResponse {
         return try await authorizedRequest(path: "api/me")
     }
+
+    // Use for PATCH/POST endpoints that respond 204 No Content (no body to decode).
+    func authorizedRequestNoContent(
+        path: String,
+        method: String = "PATCH",
+        body: Data? = nil
+    ) async throws {
+        let token = try await getIDToken()
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (_, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 204 else {
+            throw APIError.unexpectedResponse
+        }
+    }
+
+    func updateDeviceToken(_ token: String) async throws {
+        let body = try JSONEncoder().encode(["deviceToken": token])
+        try await authorizedRequestNoContent(path: "api/me/device-token", body: body)
+    }
+
+    func updatePreferences(_ preferences: [String: [String]]) async throws {
+        let body = try JSONEncoder().encode(["preferences": preferences])
+        try await authorizedRequestNoContent(path: "api/me/preferences", body: body)
+    }
 }
 
 struct HealthResponse: Decodable {
