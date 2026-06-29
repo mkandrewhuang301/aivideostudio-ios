@@ -3,7 +3,7 @@
 // Higgsfield-style circular progress indicator for the navigation bar (D-16, D-17).
 // Size: 32pt for nav bar, parameterized for reuse at 28pt in ProfileCreditSheet.
 // Color interpolates green (full) → yellow → orange → red (empty) per D-16c.
-// fill=0 shows a complete red ring — zero credits deserves a clear visual signal.
+// fill=0 shows a small red dot at 6 o'clock — zero credits deserves a clear visual signal.
 
 import SwiftUI
 
@@ -40,7 +40,7 @@ struct CircularCreditIndicator: View {
             Circle()
                 .stroke(Color.white.opacity(0.15), lineWidth: 3)
 
-            // Progress arc — 0 credits shows empty track only
+            // Progress arc — 0 credits shows red dot at start position
             Circle()
                 .trim(from: 0, to: clampedRatio)
                 .stroke(ringColor,
@@ -50,6 +50,14 @@ struct CircularCreditIndicator: View {
                     reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.75),
                     value: clampedRatio
                 )
+
+            // Red dot at 6 o'clock when credits are 0
+            if clampedRatio < 0.001 {
+                Circle()
+                    .fill(Color(red: 0.878, green: 0.278, blue: 0.247))
+                    .frame(width: 6, height: 6)
+                    .offset(y: size / 2)
+            }
 
             // Profile picture placeholder (Phase 6: replace with AsyncImage)
             Circle()

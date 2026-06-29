@@ -219,7 +219,7 @@ struct GenerateView: View {
     private var centerContent: some View {
         VStack(spacing: 20) {
             Text("What will you create?")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
 
             chipRow
@@ -239,7 +239,7 @@ struct GenerateView: View {
                                 .font(.system(size: 11))
                                 .foregroundStyle(accent.opacity(0.9))
                             Text(item.label)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.callout.weight(.medium))
                                 .foregroundStyle(.white.opacity(0.8))
                         }
                         .padding(.horizontal, 14)
@@ -265,49 +265,59 @@ struct GenerateView: View {
     // MARK: - Prompt bar
 
     private var promptBar: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // D-20: paperclip opens PhotosPicker for images + videos
-            PhotosPicker(
-                selection: $selectedPickerItem,
-                matching: .any(of: [.images, .videos])
-            ) {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-
-            // D-22: reference thumbnail (32x32pt) with dismiss button — shown when attachment present
-            if let thumb = referenceThumbnail {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: thumb)
-                        .resizable()
-                        .scaledToFill()
+        VStack(spacing: 0) {
+            // Input row — paperclip, optional thumbnail, text field
+            HStack(alignment: .top, spacing: 8) {
+                PhotosPicker(
+                    selection: $selectedPickerItem,
+                    matching: .any(of: [.images, .videos])
+                ) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
                         .frame(width: 32, height: 32)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    Button { clearReference() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white)
-                            .background(Color.black.opacity(0.5), in: Circle())
-                    }
-                    .offset(x: 4, y: -4)
                 }
+                .buttonStyle(.plain)
+
+                if let thumb = referenceThumbnail {
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 32, height: 32)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Button { clearReference() } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white)
+                                .background(Color.black.opacity(0.5), in: Circle())
+                        }
+                        .offset(x: 4, y: -4)
+                    }
+                }
+
+                TextField("Describe a scene...", text: $promptText, axis: .vertical)
+                    .lineLimit(1...5)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .tint(accent)
+                    .focused($promptFocused)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
 
-            // Text input — grows up to 5 lines
-            TextField("Describe a scene...", text: $promptText, axis: .vertical)
-                .lineLimit(1...5)
-                .font(.system(size: 15))
-                .foregroundStyle(.white)
-                .tint(accent)
-                .focused($promptFocused)
+            // Separator — keeps prompt text from running into cost + button
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
+                .padding(.horizontal, 12)
 
-            // Generation cost + generate button
-            HStack(spacing: 6) {
-                Text("\(generationCost)")
-                    .font(.system(size: 12, weight: .semibold))
+            // Bottom row — cost left of submit button
+            HStack(spacing: 8) {
+                Spacer()
+                Text("\(generationCost) credits")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.55))
 
                 Button {
@@ -336,14 +346,14 @@ struct GenerateView: View {
                 .buttonStyle(.plain)
                 .disabled(isSubmitting)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2), lineWidth: 1))
         .padding(.horizontal, 16)
-        .padding(.bottom, 72) // clear tab bar + diamond raise + comfortable gap
+        .padding(.bottom, 72)
     }
 
     // MARK: - Submit dispatch

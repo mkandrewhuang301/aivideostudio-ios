@@ -17,15 +17,26 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            tabContent
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: tabBarHeight)
-                }
+            TabView(selection: $selectedTab) {
+                NavigationStack { FeedView() }
+                    .tag(0)
+                tabPlaceholder("Explore", icon: "magnifyingglass")
+                    .tag(1)
+                NavigationStack { GenerateView(selectedTab: $selectedTab) }
+                    .tag(2)
+                LibraryView()
+                    .tag(3)
+                profileTab
+                    .tag(4)
+            }
+            .toolbar(.hidden, for: .tabBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: tabBarHeight)
+            }
 
             customTabBar
         }
         .ignoresSafeArea(edges: .bottom)
-        // D-35: Remix tab switch — FeedView posts .remixGenerationRequested; MainTabView switches to Generate (tab 2)
         .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
             selectedTab = 2
         }
@@ -33,19 +44,6 @@ struct MainTabView: View {
             ProfileCreditSheet(isPresented: $showProfileSheet)
                 .environment(creditManager)
                 .environment(authManager)
-        }
-    }
-
-    // MARK: - Tab content
-
-    @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case 1:  tabPlaceholder("Explore", icon: "magnifyingglass")
-        case 2:  NavigationStack { GenerateView(selectedTab: $selectedTab) }
-        case 3:  LibraryView()
-        case 4:  profileTab
-        default: NavigationStack { FeedView() }
         }
     }
 
@@ -175,7 +173,7 @@ struct MainTabView: View {
             VStack {
                 Spacer()
                 Text("Generate")
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(selectedTab == 2 ? .white : Color.white.opacity(0.38))
                     .padding(.bottom, 7)
             }
@@ -218,7 +216,7 @@ struct MainTabView: View {
                     .font(.system(size: 20))
                     .frame(width: 20, height: 20)
                 Text(label)
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.caption2.weight(.semibold))
             }
             .foregroundStyle(selectedTab == index ? .white : Color.white.opacity(0.38))
             .frame(maxWidth: .infinity)

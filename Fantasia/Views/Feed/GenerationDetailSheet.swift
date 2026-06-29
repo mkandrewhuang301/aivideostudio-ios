@@ -6,6 +6,7 @@
 
 import SwiftUI
 import Photos
+import AVFoundation
 
 struct GenerationDetailSheet: View {
     let item: GenerationItem
@@ -18,6 +19,7 @@ struct GenerationDetailSheet: View {
     @State private var saveError: String? = nil
     @State private var isReporting = false
     @State private var tmpShareUrl: URL? = nil
+    @State private var thumbnail: UIImage? = nil
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -38,10 +40,14 @@ struct GenerationDetailSheet: View {
                             showPlayer = true
                         } label: {
                             ZStack {
-                                AsyncImage(url: videoUrl) { image in
-                                    image.resizable().scaledToFill()
-                                } placeholder: {
-                                    Color.white.opacity(0.05)
+                                Group {
+                                    if let thumb = thumbnail {
+                                        Image(uiImage: thumb)
+                                            .resizable()
+                                            .scaledToFill()
+                                    } else {
+                                        Color.white.opacity(0.05)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 180)
@@ -53,6 +59,7 @@ struct GenerationDetailSheet: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .task { await generateThumbnail(from: videoUrl) }
                     } else {
                         // In-progress or failed — no thumbnail
                         RoundedRectangle(cornerRadius: 12)
@@ -228,6 +235,20 @@ struct GenerationDetailSheet: View {
             showShare = true
         } catch {
             print("[GenerationDetailSheet] share download error: \(error)")
+        }
+    }
+
+    // Extract first-frame thumbnail from remote video URL using AVAssetImageGenerator
+    private func generateThumbnail(from url: URL) async {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 600, height: 600)
+        do {
+            let (cgImage, _) = try await generator.image(at: .zero)
+            thumbnail = UIImage(cgImage: cgImage)
+        } catch {
+            print("[GenerationDetailSheet] thumbnail error: \(error)")
         }
     }
 

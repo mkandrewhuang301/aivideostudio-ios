@@ -116,7 +116,7 @@ struct CreateGenerationView: View {
 
             // Headline — gray, framed as an offer not an instruction
             Text("Not sure where to start?")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.55))
 
             // Chips — one per row, tap fills the prompt bar only
@@ -138,7 +138,7 @@ struct CreateGenerationView: View {
             promptFocused = true
         } label: {
             Text(item.label)
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1)
                 .padding(.horizontal, 14)
@@ -176,7 +176,7 @@ struct CreateGenerationView: View {
             // Input — this is the ONLY submit path on this screen
             TextField("Describe what you want...", text: $promptText, axis: .vertical)
                 .lineLimit(1...5)
-                .font(.system(size: 13.5))
+                .font(.body)
                 .foregroundStyle(.white)
                 .tint(accent)
                 .focused($promptFocused)

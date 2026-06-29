@@ -34,7 +34,7 @@ struct GenerationCardView: View {
             // Truncated prompt (tap → detail popup, D-29)
             Button(action: onTapDetail) {
                 Text(item.prompt ?? "No prompt")
-                    .font(.system(size: 13))
+                    .font(.callout)
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -189,9 +189,9 @@ struct GenerationCardView: View {
                 Image(systemName: icon)
                     .font(.system(size: 14))
                 Text(label)
-                    .font(.system(size: 10))
+                    .font(.caption2)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .foregroundStyle(isActive ? Color.white.opacity(0.25) : Color.white.opacity(0.7))
         }
         .disabled(isActive)

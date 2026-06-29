@@ -40,22 +40,6 @@ struct GenerationOptionsPanel: View {
                 .padding(.horizontal, 24)
             }
 
-            // D-19: credit preview — shown BELOW the pills row, above the prompt bar
-            // RESEARCH.md Pitfall 4: NO audio multiplier — backend has none in computeCostCredits
-            let cost = estimatedCost(
-                model: selectedModel,
-                duration: selectedDuration,
-                resolution: selectedResolution,
-                hasVideoRef: hasVideoReference
-            )
-            Text("~\(cost) credits")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.07))
-                .clipShape(Capsule())
-                .padding(.horizontal, 24)
         }
         // D-18: Model picker — Fast | Mini, default Fast
         .confirmationDialog("Model", isPresented: $showModelPicker, titleVisibility: .visible) {
@@ -93,10 +77,10 @@ struct GenerationOptionsPanel: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.white.opacity(0.5))
                 Text(value)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
             }
             .padding(.horizontal, 12)
