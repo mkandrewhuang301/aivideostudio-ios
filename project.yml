@@ -48,6 +48,9 @@ targets:
         UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSPhotoLibraryAddUsageDescription: "Fantasia saves your generated videos to your photo library."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
   FantasiaTests:

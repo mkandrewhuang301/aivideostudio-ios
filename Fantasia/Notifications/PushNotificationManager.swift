@@ -50,6 +50,17 @@ final class PushNotificationManager: NSObject {
 final class FantasiaAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        // Set UNUserNotificationCenter delegate so didReceive and willPresent callbacks fire.
+        // RESEARCH.md Pitfall 9: without this assignment, UNUserNotificationCenterDelegate
+        // methods are never called even if conformance is declared.
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Task { @MainActor in
@@ -62,5 +73,54 @@ final class FantasiaAppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         print("[FantasiaAppDelegate] Failed to register for remote notifications: \(error)")
+    }
+}
+
+// MARK: - Orientation lock infrastructure (D-13, D-16)
+// RESEARCH.md Pitfall 9: supportedInterfaceOrientationsFor MUST be implemented for
+// orientationLock to have any effect — the OS ignores the property without this method.
+extension FantasiaAppDelegate {
+    static var orientationLock: UIInterfaceOrientationMask = .portrait
+
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        return FantasiaAppDelegate.orientationLock
+    }
+}
+
+// MARK: - Shared notification name for push-triggered refresh (GEN-10, D-03)
+// Posted by UNUserNotificationCenterDelegate; observed by FeedView/LibraryView via
+// GenerationManager.refreshOnNotification() — triggers immediate refresh without
+// waiting for the 3-second poll tick.
+extension Notification.Name {
+    static let generationCompleted = Notification.Name("generationCompleted")
+}
+
+// MARK: - UNUserNotificationCenterDelegate (GEN-10, D-03: push triggers immediate refresh)
+extension FantasiaAppDelegate: UNUserNotificationCenterDelegate {
+    // Called when user taps a notification while the app is in background or killed state.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.notification.request.content.userInfo["generation_id"] != nil {
+            NotificationCenter.default.post(name: .generationCompleted, object: nil)
+        }
+        completionHandler()
+    }
+
+    // Called when a notification arrives while the app is in the foreground.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        if notification.request.content.userInfo["generation_id"] != nil {
+            NotificationCenter.default.post(name: .generationCompleted, object: nil)
+        }
+        completionHandler([.banner, .sound])
     }
 }
