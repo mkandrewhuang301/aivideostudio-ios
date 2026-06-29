@@ -42,7 +42,7 @@ struct GenerateView: View {
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
-        ("Anime girl, afternoon", "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
+        ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
         ("Underwater city",      "water.waves",        "An ancient sunken city lit by bioluminescent coral, camera drifting through archways"),
         ("Rainy street",         "cloud.rain.fill",    "A cobblestone street at night, warm lamplight reflecting in puddles, soft rain falling"),
         ("Space station",        "moon.stars.fill",    "Astronaut floating outside a space station, Earth glowing below"),
@@ -288,39 +288,38 @@ struct GenerateView: View {
                 .tint(accent)
                 .focused($promptFocused)
 
-            // D-27/D-28: generate button — paywall gate when credits == 0 or no entitlement
-            Button {
-                promptFocused = false
-                guard creditManager.creditsBalance > 0 && creditManager.entitlementLevel != .none else {
-                    showPaywall = true
-                    return
-                }
-                Task { await dispatchGeneration() }
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        // D-28: desaturated gradient when credits == 0 (still tappable — opens paywall)
-                        creditManager.creditsBalance > 0
-                            ? LinearGradient(
+            // Credit count + generate button
+            HStack(spacing: 6) {
+                Text("\(creditManager.creditsBalance)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+
+                Button {
+                    promptFocused = false
+                    guard creditManager.creditsBalance > 0 && creditManager.entitlementLevel != .none else {
+                        showPaywall = true
+                        return
+                    }
+                    Task { await dispatchGeneration() }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            LinearGradient(
                                 colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
                                          Color(red: 0.357, green: 0.561, blue: 0.851)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
-                              )
-                            : LinearGradient(
-                                colors: [Color.gray.opacity(0.5), Color.gray.opacity(0.4)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                              )
-                    )
-                    .clipShape(Circle())
-                    .opacity(isSubmitting ? 0.5 : 1.0)
+                            )
+                        )
+                        .clipShape(Circle())
+                        .opacity(isSubmitting ? 0.5 : 1.0)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSubmitting)
             }
-            .buttonStyle(.plain)
-            .disabled(isSubmitting)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

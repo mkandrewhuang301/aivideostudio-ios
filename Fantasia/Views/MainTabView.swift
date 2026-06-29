@@ -164,7 +164,7 @@ struct MainTabView: View {
                 .frame(height: tabBarHeight)
 
             HStack(spacing: 0) {
-                tabButton(0, "Feed",    "film.stack")
+                tabButton(0, "Home",    "house")
                 tabButton(1, "Explore", "magnifyingglass")
                 Color.clear.frame(width: 64)
                 tabButton(3, "Library", "square.grid.2x2")
