@@ -52,9 +52,8 @@ final class GenerationManager {
         isLoading = true
         defer { isLoading = false }
         do {
-            // NOTE: APIClient.fetchGenerations is added in Plan 06 (07-06-PLAN.md)
-            // Calling pattern follows CreditManager.fetchBalance()
-            let response: GenerationsResponse = try await APIClient.shared.authorizedRequest(path: "api/generations")
+            // fetchGenerations() handles iso8601 date decoding for createdAt/completedAt
+            let response = try await APIClient.shared.fetchGenerations()
             generations = response.items
             nextCursor = response.nextCursor
         } catch {
@@ -68,8 +67,7 @@ final class GenerationManager {
         isLoading = true
         defer { isLoading = false }
         do {
-            let path = "api/generations?cursor=\(cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cursor)"
-            let response: GenerationsResponse = try await APIClient.shared.authorizedRequest(path: path)
+            let response = try await APIClient.shared.fetchGenerations(cursor: cursor)
             generations.append(contentsOf: response.items)
             nextCursor = response.nextCursor
         } catch {
