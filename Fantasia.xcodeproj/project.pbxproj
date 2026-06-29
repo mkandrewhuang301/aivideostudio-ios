@@ -26,6 +26,7 @@
 		382D5A0AAEB4E7CF7B87CD65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 134AEB4B90258A717279F950 /* GoogleSignIn */; };
 		43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */; };
 		49D6A39D8DAD04C18910877C /* FullScreenVideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */; };
+		4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
@@ -44,6 +45,7 @@
 		B3BE40EC122DDAA421952402 /* TopUpSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95BFE16F83B5A52F4899CA2D /* TopUpSheet.swift */; };
 		B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D982E3DBBB56BABEB652202 /* AppConfig.swift */; };
 		BDF570EB3BF6C429ECD7E7F1 /* GenerationOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */; };
+		CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */; };
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
 		D9372B8A631BBC6C9CEFE70A /* ActivityViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 901A7F56B670204A64832BCF /* ActivityViewController.swift */; };
 		D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A65D5512DE91F2D2D1BC1B /* SignInView.swift */; };
@@ -74,6 +76,7 @@
 		54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailSheet.swift; sourceTree = "<group>"; };
 		59E4FE5DF35EF32FE7883309 /* FantasiaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FantasiaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryThumbnailView.swift; sourceTree = "<group>"; };
 		60D880315248963AAE05C9C2 /* CreditManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditManager.swift; sourceTree = "<group>"; };
 		6313B0A55581090BEA6B4A13 /* PlanCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCardView.swift; sourceTree = "<group>"; };
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
@@ -105,6 +108,7 @@
 		D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestionBankTests.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
 		E1AF13629D571EF8D48B749B /* BubblePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePickerView.swift; sourceTree = "<group>"; };
+		E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationOptionsPanel.swift; sourceTree = "<group>"; };
 		F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenVideoPlayerView.swift; sourceTree = "<group>"; };
 		F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -144,6 +148,7 @@
 				395C7109C3476F244209ECA0 /* Components */,
 				A05D8F1766F99A6C3145F3EE /* Feed */,
 				FF9119D91C886273102943AD /* Generate */,
+				86F5431A6C3C2F21E257CE04 /* Library */,
 				53184DDF5C85560F33C29D1E /* Onboarding */,
 				BAA9F733EF9638C0A3B62619 /* Paywall */,
 				9754CE97948C45B64BE85462 /* Player */,
@@ -197,6 +202,15 @@
 				140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		86F5431A6C3C2F21E257CE04 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */,
+				E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */,
+			);
+			path = Library;
 			sourceTree = "<group>";
 		};
 		96DEDC2B08262C1BE0B33DE4 = {
@@ -455,6 +469,8 @@
 				B0590E6407C84CD84A28E8F8 /* GenerationManager.swift in Sources */,
 				BDF570EB3BF6C429ECD7E7F1 /* GenerationOptionsPanel.swift in Sources */,
 				7DAA15400D90A9B0A0FB0C6F /* GlassTextField.swift in Sources */,
+				CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */,
+				4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
 				AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */,
 				09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */,
