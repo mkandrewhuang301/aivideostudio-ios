@@ -9,6 +9,7 @@ import SwiftUI
 struct MainTabView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(GenerationManager.self) private var generationManager
     @State private var selectedTab = 2   // open on Generate by default
     @State private var showProfileSheet = false
 
@@ -24,6 +25,10 @@ struct MainTabView: View {
             customTabBar
         }
         .ignoresSafeArea(edges: .bottom)
+        // D-35: Remix tab switch — FeedView posts .remixGenerationRequested; MainTabView switches to Generate (tab 2)
+        .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
+            selectedTab = 2
+        }
         .sheet(isPresented: $showProfileSheet) {
             ProfileCreditSheet(isPresented: $showProfileSheet)
                 .environment(creditManager)
@@ -37,10 +42,10 @@ struct MainTabView: View {
     private var tabContent: some View {
         switch selectedTab {
         case 1:  tabPlaceholder("Explore", icon: "magnifyingglass")
-        case 2:  NavigationStack { GenerateView() }
-        case 3:  tabPlaceholder("Library",  icon: "photo.stack")
+        case 2:  NavigationStack { GenerateView(selectedTab: $selectedTab) }
+        case 3:  LibraryView()
         case 4:  profileTab
-        default: tabPlaceholder("Home",     icon: "house.fill")
+        default: NavigationStack { FeedView() }
         }
     }
 
@@ -159,7 +164,7 @@ struct MainTabView: View {
                 .frame(height: tabBarHeight)
 
             HStack(spacing: 0) {
-                tabButton(0, "Home",    "house.fill")
+                tabButton(0, "Feed",    "film.stack")
                 tabButton(1, "Explore", "magnifyingglass")
                 Color.clear.frame(width: 64)
                 tabButton(3, "Library", "square.grid.2x2")
@@ -227,4 +232,5 @@ struct MainTabView: View {
     MainTabView()
         .environment(CreditManager())
         .environment(AuthManager())
+        .environment(GenerationManager())
 }
