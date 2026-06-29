@@ -128,6 +128,32 @@ actor APIClient {
     func deleteGeneration(id: String) async throws {
         try await authorizedRequestNoContent(path: "api/generations/\(id)", method: "DELETE")
     }
+
+    // D-23, D-24: POST /api/uploads — multipart/form-data file upload
+    // Returns UploadResponse.url (1-hour R2 presigned URL for use as reference_images[0] or reference_videos[0])
+    // RESEARCH.md Pattern 9: manually construct multipart boundary (no Alamofire dependency needed)
+    func uploadReferenceMedia(data: Data, mimeType: String, fileName: String) async throws -> UploadResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        let crlf = "\r\n"
+        body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(crlf)".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\(crlf)\(crlf)".data(using: .utf8)!)
+        body.append(data)
+        body.append("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
+
+        let token = try await getIDToken()
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/uploads"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (responseData, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIError.unexpectedResponse
+        }
+        return try JSONDecoder().decode(UploadResponse.self, from: responseData)
+    }
 }
 
 struct HealthResponse: Decodable {
