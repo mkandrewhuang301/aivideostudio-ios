@@ -22,27 +22,8 @@ private final class URLLoopingPlayerViewModel {
     }
 }
 
-// UIViewRepresentable — copied from OnboardingVideoView.FillingVideoPlayerView (PATTERNS.md).
-// resizeAspectFill fills edge-to-edge; no black bars (D-13).
-private struct FillingVideoPlayerView: UIViewRepresentable {
-    let player: AVPlayer
-
-    final class PlayerView: UIView {
-        override static var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-    }
-
-    func makeUIView(context: Context) -> PlayerView {
-        let view = PlayerView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill
-        return view
-    }
-
-    func updateUIView(_ uiView: PlayerView, context: Context) {
-        uiView.playerLayer.player = player
-    }
-}
+// FillingVideoPlayerView is declared in OnboardingVideoView.swift (module-internal).
+// Reuse it here rather than redeclaring — same resizeAspectFill behaviour (D-13).
 
 struct FullScreenVideoPlayerView: View {
     let videoUrl: URL

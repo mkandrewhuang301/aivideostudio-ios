@@ -18,7 +18,7 @@ enum GenerationStatus: String, Decodable, Equatable {
 }
 
 // Maps to backend params JSONB column — camelCase Swift, snake_case CodingKeys
-struct GenerationParams: Decodable {
+struct GenerationParams: Decodable, Equatable {
     let resolution: String       // "480p" | "720p"
     let duration: Int            // seconds
     let aspectRatio: String      // "16:9" | "9:16" | "1:1" | "4:3"
