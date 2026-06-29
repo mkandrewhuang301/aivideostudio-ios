@@ -41,6 +41,17 @@ struct GenerateView: View {
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
+    private var generationCost: Int {
+        let creditPerDollar = 50.0
+        let rates: [String: [String: [String: Double]]] = [
+            "bytedance/seedance-2.0-fast": ["nonVideoIn": ["480p": 0.07, "720p": 0.15], "videoIn": ["480p": 0.08, "720p": 0.17]],
+            "bytedance/seedance-2.0-mini": ["nonVideoIn": ["480p": 0.04, "720p": 0.09], "videoIn": ["480p": 0.05, "720p": 0.11]],
+        ]
+        let rateSet = hasVideoReference ? "videoIn" : "nonVideoIn"
+        let rate = rates[selectedModel]?[rateSet]?[selectedResolution] ?? 0
+        return Int(ceil(Double(selectedDuration) * rate * creditPerDollar))
+    }
+
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
         ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
         ("Underwater city",      "water.waves",        "An ancient sunken city lit by bioluminescent coral, camera drifting through archways"),
@@ -183,13 +194,18 @@ struct GenerateView: View {
 
             Spacer()
 
-            // Credit ring — opens profile / credit sheet
+            // Credit ring + balance — opens profile / credit sheet
             Button {
                 showProfileSheet = true
             } label: {
-                CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 36)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
+                VStack(spacing: 2) {
+                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+                    Text("\(creditManager.creditsBalance)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
         }
@@ -288,9 +304,9 @@ struct GenerateView: View {
                 .tint(accent)
                 .focused($promptFocused)
 
-            // Credit count + generate button
+            // Generation cost + generate button
             HStack(spacing: 6) {
-                Text("\(creditManager.creditsBalance)")
+                Text("\(generationCost)")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
 
