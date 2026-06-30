@@ -45,32 +45,37 @@ struct GenerationCardView: View {
 
             // Aspect-ratio box (D-06: sized to requested aspect ratio)
             Color.clear
-                .aspectRatio(aspectRatioValue(item.params.aspectRatio), contentMode: .fit)
+                .aspectRatio(aspectRatioValue(item.params.aspectRatio ?? "16:9"), contentMode: .fit)
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 14)
 
-            // Progress bar (shown only for active jobs)
+            // Circular progress (shown only for active jobs)
             if isActive {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: animatedProgress)
-                        .tint(accent)
-                        .padding(.horizontal, 14)
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.1), lineWidth: 3)
+                        Circle()
+                            .trim(from: 0, to: animatedProgress)
+                            .stroke(accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 0.4), value: animatedProgress)
+                    }
+                    .frame(width: 44, height: 44)
 
                     Text("\(Int(animatedProgress * 100))%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
 
-                    // D-12: after 15s at 99%, show delay message
                     if showDelayMessage {
                         Text("Taking a bit longer than expected...")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 14)
                     }
                 }
-                .padding(.top, 8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
             }
 
             // Action buttons (D-09: always visible; disabled/greyed while active)
@@ -146,15 +151,15 @@ struct GenerationCardView: View {
             }
 
         case .failed:
-            // D-38: error state
             VStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28))
                     .foregroundStyle(.orange)
-                Text("Generation failed, credits returned")
+                Text("Your prompt may not adhere to our community guidelines. Please try again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.white.opacity(0.03))

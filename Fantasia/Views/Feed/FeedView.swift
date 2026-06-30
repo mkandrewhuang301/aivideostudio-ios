@@ -116,9 +116,11 @@ struct FeedView: View {
 
     // Credit estimate: rough ratePerSecond approximation matching GenerationOptionsPanel's formula
     // D-36: UX pre-flight only — backend enforces credits atomically (CLAUDE.md Rule 1)
+    // Image items return 0 here; image cost shown separately in the generate flow.
     private func estimatedCost(for item: GenerationItem) -> Int {
+        guard !item.isImage else { return 0 }
         let ratePerSecond: Int = item.model.contains("mini") ? 5 : 10
-        return item.params.duration * ratePerSecond
+        return (item.params.duration ?? 0) * ratePerSecond
     }
 
     // Actual API dispatch (shared by direct path and confirmed-despite-low-credits path)
@@ -127,12 +129,16 @@ struct FeedView: View {
         let body = GenerationRequestBody(
             prompt: prompt,
             model: item.model,
+            mediaType: item.isImage ? "image" : "video",
             duration: item.params.duration,
             resolution: item.params.resolution,
             aspectRatio: item.params.aspectRatio,
             audioEnabled: item.params.audioEnabled,
+            width: item.params.width,
+            height: item.params.height,
             referenceImages: nil,
-            referenceVideos: nil
+            referenceVideos: nil,
+            referenceUploadIds: nil
         )
         do {
             _ = try await APIClient.shared.submitGeneration(body: body)

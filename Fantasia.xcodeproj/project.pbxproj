@@ -17,8 +17,10 @@
 		17422C8DCDE8B4EAF6E6DADA /* GenerationCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF98D41F7BDC89D993199016 /* GenerationCardView.swift */; };
 		18F347EAB3D07C4ACAB89528 /* GenerationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */; };
 		1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9325B3ED5B04712AB19C26 /* FeedView.swift */; };
+		1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226A3C8D078EB4BB18B608E /* HomeView.swift */; };
 		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
+		2B37491440F3B799AC6DB3FC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7137D3DC45A60C75C3109168 /* GoogleSignInSwift */; };
 		32104E944D1A0E14E9D90D02 /* CircularCreditIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */; };
 		3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
@@ -39,6 +41,7 @@
 		85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06EBDDED984EC354B17EC5 /* MainTabView.swift */; };
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE46B720B299E8E732C4EA9 /* PushNotificationManager.swift */; };
+		AA5B5DFFE899799050F6619F /* OnboardingFeatureSlideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */; };
 		AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */; };
 		B0590E6407C84CD84A28E8F8 /* GenerationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C297099F54ADF39EB8703661 /* GenerationManager.swift */; };
 		B17FF15D5D571DEAB54D0EB7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 98728630D43E57BFF19C909E /* LaunchScreen.storyboard */; };
@@ -49,6 +52,7 @@
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
 		D9372B8A631BBC6C9CEFE70A /* ActivityViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 901A7F56B670204A64832BCF /* ActivityViewController.swift */; };
 		D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A65D5512DE91F2D2D1BC1B /* SignInView.swift */; };
+		DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085B4D75DB663F0A8A93228C /* RatesManager.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 		E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68544EFABAD6EC84426B2794 /* GenerateView.swift */; };
 		EBE3BD23343938B199C4054C /* GenerationItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */; };
@@ -66,6 +70,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
 		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -105,6 +111,7 @@
 		C2752AF2A62657566B211B9B /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		C297099F54ADF39EB8703661 /* GenerationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationManager.swift; sourceTree = "<group>"; };
 		CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestion.swift; sourceTree = "<group>"; };
+		CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeatureSlideView.swift; sourceTree = "<group>"; };
 		D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestionBankTests.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
 		E1AF13629D571EF8D48B749B /* BubblePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePickerView.swift; sourceTree = "<group>"; };
@@ -123,6 +130,7 @@
 				58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */,
 				989874F0945BA7356528F19E /* RevenueCat in Frameworks */,
 				382D5A0AAEB4E7CF7B87CD65 /* GoogleSignIn in Frameworks */,
+				2B37491440F3B799AC6DB3FC /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -148,6 +156,7 @@
 				395C7109C3476F244209ECA0 /* Components */,
 				A05D8F1766F99A6C3145F3EE /* Feed */,
 				FF9119D91C886273102943AD /* Generate */,
+				310917A575E9D26FDCBE414E /* Home */,
 				86F5431A6C3C2F21E257CE04 /* Library */,
 				53184DDF5C85560F33C29D1E /* Onboarding */,
 				BAA9F733EF9638C0A3B62619 /* Paywall */,
@@ -161,8 +170,17 @@
 			isa = PBXGroup;
 			children = (
 				F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */,
+				085B4D75DB663F0A8A93228C /* RatesManager.swift */,
 			);
 			path = Network;
+			sourceTree = "<group>";
+		};
+		310917A575E9D26FDCBE414E /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				0226A3C8D078EB4BB18B608E /* HomeView.swift */,
+			);
+			path = Home;
 			sourceTree = "<group>";
 		};
 		395C7109C3476F244209ECA0 /* Components */ = {
@@ -188,6 +206,7 @@
 			isa = PBXGroup;
 			children = (
 				E1AF13629D571EF8D48B749B /* BubblePickerView.swift */,
+				CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */,
 				7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */,
 				CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */,
 				C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */,
@@ -370,6 +389,7 @@
 				EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */,
 				449957FC49E746A99AC14325 /* RevenueCat */,
 				134AEB4B90258A717279F950 /* GoogleSignIn */,
+				7137D3DC45A60C75C3109168 /* GoogleSignInSwift */,
 			);
 			productName = Fantasia;
 			productReference = 73AB21366AA28409EB76A559 /* Fantasia.app */;
@@ -469,9 +489,11 @@
 				B0590E6407C84CD84A28E8F8 /* GenerationManager.swift in Sources */,
 				BDF570EB3BF6C429ECD7E7F1 /* GenerationOptionsPanel.swift in Sources */,
 				7DAA15400D90A9B0A0FB0C6F /* GlassTextField.swift in Sources */,
+				1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */,
 				CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */,
 				4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
+				AA5B5DFFE899799050F6619F /* OnboardingFeatureSlideView.swift in Sources */,
 				AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */,
 				09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */,
 				3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */,
@@ -481,6 +503,7 @@
 				EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */,
+				DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */,
 				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */,
 				14C33C25B4E446F40F55E0F3 /* SocialSignInButton.swift in Sources */,
@@ -568,6 +591,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = Fantasia/Info.plist;
@@ -688,6 +712,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = Fantasia/Info.plist;
@@ -774,6 +799,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1CE45AE0C3C001334699CA74 /* XCRemoteSwiftPackageReference "purchases-ios" */;
 			productName = RevenueCat;
+		};
+		7137D3DC45A60C75C3109168 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4D8B56C89A1815B8348FBF3 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
 		};
 		EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;

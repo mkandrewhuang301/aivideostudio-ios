@@ -7,8 +7,24 @@ import FirebaseAuth
 actor APIClient {
     static let shared = APIClient()
 
-    private let session: URLSession = .shared
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
     private let baseURL = AppConfig.baseURL
+
+    // GET /rates — public endpoint, no auth token needed
+    func fetchRates() async throws -> RatesResponse {
+        let url = baseURL.appendingPathComponent("rates")
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw APIError.unexpectedResponse
+        }
+        return try JSONDecoder().decode(RatesResponse.self, from: data)
+    }
 
     func healthCheck() async throws -> HealthResponse {
         let url = baseURL.appendingPathComponent("health")
@@ -132,6 +148,22 @@ actor APIClient {
     // D-23, D-24: POST /api/uploads — multipart/form-data file upload
     // Returns UploadResponse.url (1-hour R2 presigned URL for use as reference_images[0] or reference_videos[0])
     // RESEARCH.md Pattern 9: manually construct multipart boundary (no Alamofire dependency needed)
+    // GET /api/uploads — user's previously-uploaded reference media, newest first
+    func fetchMyUploads() async throws -> [ReferenceUploadItem] {
+        let token = try await getIDToken()
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/uploads"))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            print("[APIClient] fetchMyUploads HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1): \(String(data: data, encoding: .utf8) ?? "no body")")
+            throw APIError.unexpectedResponse
+        }
+        print("[APIClient] fetchMyUploads raw: \(String(data: data, encoding: .utf8) ?? "nil")")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(UploadsListResponse.self, from: data).uploads
+    }
+
     func uploadReferenceMedia(data: Data, mimeType: String, fileName: String) async throws -> UploadResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -153,6 +185,17 @@ actor APIClient {
             throw APIError.unexpectedResponse
         }
         return try JSONDecoder().decode(UploadResponse.self, from: responseData)
+    }
+}
+
+// GET /rates response — rates are in credits/sec, no dollar conversion needed client-side
+struct RatesResponse: Decodable {
+    let rates: [String: [String: [String: Double]]]
+    let imageCosts: [String: Int]?   // flat credits per image model; optional for backward compat
+
+    enum CodingKeys: String, CodingKey {
+        case rates
+        case imageCosts = "imageCosts"
     }
 }
 
@@ -209,27 +252,56 @@ struct GenerationSubmitResponse: Decodable {
     }
 }
 
-// Upload response — returned by POST /api/uploads (1-hour R2 presigned URL)
+// Upload response — returned by POST /api/uploads
 struct UploadResponse: Decodable {
+    let id: String?   // reference_uploads UUID — stored so remix/regen can restore the reference
     let url: String
 }
 
-// Generation request body — sent to POST /api/generations (GEN-01, GEN-02, GEN-03)
+// A previously-uploaded reference file returned by GET /api/uploads
+struct ReferenceUploadItem: Identifiable, Decodable {
+    let id: String
+    let url: String
+    let mimeType: String
+
+    var isVideo: Bool { mimeType.contains("video") }
+
+    enum CodingKeys: String, CodingKey {
+        case id, url
+        case mimeType = "mime_type"
+    }
+}
+
+private struct UploadsListResponse: Decodable {
+    let uploads: [ReferenceUploadItem]
+}
+
+// Generation request body — sent to POST /api/generations
+// Video fields (duration/resolution/aspectRatio/audioEnabled) are optional so that image
+// generation requests can omit them; width/height are image-only.
 struct GenerationRequestBody: Encodable {
     let prompt: String
     let model: String
-    let duration: Int
-    let resolution: String
-    let aspectRatio: String
-    let audioEnabled: Bool
+    let mediaType: String?          // "video" | "image"; nil omits from JSON (backend defaults to video)
+    let duration: Int?              // video-only; nil for image mode
+    let resolution: String?         // video-only; nil for image mode
+    let aspectRatio: String?        // video-only; nil for image mode
+    let audioEnabled: Bool?         // video-only; nil for image mode
+    let width: Int?                 // image-only; nil for video mode
+    let height: Int?                // image-only; nil for video mode
     let referenceImages: [String]?
     let referenceVideos: [String]?
+    let referenceUploadIds: [String]?   // reference_uploads UUIDs — stored server-side for remix/regen
 
     enum CodingKeys: String, CodingKey {
-        case prompt, model, duration, resolution
+        case prompt, model
+        case mediaType = "media_type"
+        case duration, resolution
         case aspectRatio = "aspect_ratio"
         case audioEnabled = "audio_enabled"
+        case width, height
         case referenceImages = "reference_images"
         case referenceVideos = "reference_videos"
+        case referenceUploadIds = "reference_upload_ids"
     }
 }
