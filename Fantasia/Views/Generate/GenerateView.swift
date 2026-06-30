@@ -24,6 +24,7 @@ struct GenerateView: View {
     @State private var selectedResolution = "720p"
     @State private var selectedAspectRatio = "9:16"
     @State private var audioEnabled = true
+    @State private var selectedImageResolution: ImageResolution = .medium
     @State private var showOptions = false
 
     // Reference attachment state
@@ -40,6 +41,7 @@ struct GenerateView: View {
     @State private var showMediaLibrary = false
     @State private var mediaLibraryItems: [ReferenceUploadItem] = []
     @State private var isLoadingLibrary = false
+    @State private var libraryLoadFailed = false
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -51,7 +53,10 @@ struct GenerateView: View {
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
     private var generationCost: Int {
-        ratesManager.cost(
+        if selectedMode == "AI Image" {
+            return ratesManager.imageCost(for: selectedModel)
+        }
+        return ratesManager.cost(
             model: selectedModel,
             durationSeconds: selectedDuration,
             resolution: selectedResolution,
@@ -66,7 +71,11 @@ struct GenerateView: View {
 
     // Lights up the Options button when anything differs from defaults
     private var hasNonDefaultSettings: Bool {
-        selectedMode != "AI Video" ||
+        if selectedMode == "AI Image" {
+            return selectedImageResolution != .medium ||
+                selectedModel != ModelCatalog.image[0].id
+        }
+        return selectedMode != "AI Video" ||
         selectedModel != "bytedance/seedance-2.0-mini" ||
         selectedDuration != 6 ||
         selectedResolution != "720p" ||
@@ -160,13 +169,24 @@ struct GenerateView: View {
         // Polling — start/stop with this view's lifecycle
         .onAppear {
             generationManager.startPolling()
+            // Pre-warm the library so it's ready when the user types @
+            Task { await loadMediaLibrary() }
             if let remix = generationManager.pendingRemix {
                 promptText = remix.prompt ?? ""
                 selectedModel = remix.model
-                selectedDuration = remix.params.duration ?? 6
-                selectedResolution = remix.params.resolution ?? "720p"
-                selectedAspectRatio = remix.params.aspectRatio ?? "9:16"
-                audioEnabled = remix.params.audioEnabled ?? true
+                selectedMode = remix.isImage ? "AI Image" : "AI Video"
+                if remix.isImage {
+                    if let w = remix.params.width, let h = remix.params.height {
+                        selectedImageResolution = ImageResolution.allCases.first {
+                            $0.width == w && $0.height == h
+                        } ?? .medium
+                    }
+                } else {
+                    selectedDuration = remix.params.duration ?? 6
+                    selectedResolution = remix.params.resolution ?? "720p"
+                    selectedAspectRatio = remix.params.aspectRatio ?? "9:16"
+                    audioEnabled = remix.params.audioEnabled ?? true
+                }
                 generationManager.pendingRemix = nil
             }
         }
@@ -226,9 +246,7 @@ struct GenerateView: View {
         .onChange(of: promptText) { old, new in
             if new.hasSuffix("@") && !old.hasSuffix("@") {
                 showMediaLibrary = true
-                if !isLoadingLibrary {
-                    Task { await loadMediaLibrary() }
-                }
+                Task { await loadMediaLibrary() }
             } else if !new.hasSuffix("@") && showMediaLibrary {
                 showMediaLibrary = false
             }
@@ -393,7 +411,7 @@ struct GenerateView: View {
     private var promptBar: some View {
         VStack(spacing: 4) {
             // Row 1: attach + prompt + send
-            HStack(alignment: .center, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
             // Left: attach button, thumbnail stacked below when present
             VStack(spacing: 6) {
                 PhotosPicker(
@@ -529,7 +547,8 @@ struct GenerateView: View {
                     selectedDuration: $selectedDuration,
                     selectedResolution: $selectedResolution,
                     selectedAspectRatio: $selectedAspectRatio,
-                    audioEnabled: $audioEnabled
+                    audioEnabled: $audioEnabled,
+                    selectedImageResolution: $selectedImageResolution
                 )
                 .padding(.bottom, 8)
                 .transition(.opacity)
@@ -563,14 +582,26 @@ struct GenerateView: View {
                 }
                 .frame(width: 72 + 2 * 14, height: 74)
             } else if mediaLibraryItems.isEmpty {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 72, height: 72)
-                    .overlay(
-                        Image(systemName: "photo.on.rectangle")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white.opacity(0.2))
-                    )
+                Button {
+                    Task { await loadMediaLibrary() }
+                } label: {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 72, height: 72)
+                        .overlay(
+                            VStack(spacing: 4) {
+                                Image(systemName: libraryLoadFailed ? "arrow.clockwise" : "photo.on.rectangle")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.white.opacity(libraryLoadFailed ? 0.5 : 0.2))
+                                if libraryLoadFailed {
+                                    Text("Retry")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                }
+                            }
+                        )
+                }
+                .buttonStyle(.plain)
             } else {
                 let visible = Array(mediaLibraryItems.prefix(3))
                 // Reverse so oldest renders first (behind), newest last (on top)
@@ -599,7 +630,15 @@ struct GenerateView: View {
                     Text("\(mediaLibraryItems.count) file\(mediaLibraryItems.count == 1 ? "" : "s")")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.35))
-                } else if !isLoadingLibrary {
+                } else if isLoadingLibrary {
+                    Text("Loading...")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.35))
+                } else if libraryLoadFailed {
+                    Text("Tap to retry")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
+                } else {
                     Text("No uploads yet")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.35))
@@ -653,13 +692,16 @@ struct GenerateView: View {
     }
 
     private func loadMediaLibrary() async {
+        guard !isLoadingLibrary else { return }
         isLoadingLibrary = true
+        libraryLoadFailed = false
         defer { isLoadingLibrary = false }
         do {
             mediaLibraryItems = try await APIClient.shared.fetchMyUploads()
         } catch {
             print("[GenerateView] fetchMyUploads failed: \(error)")
-            mediaLibraryItems = []
+            libraryLoadFailed = true
+            // Keep existing items if we had them; only clear on a real empty response
         }
     }
 
@@ -704,20 +746,38 @@ struct GenerateView: View {
                 refUploadId = uploadResponse.id  // capture for remix/regen
             }
 
-            let body = GenerationRequestBody(
-                prompt: promptText,
-                model: selectedModel,
-                mediaType: "video",
-                duration: selectedDuration,
-                resolution: selectedResolution,
-                aspectRatio: selectedAspectRatio,
-                audioEnabled: audioEnabled,
-                width: nil,
-                height: nil,
-                referenceImages: refImages,
-                referenceVideos: refVideos,
-                referenceUploadIds: refUploadId.map { [$0] }
-            )
+            let body: GenerationRequestBody
+            if selectedMode == "AI Image" {
+                body = GenerationRequestBody(
+                    prompt: promptText,
+                    model: selectedModel,
+                    mediaType: "image",
+                    duration: nil,
+                    resolution: nil,
+                    aspectRatio: nil,
+                    audioEnabled: nil,
+                    width: selectedImageResolution.width,
+                    height: selectedImageResolution.height,
+                    referenceImages: refImages,
+                    referenceVideos: refVideos,
+                    referenceUploadIds: refUploadId.map { [$0] }
+                )
+            } else {
+                body = GenerationRequestBody(
+                    prompt: promptText,
+                    model: selectedModel,
+                    mediaType: "video",
+                    duration: selectedDuration,
+                    resolution: selectedResolution,
+                    aspectRatio: selectedAspectRatio,
+                    audioEnabled: audioEnabled,
+                    width: nil,
+                    height: nil,
+                    referenceImages: refImages,
+                    referenceVideos: refVideos,
+                    referenceUploadIds: refUploadId.map { [$0] }
+                )
+            }
             _ = try await APIClient.shared.submitGeneration(body: body)
 
             promptText = ""
@@ -737,10 +797,19 @@ struct GenerateView: View {
     private func handleRemix(item: GenerationItem) {
         promptText = item.prompt ?? ""
         selectedModel = item.model
-        selectedDuration = item.params.duration ?? 6
-        selectedResolution = item.params.resolution ?? "720p"
-        selectedAspectRatio = item.params.aspectRatio ?? "9:16"
-        audioEnabled = item.params.audioEnabled ?? true
+        selectedMode = item.isImage ? "AI Image" : "AI Video"
+        if item.isImage {
+            if let w = item.params.width, let h = item.params.height {
+                selectedImageResolution = ImageResolution.allCases.first {
+                    $0.width == w && $0.height == h
+                } ?? .medium
+            }
+        } else {
+            selectedDuration = item.params.duration ?? 6
+            selectedResolution = item.params.resolution ?? "720p"
+            selectedAspectRatio = item.params.aspectRatio ?? "9:16"
+            audioEnabled = item.params.audioEnabled ?? true
+        }
         // Pre-fill reference if the original generation had one
         if let ref = item.referenceUrls?.first {
             referenceURL = ref.url
@@ -760,13 +829,18 @@ struct GenerateView: View {
     }
 
     private func handleRegenerate(item: GenerationItem) async {
-        let hasVideoRef = item.referenceUrls?.contains(where: { $0.isVideo }) ?? false
-        let cost = ratesManager.cost(
-            model: item.model,
-            durationSeconds: item.params.duration ?? 0,
-            resolution: item.params.resolution ?? "720p",
-            hasVideoReference: hasVideoRef
-        )
+        let cost: Int
+        if item.isImage {
+            cost = ratesManager.imageCost(for: item.model)
+        } else {
+            let hasVideoRef = item.referenceUrls?.contains(where: { $0.isVideo }) ?? false
+            cost = ratesManager.cost(
+                model: item.model,
+                durationSeconds: item.params.duration ?? 0,
+                resolution: item.params.resolution ?? "720p",
+                hasVideoReference: hasVideoRef
+            )
+        }
         guard creditManager.creditsBalance >= cost else { return }
         await dispatchRegenerate(item: item)
     }
