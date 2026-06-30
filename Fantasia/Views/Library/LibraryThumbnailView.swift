@@ -1,14 +1,14 @@
 // LibraryThumbnailView.swift
 // Fantasia
-// D-08: Individual cell in the Library 2-column grid
-// Square thumbnail cell — consistent with iOS Photos.app pattern
-// Thumbnail generated from first frame via AVAssetImageGenerator (same as GenerationCardView)
+// Individual cell in the Library masonry grid.
+// Height is driven by the video's native aspect ratio — caller passes the ratio.
 
 import SwiftUI
 import AVFoundation
 
 struct LibraryThumbnailView: View {
     let item: GenerationItem
+    let ratio: CGFloat          // native width/height e.g. 16/9, 9/16, 1/1
     var onTap: () -> Void
 
     @State private var thumbnail: UIImage? = nil
@@ -16,46 +16,59 @@ struct LibraryThumbnailView: View {
     var body: some View {
         Button(action: onTap) {
             ZStack {
-                // Aspect ratio box — square cells in the grid for clean 2-column layout (D-08)
                 Color.white.opacity(0.04)
-                    .aspectRatio(1.0, contentMode: .fill)
 
-                if let thumb = thumbnail {
-                    Image(uiImage: thumb)
-                        .resizable()
-                        .scaledToFill()
+                if item.isImage {
+                    // Images: AsyncImage thumbnail, no play overlay
+                    if let urlString = item.completedMediaUrl, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                Color(.systemGray5)
+                            }
+                        }
                         .clipped()
+                    } else {
+                        Color(.systemGray5)
+                    }
                 } else {
-                    // Loading shimmer placeholder
-                    Color.white.opacity(0.04)
-                    Image(systemName: "film")
-                        .foregroundStyle(.tertiary)
-                        .font(.system(size: 22))
-                }
+                    if let thumb = thumbnail {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Color.white.opacity(0.04)
+                        Image(systemName: "film")
+                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 22))
+                    }
 
-                // Play icon overlay
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white.opacity(0.7))
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
             }
+            .aspectRatio(ratio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipped()
         }
         .buttonStyle(.plain)
         .onAppear {
-            if let urlString = item.videoUrl, thumbnail == nil {
+            if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {
                 loadThumbnail(urlString: urlString)
             }
         }
     }
 
-    // AVAssetImageGenerator (same pattern as GenerationCardView) — RESEARCH.md Pattern 5
     private func loadThumbnail(urlString: String) {
         guard let url = URL(string: urlString) else { return }
         Task {
             let asset = AVURLAsset(url: url)
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
-            gen.maximumSize = CGSize(width: 300, height: 300)
+            gen.maximumSize = CGSize(width: 400, height: 400)
             if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
                 thumbnail = UIImage(cgImage: cgImg)
             }

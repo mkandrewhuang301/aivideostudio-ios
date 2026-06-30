@@ -129,6 +129,13 @@ struct LibraryView: View {
     // MARK: - Helpers
 
     private func nativeRatio(_ item: GenerationItem) -> CGFloat {
+        if item.isImage {
+            // Images: use actual width/height instead of the (absent) aspectRatio string
+            if let w = item.params.width, let h = item.params.height, h != 0 {
+                return CGFloat(w) / CGFloat(h)
+            }
+            return 1
+        }
         let parts = (item.params.aspectRatio ?? "16:9").split(separator: ":").compactMap { Double($0) }
         guard parts.count == 2, parts[1] != 0 else { return 1 }
         return CGFloat(parts[0] / parts[1])

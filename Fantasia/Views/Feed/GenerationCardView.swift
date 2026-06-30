@@ -45,7 +45,7 @@ struct GenerationCardView: View {
 
             // Aspect-ratio box (D-06: sized to requested aspect ratio)
             Color.clear
-                .aspectRatio(aspectRatioValue(item.params.aspectRatio ?? "16:9"), contentMode: .fit)
+                .aspectRatio(cardAspectRatio, contentMode: .fit)
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 14)
@@ -93,9 +93,11 @@ struct GenerationCardView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
         .padding(.horizontal, 16)
 
-        // Full-screen player (D-16: tap video thumbnail → full-screen)
+        // Full-screen player (D-16: tap thumbnail → full-screen)
         .fullScreenCover(isPresented: $showPlayer) {
-            if let urlString = item.videoUrl, let url = URL(string: urlString) {
+            if item.isImage {
+                FullScreenImageView(item: item)
+            } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
                 FullScreenVideoPlayerView(videoUrl: url)
             }
         }
@@ -132,8 +134,28 @@ struct GenerationCardView: View {
             shimmerView
 
         case .completed:
-            // D-16: static thumbnail + play icon overlay
-            if let thumb = thumbnail {
+            if item.isImage {
+                // Images: AsyncImage thumbnail, no play icon overlay
+                if let urlString = item.completedMediaUrl, let url = URL(string: urlString) {
+                    Button { showPlayer = true } label: {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            case .empty:
+                                shimmerView
+                            default:
+                                Color.white.opacity(0.03)
+                            }
+                        }
+                        .clipped()
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    shimmerView
+                }
+            } else if let thumb = thumbnail {
+                // D-16: static thumbnail + play icon overlay
                 Button { showPlayer = true } label: {
                     ZStack {
                         Image(uiImage: thumb)
@@ -242,7 +264,7 @@ struct GenerationCardView: View {
 
     // MARK: - Thumbnail (first frame from video URL)
     private func loadThumbnail() {
-        guard item.status == .completed, let urlString = item.videoUrl,
+        guard !item.isImage, item.status == .completed, let urlString = item.videoUrl,
               let url = URL(string: urlString), thumbnail == nil else { return }
         Task {
             let asset = AVURLAsset(url: url)
@@ -256,6 +278,14 @@ struct GenerationCardView: View {
     }
 
     // MARK: - Aspect Ratio Helper (D-06)
+    // Images use width/height; videos use the requested aspectRatio string.
+    private var cardAspectRatio: CGFloat {
+        if item.isImage, let w = item.params.width, let h = item.params.height, h != 0 {
+            return CGFloat(w) / CGFloat(h)
+        }
+        return aspectRatioValue(item.params.aspectRatio ?? "16:9")
+    }
+
     private func aspectRatioValue(_ ratio: String) -> CGFloat {
         switch ratio {
         case "16:9": return 16.0 / 9.0

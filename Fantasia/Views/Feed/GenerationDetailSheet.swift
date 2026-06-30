@@ -35,7 +35,24 @@ struct GenerationDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Thumbnail + play button (D-29)
-                    if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
+                    if item.isImage, let urlString = item.completedMediaUrl, let imageUrl = URL(string: urlString) {
+                        Button {
+                            showPlayer = true
+                        } label: {
+                            AsyncImage(url: imageUrl) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    Color.white.opacity(0.05)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
                         Button {
                             showPlayer = true
                         } label: {
@@ -84,16 +101,24 @@ struct GenerationDetailSheet: View {
                         }
                     }
 
-                    // Parameters (D-29: model, resolution, duration, aspect ratio, audio)
+                    // Parameters (D-29: model + media-type-specific fields)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Parameters")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         paramRow("Model", value: item.model.contains("mini") ? "Seedance Mini" : "Seedance Fast")
-                        paramRow("Resolution", value: item.params.resolution ?? "—")
-                        paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
-                        paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
-                        paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off")
+                        if item.isImage {
+                            // Image: only resolution (width x height) — no duration/aspect/audio
+                            if let w = item.params.width, let h = item.params.height {
+                                paramRow("Resolution", value: "\(w) × \(h)")
+                            }
+                        } else {
+                            // Video: existing params display
+                            paramRow("Resolution", value: item.params.resolution ?? "—")
+                            paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
+                            paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
+                            paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off")
+                        }
                     }
                     .padding(12)
                     .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
@@ -108,8 +133,8 @@ struct GenerationDetailSheet: View {
                     // Actions (D-29: Download, Share, Report)
                     // D-30: Delete is on the card, NOT here
                     VStack(spacing: 10) {
-                        // Download (GAL-03) — primary button
-                        if item.status == .completed, let urlString = item.videoUrl {
+                        // Download (GAL-03) — primary button. Save-to-Photos deferred for images (08-CONTEXT.md).
+                        if item.status == .completed, !item.isImage, let urlString = item.videoUrl {
                             Button {
                                 Task { await saveToPhotos(urlString: urlString) }
                             } label: {
@@ -123,7 +148,9 @@ struct GenerationDetailSheet: View {
                                 .foregroundStyle(.white)
                             }
                             .disabled(isSaving)
+                        }
 
+                        if item.status == .completed, let urlString = item.completedMediaUrl {
                             // Share (GAL-04) — secondary button
                             Button {
                                 Task { await prepareAndShare(urlString: urlString) }
@@ -157,9 +184,11 @@ struct GenerationDetailSheet: View {
                 .padding(.bottom, 32)
             }
         }
-        // Full-screen player when thumbnail tapped (D-29)
+        // Full-screen viewer when thumbnail tapped (D-29)
         .fullScreenCover(isPresented: $showPlayer) {
-            if let urlString = item.videoUrl, let url = URL(string: urlString) {
+            if item.isImage {
+                FullScreenImageView(item: item)
+            } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
                 FullScreenVideoPlayerView(videoUrl: url)
             }
         }
@@ -224,11 +253,14 @@ struct GenerationDetailSheet: View {
 
     // GAL-04: Share via UIActivityViewController (wrapped in ActivityViewController)
     private func prepareAndShare(urlString: String) async {
-        guard let videoUrl = URL(string: urlString) else { return }
+        guard let mediaUrl = URL(string: urlString) else { return }
         do {
-            let (tmpUrl, _) = try await URLSession.shared.download(from: videoUrl)
+            let (tmpUrl, _) = try await URLSession.shared.download(from: mediaUrl)
+            // Preserve correct file extension so Share Sheet recipients (Messages, Files, etc.)
+            // recognize the content type — images must not be saved with a .mp4 extension.
+            let ext = item.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
             let destUrl = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(item.id)-share.mp4")
+                .appendingPathComponent("\(item.id)-share.\(ext)")
             try? FileManager.default.removeItem(at: destUrl)
             try FileManager.default.moveItem(at: tmpUrl, to: destUrl)
             tmpShareUrl = destUrl
