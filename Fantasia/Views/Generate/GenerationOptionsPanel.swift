@@ -60,12 +60,13 @@ enum ModelCatalog {
         ModelOption(id: "bytedance/seedance-2.0",      name: "Seedance 2.0",
                     tagline: "Highest quality, cinematic motion"),
     ]
-    // Image models — per 08-CONTEXT.md locked decisions
     static let image: [ModelOption] = [
-        ModelOption(id: "black-forest-labs/flux-schnell", name: "Flux Schnell",
-                    tagline: "Fast & affordable", badge: "5 credits"),
-        ModelOption(id: "black-forest-labs/flux-dev",      name: "Flux Dev",
-                    tagline: "Highest quality", badge: "15 credits"),
+        ModelOption(id: "bytedance/seedream-5-lite", name: "Seedream 5 Lite",
+                    tagline: "Fast, high-quality images", badge: "4 credits"),
+        ModelOption(id: "bytedance/seedream-4.5",    name: "Seedream 4.5",
+                    tagline: "Cinematic aesthetics, strong detail", badge: "4 credits"),
+        ModelOption(id: "openai/gpt-image-2",        name: "GPT Image 2",
+                    tagline: "Precise instruction-following, photorealistic", badge: "13 credits"),
     ]
 
     static func defaultModel(for mode: String) -> String {
