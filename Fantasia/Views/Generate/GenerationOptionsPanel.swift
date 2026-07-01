@@ -23,30 +23,21 @@ struct ModelOption {
     }
 }
 
-/// Supported output resolutions for Flux image generation.
 enum ImageResolution: String, CaseIterable, Identifiable {
-    case small     = "512×512"
-    case medium    = "1024×1024"
-    case landscape = "1024×768"
-    case portrait  = "768×1024"
+    case square    = "1:1"
+    case landscape = "4:3"
+    case portrait  = "3:4"
+    case wide      = "16:9"
+    case tall      = "9:16"
 
     var id: String { rawValue }
-    var displayName: String { rawValue }
-
-    var width: Int {
+    var displayName: String {
         switch self {
-        case .small:     return 512
-        case .medium:    return 1024
-        case .landscape: return 1024
-        case .portrait:  return 768
-        }
-    }
-    var height: Int {
-        switch self {
-        case .small:     return 512
-        case .medium:    return 1024
-        case .landscape: return 768
-        case .portrait:  return 1024
+        case .square:    return "1:1 · Square"
+        case .landscape: return "4:3 · Landscape"
+        case .portrait:  return "3:4 · Portrait"
+        case .wide:      return "16:9 · Wide"
+        case .tall:      return "9:16 · Tall"
         }
     }
 }
@@ -54,19 +45,17 @@ enum ImageResolution: String, CaseIterable, Identifiable {
 enum ModelCatalog {
     static let video: [ModelOption] = [
         ModelOption(id: "bytedance/seedance-2.0-mini", name: "Seedance 2.0 Mini",
-                    tagline: "Newest model · 2× faster than Fast at half the cost"),
-        ModelOption(id: "bytedance/seedance-2.0-fast", name: "Seedance 2.0 Fast",
-                    tagline: "Great quality with faster generation than standard"),
+                    tagline: "Newest model - cheaper and faster than 2.0, good for testing ideas"),
         ModelOption(id: "bytedance/seedance-2.0",      name: "Seedance 2.0",
-                    tagline: "Highest quality, cinematic motion"),
+                    tagline: "Best output quality, ideal for final renders"),
     ]
     static let image: [ModelOption] = [
         ModelOption(id: "bytedance/seedream-5-lite", name: "Seedream 5 Lite",
-                    tagline: "Fast, high-quality images", badge: "4 credits"),
+                    tagline: "Fast and cheap - best for testing ideas"),
         ModelOption(id: "bytedance/seedream-4.5",    name: "Seedream 4.5",
-                    tagline: "Cinematic aesthetics, strong detail", badge: "4 credits"),
+                    tagline: "Best output quality, best for final renders"),
         ModelOption(id: "openai/gpt-image-2",        name: "GPT Image 2",
-                    tagline: "Precise instruction-following, photorealistic", badge: "13 credits"),
+                    tagline: "OpenAI's image model"),
     ]
 
     static func defaultModel(for mode: String) -> String {
@@ -136,8 +125,8 @@ struct GenerationOptionsPanel: View {
 
                 if selectedMode == "AI Image" {
                     // Image mode resolution picker — pixel dimensions, not video resolutions
-                    menuPill("Resolution", icon: "sparkles", value: selectedImageResolution.displayName) {
-                        Picker("Resolution", selection: $selectedImageResolution) {
+                    menuPill("Aspect", icon: "aspectratio", value: selectedImageResolution.displayName) {
+                        Picker("Aspect Ratio", selection: $selectedImageResolution) {
                             ForEach(ImageResolution.allCases) { res in
                                 Text(res.displayName).tag(res)
                             }
@@ -216,22 +205,13 @@ struct GenerationOptionsPanel: View {
                         Button {
                             selectedModel = model.id
                         } label: {
+                            let subtitle = model.badge.map { "\(model.tagline) · \($0)" } ?? model.tagline
                             if selectedModel == model.id {
-                                Label {
-                                    Text(model.name)
-                                    Text(model.tagline)
-                                    if let badge = model.badge {
-                                        Text(badge)
-                                    }
-                                } icon: {
-                                    Image(systemName: "checkmark")
-                                }
+                                Label(model.name, systemImage: "checkmark")
+                                Text(subtitle)
                             } else {
                                 Text(model.name)
-                                Text(model.tagline)
-                                if let badge = model.badge {
-                                    Text(badge)
-                                }
+                                Text(subtitle)
                             }
                         }
                     }

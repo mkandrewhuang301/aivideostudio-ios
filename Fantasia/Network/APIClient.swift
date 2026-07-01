@@ -60,7 +60,11 @@ actor APIClient {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let body = String(data: data, encoding: .utf8) ?? "no body"
+            print("[APIClient] \(method) \(path) → HTTP \(status): \(body)")
+            let code = (try? JSONDecoder().decode([String: String].self, from: data))?["code"]
+            throw APIError.unexpectedResponse(statusCode: status, code: code)
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -164,6 +168,25 @@ actor APIClient {
         return try decoder.decode(UploadsListResponse.self, from: data).uploads
     }
 
+    func deleteUpload(id: String) async throws {
+        try await authorizedRequestNoContent(path: "api/uploads/\(id)", method: "DELETE")
+    }
+
+    // PATCH /api/uploads/:id — set or clear display name. Empty string clears to nil.
+    func renameUpload(id: String, displayName: String) async throws {
+        let body = try JSONEncoder().encode(["display_name": displayName])
+        let token = try await getIDToken()
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/uploads/\(id)"))
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.unexpectedResponse
+        }
+    }
+
     func uploadReferenceMedia(data: Data, mimeType: String, fileName: String) async throws -> UploadResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -228,7 +251,7 @@ struct UserInfo: Decodable {
 }
 
 enum APIError: Error, LocalizedError {
-    case unexpectedResponse
+    case unexpectedResponse(statusCode: Int, code: String?)
     case notAuthenticated
 
     var errorDescription: String? {
@@ -263,12 +286,14 @@ struct ReferenceUploadItem: Identifiable, Decodable {
     let id: String
     let url: String
     let mimeType: String
+    var displayName: String?   // user-assigned name; nil = unnamed → uses [ImageN]/[VideoN]
 
     var isVideo: Bool { mimeType.contains("video") }
 
     enum CodingKeys: String, CodingKey {
         case id, url
-        case mimeType = "mime_type"
+        case mimeType    = "mime_type"
+        case displayName = "display_name"
     }
 }
 
@@ -287,8 +312,7 @@ struct GenerationRequestBody: Encodable {
     let resolution: String?         // video-only; nil for image mode
     let aspectRatio: String?        // video-only; nil for image mode
     let audioEnabled: Bool?         // video-only; nil for image mode
-    let width: Int?                 // image-only; nil for video mode
-    let height: Int?                // image-only; nil for video mode
+    let imageAspectRatio: String?   // image-only; nil for video mode
     let referenceImages: [String]?
     let referenceVideos: [String]?
     let referenceUploadIds: [String]?   // reference_uploads UUIDs — stored server-side for remix/regen
@@ -300,6 +324,7 @@ struct GenerationRequestBody: Encodable {
         case aspectRatio = "aspect_ratio"
         case audioEnabled = "audio_enabled"
         case width, height
+        case imageAspectRatio = "image_aspect_ratio"
         case referenceImages = "reference_images"
         case referenceVideos = "reference_videos"
         case referenceUploadIds = "reference_upload_ids"
