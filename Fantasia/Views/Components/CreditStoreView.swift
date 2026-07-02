@@ -15,12 +15,23 @@ struct CreditStoreView: View {
     @State private var purchasingId: String? = nil
     @State private var errorId: String? = nil
 
-    /// A pack ready to render — backed by a live RevenueCat Package when available,
-    /// or the last locally-cached price when offline (purchase is disabled in that case).
+    /// A pack ready to render — backed by a live RevenueCat Package or a directly-fetched
+    /// StoreProduct when available, or the last locally-cached price when offline
+    /// (purchase is disabled in that last case).
     private struct DisplayPack: Identifiable {
         let id: String
         let priceString: String
         let livePackage: Package?
+        let liveProduct: StoreProduct?
+
+        /// Whether this pack can be purchased right now (has a live Package or StoreProduct).
+        var isPurchasable: Bool { livePackage != nil || liveProduct != nil }
+        /// Localized numeric price, or 0 when only a cached string is available.
+        var priceDouble: Double {
+            if let pkg = livePackage { return NSDecimalNumber(decimal: pkg.storeProduct.price).doubleValue }
+            if let prod = liveProduct { return NSDecimalNumber(decimal: prod.price).doubleValue }
+            return 0
+        }
     }
 
     private let accent  = Color(red: 0.55, green: 0.35, blue: 1.0)
@@ -55,9 +66,11 @@ struct CreditStoreView: View {
     private var displayPacks: [DisplayPack] {
         packOrder.compactMap { id in
             if let pkg = offeringsManager.package(for: id) {
-                return DisplayPack(id: id, priceString: pkg.storeProduct.localizedPriceString, livePackage: pkg)
+                return DisplayPack(id: id, priceString: pkg.storeProduct.localizedPriceString, livePackage: pkg, liveProduct: nil)
+            } else if let prod = offeringsManager.standaloneProduct(for: id) {
+                return DisplayPack(id: id, priceString: prod.localizedPriceString, livePackage: nil, liveProduct: prod)
             } else if let cached = offeringsManager.cachedPrice(for: id) {
-                return DisplayPack(id: id, priceString: cached, livePackage: nil)
+                return DisplayPack(id: id, priceString: cached, livePackage: nil, liveProduct: nil)
             }
             return nil
         }
@@ -84,7 +97,7 @@ struct CreditStoreView: View {
                     .accessibilityLabel("Close")
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 56)   // clears status bar
+                .padding(.top, 12)   // sits just below the safe-area inset
                 .padding(.bottom, 20)
 
                 // Content states
@@ -117,7 +130,9 @@ struct CreditStoreView: View {
         .task {
             let pm = PurchaseManager(creditManager: creditManager)
             purchaseManager = pm
-            await offeringsManager.refreshIfNeeded() // no-op if we already have fresh packages
+            // Ensure the top-up product IDs resolve even if they live outside the current
+            // offering (or in no offering at all) — see OfferingsManager.refreshIfNeeded.
+            await offeringsManager.refreshIfNeeded(ensuring: packOrder)
         }
     }
 
@@ -160,7 +175,7 @@ struct CreditStoreView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Retry") {
-                Task { await offeringsManager.refreshIfNeeded(force: true) }
+                Task { await offeringsManager.refreshIfNeeded(force: true, ensuring: packOrder) }
             }
             .font(.body.weight(.semibold))
             .foregroundStyle(.white)
@@ -177,7 +192,7 @@ struct CreditStoreView: View {
     private func packCard(_ pack: DisplayPack) -> some View {
         let productId = pack.id
         let price     = pack.priceString
-        let priceD    = pack.livePackage.map { NSDecimalNumber(decimal: $0.storeProduct.price).doubleValue } ?? 0
+        let priceD    = pack.priceDouble
         let meta      = packMeta[productId]
         let credits   = meta?.credits ?? 0
         // $1 = X credits — dynamic from RevenueCat price; handles localisation.
@@ -185,7 +200,7 @@ struct CreditStoreView: View {
         let cpd       = priceD > 0 ? Int(Double(credits) / priceD) : 0
         let isPurchasing = purchasingId == productId
         let hadError     = errorId == productId
-        let isOffline    = pack.livePackage == nil
+        let isOffline    = !pack.isPurchasable
         // Both "Popular" and "Best Value" get accent border per D-08 key decisions
         let highlighted  = meta?.badge == "Popular" || meta?.badge == "Best Value"
 
@@ -254,8 +269,10 @@ struct CreditStoreView: View {
                 Button {
                     if let pkg = pack.livePackage {
                         Task { await purchase(pkg) }
+                    } else if let prod = pack.liveProduct {
+                        Task { await purchase(product: prod) }
                     } else {
-                        Task { await offeringsManager.refreshIfNeeded(force: true) }
+                        Task { await offeringsManager.refreshIfNeeded(force: true, ensuring: packOrder) }
                     }
                 } label: {
                     Group {
@@ -308,11 +325,22 @@ struct CreditStoreView: View {
     // MARK: - Actions
 
     private func purchase(_ package: Package) async {
+        await runPurchase(id: package.storeProduct.productIdentifier) { pm in
+            await pm.purchase(package: package)
+        }
+    }
+
+    private func purchase(product: StoreProduct) async {
+        await runPurchase(id: product.productIdentifier) { pm in
+            await pm.purchase(product: product)
+        }
+    }
+
+    private func runPurchase(id: String, _ buy: (PurchaseManager) async -> Void) async {
         guard let pm = purchaseManager else { return }
-        let id = package.storeProduct.productIdentifier
         purchasingId = id
         errorId = nil
-        await pm.purchase(package: package)
+        await buy(pm)
         purchasingId = nil
         if pm.purchaseError != nil {
             errorId = id

@@ -23,6 +23,18 @@ final class PurchaseManager {
     /// Purchase a RevenueCat Package (subscription or top-up consumable).
     /// On success, fetches updated balance (D-19).
     func purchase(package: Package) async {
+        await runPurchase { try await Purchases.shared.purchase(package: package) }
+    }
+
+    /// Purchase a raw StoreProduct — used for top-up consumables that aren't attached to a
+    /// RevenueCat offering (see OfferingsManager's direct-product fallback). Same post-purchase
+    /// balance-poll semantics as the Package path.
+    func purchase(product: StoreProduct) async {
+        await runPurchase { try await Purchases.shared.purchase(product: product) }
+    }
+
+    /// Shared purchase flow for both the Package and StoreProduct entry points.
+    private func runPurchase(_ buy: () async throws -> (StoreTransaction?, CustomerInfo, Bool)) async {
         isLoading = true
         purchaseError = nil
         defer { isLoading = false }
@@ -32,7 +44,7 @@ final class PurchaseManager {
         let balanceBefore = creditManager.creditsBalance
 
         do {
-            let (_, customerInfo, _) = try await Purchases.shared.purchase(package: package)
+            let (_, customerInfo, _) = try await buy()
             updateEntitlement(from: customerInfo)
             await creditManager.fetchBalance() // D-19: refresh post-purchase
             // RC webhook arrives asynchronously — poll until credits land (up to ~10s).

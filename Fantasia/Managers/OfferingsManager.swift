@@ -14,6 +14,9 @@ import RevenueCat
 @MainActor
 final class OfferingsManager {
     private(set) var packages: [Package] = []
+    /// Products fetched directly (not via any offering) as a fallback — keyed by productIdentifier.
+    /// Populated by `refreshIfNeeded(ensuring:)` for required IDs missing from every offering.
+    private(set) var standaloneProducts: [String: StoreProduct] = [:]
     private(set) var isRefreshing = false
 
     // Only hit the network this often in the background — reopening the top-up/
@@ -43,15 +46,31 @@ final class OfferingsManager {
         packages.first { $0.storeProduct.productIdentifier == productId }
     }
 
+    /// A directly-fetched product for `productId`, when it isn't available through any offering.
+    func standaloneProduct(for productId: String) -> StoreProduct? {
+        standaloneProducts[productId]
+    }
+
+    /// True once we have a purchasable StoreProduct for `productId` from any source.
+    func hasProduct(for productId: String) -> Bool {
+        package(for: productId) != nil || standaloneProducts[productId] != nil
+    }
+
     /// Cheap to call from every screen's `.task {}` — only actually reaches the
     /// network if we have nothing in memory yet or the last fetch is stale.
-    func refreshIfNeeded(force: Bool = false) async {
+    ///
+    /// `ensuring:` lists product IDs the caller *must* be able to purchase. If any are
+    /// still missing after loading offerings, they're fetched directly via
+    /// `Purchases.shared.products(_:)`. This is what makes the top-up store resilient to
+    /// RevenueCat setups where the consumable packs aren't attached to an offering at all.
+    func refreshIfNeeded(force: Bool = false, ensuring requiredIds: [String] = []) async {
         if packages.isEmpty, let cached = Purchases.shared.cachedOfferings {
             apply(cached)
         }
 
         let isStale = lastFetchDate.map { Date().timeIntervalSince($0) > Self.refreshInterval } ?? true
-        guard force || isStale else { return }
+        let missingRequired = requiredIds.contains { !hasProduct(for: $0) }
+        guard force || isStale || missingRequired else { return }
         guard !isRefreshing else { return }
 
         isRefreshing = true
@@ -61,17 +80,49 @@ final class OfferingsManager {
             apply(offerings)
             lastFetchDate = Date()
         }
+
+        // Fallback: fetch any still-missing required products directly from StoreKit/RC.
+        let stillMissing = requiredIds.filter { !hasProduct(for: $0) }
+        if !stillMissing.isEmpty {
+            let fetched = await Purchases.shared.products(stillMissing)
+            for product in fetched {
+                standaloneProducts[product.productIdentifier] = product
+            }
+            persistPrices(fromProducts: fetched)
+        }
     }
 
     private func apply(_ offerings: Offerings) {
-        guard let available = offerings.current?.availablePackages, !available.isEmpty else { return }
-        packages = available
-        persistPrices(from: available)
+        // Aggregate packages across ALL offerings, not just `current`.
+        //
+        // RevenueCat allows only ONE offering to be `current`. Our subscription paywall
+        // is the current offering, while the consumable top-up packs (com.fantasiaai.topup_*)
+        // live in a SEPARATE offering. Reading only `offerings.current` silently dropped every
+        // top-up package, so CreditStoreView always fell through to "Couldn't load packages"
+        // even online — while PaywallView worked because subscriptions are in `current`.
+        //
+        // Dedupe by productIdentifier (a product can appear in more than one offering).
+        // `current` is visited first so its packages win any tie — irrelevant to lookups by
+        // id, but keeps ordering stable.
+        var seen = Set<String>()
+        var collected: [Package] = []
+        let orderedOfferings = [offerings.current].compactMap { $0 }
+            + offerings.all.values.filter { $0.identifier != offerings.current?.identifier }
+        for offering in orderedOfferings {
+            for pkg in offering.availablePackages where seen.insert(pkg.storeProduct.productIdentifier).inserted {
+                collected.append(pkg)
+            }
+        }
+
+        guard !collected.isEmpty else { return }
+        packages = collected
+        persistPrices(fromProducts: collected.map { $0.storeProduct })
     }
 
-    private func persistPrices(from packages: [Package]) {
-        for pkg in packages {
-            cachedPrices[pkg.storeProduct.productIdentifier] = pkg.storeProduct.localizedPriceString
+    private func persistPrices(fromProducts products: [StoreProduct]) {
+        guard !products.isEmpty else { return }
+        for product in products {
+            cachedPrices[product.productIdentifier] = product.localizedPriceString
         }
         if let data = try? JSONEncoder().encode(cachedPrices) {
             UserDefaults.standard.set(data, forKey: Self.priceCacheKey)
