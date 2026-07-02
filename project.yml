@@ -68,3 +68,4 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai.tests
         SWIFT_VERSION: 5.9
         IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        GENERATE_INFOPLIST_FILE: YES
