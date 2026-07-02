@@ -1,8 +1,6 @@
 // MainTabView.swift
 // Fantasia
-// Custom tab bar: 5 tabs (Home, Explore, Generate, Library, Profile).
-// Generate is a real tab — tapping the diamond lights it up like any other tab.
-// All tabs share the same custom top bar (hamburger + logo + credit ring).
+// Custom tab bar: Feed (left) + Generate center diamond + Library (right).
 
 import SwiftUI
 
@@ -10,72 +8,76 @@ struct MainTabView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
-    @State private var selectedTab = 2   // open on Generate by default
+    @State private var selectedTab = 1   // open on Generate by default
     @State private var showProfileSheet = false
+    @State private var drawer = DrawerManager()
 
     private let tabBarHeight: CGFloat = 74
+    private let bottomLift: CGFloat = 16
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                NavigationStack { FeedView() }
-                    .tag(0)
-                tabPlaceholder("Explore", icon: "magnifyingglass")
-                    .tag(1)
-                NavigationStack { GenerateView(selectedTab: $selectedTab) }
-                    .tag(2)
-                LibraryView()
-                    .tag(3)
-                profileTab
-                    .tag(4)
-            }
-            .toolbar(.hidden, for: .tabBar)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: tabBarHeight)
-            }
+        GeometryReader { geo in
+            let drawerWidth = geo.size.width * 0.65
 
-            customTabBar
+            ZStack(alignment: .bottom) {
+                TabView(selection: $selectedTab) {
+                    HomeView(onNavigateToGenerate: { selectedTab = 1 })
+                        .safeAreaInset(edge: .top, spacing: 0) { sharedTopBar }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(0)
+                    NavigationStack { GenerateView() }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(1)
+                    LibraryView()
+                        .safeAreaInset(edge: .top, spacing: 0) { sharedTopBar }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(2)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear.frame(height: tabBarHeight + bottomLift)
+                }
+
+                customTabBar
+                    .padding(.bottom, bottomLift)
+
+                Color(red: 0.063, green: 0.059, blue: 0.075)
+                    .frame(height: bottomLift)
+                    .ignoresSafeArea(edges: .bottom)
+            }
+            // Dim overlay
+            .overlay {
+                Color.black.opacity(drawer.isOpen ? 0.5 : 0)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(drawer.isOpen)
+                    .onTapGesture { drawer.close() }
+                    .animation(.easeInOut(duration: 0.22), value: drawer.isOpen)
+            }
+            // Side drawer
+            .overlay(alignment: .leading) {
+                SideDrawerView()
+                    .environment(drawer)
+                    .environment(creditManager)
+                    .environment(authManager)
+                    .frame(width: drawerWidth)
+                    .ignoresSafeArea()
+                    .offset(x: drawer.isOpen ? 0 : -drawerWidth)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: drawer.isOpen)
+            }
         }
         .ignoresSafeArea(edges: .bottom)
+        .environment(drawer)
         .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
-            selectedTab = 2
+            selectedTab = 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
+            selectedTab = 1
         }
         .sheet(isPresented: $showProfileSheet) {
             ProfileCreditSheet(isPresented: $showProfileSheet)
                 .environment(creditManager)
                 .environment(authManager)
-        }
-    }
-
-    // MARK: - Profile tab
-
-    private var profileTab: some View {
-        ZStack {
-            Color(red: 0.051, green: 0.047, blue: 0.067).ignoresSafeArea()
-            RadialGradient(
-                colors: [Color(red: 0.55, green: 0.35, blue: 1.0).opacity(0.13), .clear],
-                center: .init(x: 0.1, y: 0.0),
-                startRadius: 0, endRadius: 340
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                sharedTopBar
-                Spacer()
-                Button {
-                    try? authManager.signOut()
-                } label: {
-                    Text("Sign Out")
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
-                }
-                .padding(.horizontal, 32)
-                Spacer()
-            }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.hidden)
         }
     }
 
@@ -83,7 +85,7 @@ struct MainTabView: View {
 
     private var sharedTopBar: some View {
         HStack(alignment: .center, spacing: 11) {
-            Button { } label: {
+            Button { drawer.open() } label: {
                 VStack(spacing: 5) {
                     Rectangle().frame(width: 22, height: 2)
                     Rectangle().frame(width: 22, height: 2)
@@ -108,103 +110,92 @@ struct MainTabView: View {
             Spacer()
 
             Button { showProfileSheet = true } label: {
-                CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 36)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
+                HStack(spacing: 12) {
+                    Text("\(creditManager.creditsBalance)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .contentTransition(.numericText())
+                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+                }
+                .frame(height: 44)
+                .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
         }
         .padding(.horizontal, 18)
         .padding(.top, 2)
         .padding(.bottom, 10)
-    }
-
-    // MARK: - Generic tab placeholder (Home / Explore / Library / Profile)
-
-    @ViewBuilder
-    private func tabPlaceholder(_ title: String, icon: String) -> some View {
-        ZStack {
-            Color(red: 0.051, green: 0.047, blue: 0.067).ignoresSafeArea()
-            RadialGradient(
-                colors: [Color(red: 0.55, green: 0.35, blue: 1.0).opacity(0.13), .clear],
-                center: .init(x: 0.1, y: 0.0),
-                startRadius: 0, endRadius: 340
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                sharedTopBar
-                Spacer()
-                VStack(spacing: 12) {
-                    Image(systemName: icon)
-                        .font(.system(size: 36, weight: .light))
-                        .foregroundStyle(.tertiary)
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-            }
-        }
+        .background(Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea(edges: .top))
     }
 
     // MARK: - Custom tab bar
 
     private var customTabBar: some View {
-        ZStack(alignment: .top) {
-            Rectangle()
-                .fill(Color(red: 0.063, green: 0.059, blue: 0.075).opacity(0.9))
-                .background(.regularMaterial)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+        GeometryReader { geo in
+            let third = geo.size.width / 3
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(Color(red: 0.063, green: 0.059, blue: 0.075).opacity(0.9))
+                    .background(.regularMaterial)
+                    .frame(height: tabBarHeight)
+
+                HStack(spacing: 0) {
+                    tabButton(0, "Home", "house").frame(width: third)
+                    Color.clear.frame(width: third)
+                    tabButton(2, "Library", "square.grid.2x2").frame(width: third)
                 }
-                .ignoresSafeArea(edges: .bottom)
                 .frame(height: tabBarHeight)
 
-            HStack(spacing: 0) {
-                tabButton(0, "Home",    "house")
-                tabButton(1, "Explore", "magnifyingglass")
-                Color.clear.frame(width: 64)
-                tabButton(3, "Library", "square.grid.2x2")
-                tabButton(4, "Profile", "person.fill")
-            }
-            .frame(height: tabBarHeight)
-
-            VStack {
-                Spacer()
-                Text("Generate")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(selectedTab == 2 ? .white : Color.white.opacity(0.38))
-                    .padding(.bottom, 7)
-            }
-            .frame(height: tabBarHeight)
-
-            HStack {
-                Spacer()
-                Button { selectedTab = 2 } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 13)
-                            .fill(LinearGradient(
-                                colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
-                                         Color(red: 0.416, green: 0.561, blue: 0.878)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 42, height: 42)
-                            .overlay(RoundedRectangle(cornerRadius: 13)
-                                .stroke(Color.white.opacity(0.25), lineWidth: 1.5))
-                            .shadow(color: Color(red: 0.47, green: 0.39, blue: 0.90).opacity(0.45), radius: 8, x: 0, y: 4)
-                            .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
-                            .rotationEffect(.degrees(45))
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 54, height: 54)
+                // Dividers at exact 1/3 and 2/3 of the bar width
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: third)
+                    Rectangle()
+                        .fill(Color.white.opacity(0.38))
+                        .frame(width: 0.5, height: 36)
+                    Spacer()
+                    Rectangle()
+                        .fill(Color.white.opacity(0.38))
+                        .frame(width: 0.5, height: 36)
+                    Color.clear.frame(width: third)
                 }
-                .buttonStyle(.plain)
-                Spacer()
+                .frame(height: tabBarHeight)
+
+                VStack {
+                    Spacer()
+                    Text("Generate")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(selectedTab == 1 ? .white : Color.white.opacity(0.38))
+                        .padding(.bottom, 7)
+                }
+                .frame(height: tabBarHeight)
+
+                HStack {
+                    Spacer()
+                    Button { selectedTab = 1 } label: {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 13)
+                                .fill(LinearGradient(
+                                    colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
+                                             Color(red: 0.416, green: 0.561, blue: 0.878)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 42, height: 42)
+                                .overlay(RoundedRectangle(cornerRadius: 13)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 1.5))
+                                .shadow(color: Color(red: 0.47, green: 0.39, blue: 0.90).opacity(0.45), radius: 8, x: 0, y: 4)
+                                .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
+                                .rotationEffect(.degrees(45))
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 54, height: 54)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .offset(y: -14)
             }
-            .offset(y: -14)
         }
         .frame(height: tabBarHeight)
     }

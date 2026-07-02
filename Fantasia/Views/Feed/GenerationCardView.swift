@@ -17,6 +17,8 @@ struct GenerationCardView: View {
     var onTapDetail: () -> Void      // tap prompt text → detail sheet (D-29)
     var onRemix: () -> Void          // D-35
     var onRegenerate: () -> Void     // D-36
+    var onReference: () -> Void      // use this generation's output as a reference input
+    var onNameAsReference: () -> Void  // long-press → promote this output into the permanent reference library
     var onDelete: () -> Void         // D-37
 
     @State private var animatedProgress: Double = 0
@@ -25,6 +27,8 @@ struct GenerationCardView: View {
     @State private var showDeleteAlert = false
     @State private var thumbnail: UIImage? = nil
     @State private var showPlayer = false
+    @State private var revealCompleted = false    // gates media reveal after fill-to-100 animation
+    @State private var cachedImage: UIImage? = nil  // for image generations
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
     private var isActive: Bool { item.status == .pending || item.status == .processing }
@@ -40,6 +44,7 @@ struct GenerationCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -49,42 +54,19 @@ struct GenerationCardView: View {
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 14)
-
-            // Circular progress (shown only for active jobs)
-            if isActive {
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.1), lineWidth: 3)
-                        Circle()
-                            .trim(from: 0, to: animatedProgress)
-                            .stroke(accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear(duration: 0.4), value: animatedProgress)
-                    }
-                    .frame(width: 44, height: 44)
-
-                    Text("\(Int(animatedProgress * 100))%")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-
-                    if showDelayMessage {
-                        Text("Taking a bit longer than expected...")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                .contextMenu {
+                    if item.status == .completed {
+                        Button("Name as reference", systemImage: "tag") { onNameAsReference() }
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-            }
+
 
             // Action buttons (D-09: always visible; disabled/greyed while active)
-            HStack(spacing: 0) {
-                actionButton("arrow.2.squarepath", "Remix", action: onRemix)
-                actionButton("arrow.clockwise", "Regen", action: onRegenerate)
-                actionButton("trash", "Delete") {
-                    showDeleteAlert = true     // D-37: confirmation before delete
-                }
+            HStack(spacing: 8) {
+                actionButton("arrow.2.squarepath", "Remix", isDestructive: false, action: onRemix)
+                actionButton("arrow.clockwise", "Regen", isDestructive: false, action: onRegenerate)
+                actionButton("paperclip", "Reference", isDestructive: false, action: onReference)
+                actionButton("trash", "Delete", isDestructive: true) { showDeleteAlert = true }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -98,12 +80,12 @@ struct GenerationCardView: View {
             if item.isImage {
                 FullScreenImageView(item: item)
             } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
-                FullScreenVideoPlayerView(videoUrl: url)
+                FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
             }
         }
 
         // Delete confirmation alert (D-37)
-        .alert("Delete this video?", isPresented: $showDeleteAlert) {
+        .alert(item.isImage ? "Delete this image?" : "Delete this video?", isPresented: $showDeleteAlert) {
             Button("Delete", role: .destructive) { onDelete() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -113,14 +95,34 @@ struct GenerationCardView: View {
         // Progress jitter lifecycle (D-10, D-11) — Task.sleep, not Timer
         .onAppear {
             loadThumbnail()
-            if isActive { startProgressJitter() }
+            loadCachedImage()
+            if isActive {
+                startProgressJitter()
+            } else if item.status == .completed {
+                revealCompleted = true   // already done — skip animation
+            }
         }
         .onDisappear { jitterTask?.cancel() }
         .onChange(of: item.status) { _, newStatus in
-            if newStatus != .pending && newStatus != .processing {
-                jitterTask?.cancel()
-                jitterTask = nil
-                animatedProgress = newStatus == .completed ? 1.0 : animatedProgress
+            jitterTask?.cancel()
+            jitterTask = nil
+            if newStatus == .completed {
+                Task {
+                    // Fast fill races toward 1.0 while downloading — exponential decay so it
+                    // accelerates from current position and naturally slows near the top
+                    let fillTask = Task {
+                        while !Task.isCancelled && animatedProgress < 0.985 {
+                            try? await Task.sleep(for: .seconds(0.1))
+                            let gap = 1.0 - animatedProgress
+                            animatedProgress = min(animatedProgress + gap * 0.28, 0.985)
+                        }
+                    }
+                    await downloadMedia()     // 100% = image is in memory
+                    fillTask.cancel()
+                    animatedProgress = 1.0
+                    try? await Task.sleep(for: .seconds(0.45))
+                    revealCompleted = true
+                }
             }
         }
     }
@@ -130,30 +132,46 @@ struct GenerationCardView: View {
     private var mediaContent: some View {
         switch item.status {
         case .pending, .processing:
-            // D-07: shimmer pulse animation
-            shimmerView
-
-        case .completed:
-            if item.isImage {
-                // Images: AsyncImage thumbnail, no play icon overlay
-                if let urlString = item.completedMediaUrl, let url = URL(string: urlString) {
-                    Button { showPlayer = true } label: {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFill()
-                            case .empty:
-                                shimmerView
-                            default:
-                                Color.white.opacity(0.03)
-                            }
-                        }
-                        .clipped()
+            ZStack {
+                shimmerView
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.15), lineWidth: 3)
+                        Circle()
+                            .trim(from: 0, to: animatedProgress)
+                            .stroke(accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 0.4), value: animatedProgress)
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    shimmerView
+                    .frame(width: 44, height: 44)
+                    Text("\(Int(animatedProgress * 100))%")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                    if showDelayMessage {
+                        Text("Taking a bit longer...")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+
+        case .completed where revealCompleted:
+            if item.isImage {
+                // Images: cached UIImage loader (AsyncImage skipped — presigned URLs change per-fetch)
+                Button { showPlayer = true } label: {
+                    Group {
+                        if let img = cachedImage {
+                            Image(uiImage: img)
+                                .resizable().scaledToFill()
+                                .transition(.opacity.animation(.easeIn(duration: 0.3)))
+                        } else {
+                            shimmerView
+                        }
+                    }
+                    .clipped()
+                }
+                .buttonStyle(.plain)
             } else if let thumb = thumbnail {
                 // D-16: static thumbnail + play icon overlay
                 Button { showPlayer = true } label: {
@@ -177,7 +195,7 @@ struct GenerationCardView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28))
                     .foregroundStyle(.orange)
-                Text("Your prompt may not adhere to our community guidelines. Please try again.")
+                Text(failureMessage(for: item.failureReason))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -209,17 +227,46 @@ struct GenerationCardView: View {
         }
     }
 
+    // MARK: - Failure Message Helper
+    private func failureMessage(for reason: String?) -> String {
+        switch reason {
+        case "content_policy":
+            return "Your prompt may not adhere to our community guidelines. Your credits have been refunded."
+        case "copyright":
+            return "This generation couldn't be completed due to potential copyright reasons. Your credits have been refunded."
+        case "provider_error":
+            return "The video service hit a temporary problem. Your credits have been refunded — please try again."
+        default:
+            return "An error has occurred. Your credits have been refunded."
+        }
+    }
+
     // MARK: - Action Button Helper
-    private func actionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
+    private func actionButton(_ icon: String, _ label: String, isDestructive: Bool, action: @escaping () -> Void) -> some View {
+        let fg: Color = isActive
+            ? Color.white.opacity(0.2)
+            : isDestructive ? Color.red.opacity(0.85) : Color.white.opacity(0.8)
+        let bg: Color = isActive
+            ? Color.white.opacity(0.04)
+            : isDestructive ? Color.red.opacity(0.1) : Color.white.opacity(0.08)
+        let border: Color = isActive
+            ? Color.white.opacity(0.06)
+            : isDestructive ? Color.red.opacity(0.25) : Color.white.opacity(0.13)
+
+        return Button(action: action) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: 12, weight: .medium))
                 Text(label)
-                    .font(.caption2)
+                    .font(.system(size: 12, weight: .medium))
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .foregroundStyle(isActive ? Color.white.opacity(0.25) : Color.white.opacity(0.7))
+            .foregroundStyle(fg)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(bg, in: Capsule())
+            .overlay(Capsule().stroke(border, lineWidth: 0.5))
+            .contentShape(Rectangle())
+            .frame(minHeight: 44)
         }
         .disabled(isActive)
         .buttonStyle(.plain)
@@ -228,12 +275,12 @@ struct GenerationCardView: View {
     // MARK: - Progress Jitter (D-10, D-11, D-12)
     // CLAUDE.md: Swift Concurrency — NO Timer allowed
     private func startProgressJitter() {
-        // Seed from elapsed time (D-10: elapsed / expected_duration)
-        let expectedDuration: Double = item.model.contains("mini") ? 75 : 45
+        // Seed from elapsed time, capped at 0.80 so the jitter has room to breathe
+        let expectedDuration: Double = item.model.contains("grok") ? 20 : (item.model.contains("mini") ? 75 : 45)
         let elapsed = Date().timeIntervalSince(item.createdAt)
-        animatedProgress = min(elapsed / expectedDuration, 0.99)
+        animatedProgress = min(elapsed / expectedDuration * 0.85, 0.80)
 
-        var timeAt99: Date? = nil
+        var timeStuckHigh: Date? = nil
 
         jitterTask = Task {
             while !Task.isCancelled && isActive {
@@ -243,18 +290,17 @@ struct GenerationCardView: View {
 
                 guard !Task.isCancelled else { break }
 
-                let p = animatedProgress
-                let jump: Double
-                if p < 0.40 { jump = Double.random(in: 0.03...0.06) }
-                else if p < 0.70 { jump = Double.random(in: 0.01...0.03) }
-                else { jump = Double.random(in: 0.005...0.015) }
+                // Asymptotic decay: each tick advances a fraction of the remaining gap to 0.99.
+                // Near 0% the increment is large; near 99% it becomes imperceptibly small —
+                // so the bar keeps moving without ever visually freezing at the ceiling.
+                let gap = 0.99 - animatedProgress
+                let increment = gap * Double.random(in: 0.04...0.09)
+                animatedProgress = min(animatedProgress + increment, 0.99)
 
-                animatedProgress = min(p + jump, 0.99)  // hard cap at 99%
-
-                // D-12: after 15s at 99%, show delay message
-                if animatedProgress >= 0.99 {
-                    if timeAt99 == nil { timeAt99 = Date() }
-                    if let since = timeAt99, Date().timeIntervalSince(since) > 15 {
+                // D-12: show delay message after 20s looking "stuck" near the ceiling
+                if animatedProgress >= 0.95 {
+                    if timeStuckHigh == nil { timeStuckHigh = Date() }
+                    if let since = timeStuckHigh, Date().timeIntervalSince(since) > 20 {
                         showDelayMessage = true
                     }
                 }
@@ -262,28 +308,85 @@ struct GenerationCardView: View {
         }
     }
 
-    // MARK: - Thumbnail (first frame from video URL)
+    // MARK: - Media Loading
+
+    // Awaitable download — used by onChange so 100% only fires when image is in memory
+    // Perf: card grid cells decode+cache a downscaled copy under a distinct "-grid" cache key
+    // (matches the existing 400x400 cap already used for video thumbnails below) instead of the
+    // full-resolution image — GenerationDetailSheet/FullScreenImageView cache the full image
+    // separately under the plain item.id key, so they're unaffected by this.
+    private func downloadMedia() async {
+        if item.isImage {
+            guard let urlString = item.completedMediaUrl, let url = URL(string: urlString),
+                  cachedImage == nil else { return }
+            let gridKey = item.id + "-grid"
+            if let cached = await ThumbnailCache.shared.image(for: gridKey) { cachedImage = cached; return }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return }
+            let thumb = image.preparingThumbnail(of: CGSize(width: 400, height: 400)) ?? image
+            ThumbnailCache.shared[gridKey] = thumb
+            cachedImage = thumb
+        } else {
+            guard let urlString = item.videoUrl, let url = URL(string: urlString) else { return }
+            if thumbnail == nil {
+                if let cached = await ThumbnailCache.shared.image(for: item.id) {
+                    thumbnail = cached
+                } else {
+                    let asset = AVURLAsset(url: url)
+                    let gen = AVAssetImageGenerator(asset: asset)
+                    gen.appliesPreferredTrackTransform = true
+                    gen.maximumSize = CGSize(width: 400, height: 400)
+                    if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
+                        let image = UIImage(cgImage: cgImg)
+                        ThumbnailCache.shared[item.id] = image
+                        thumbnail = image
+                    }
+                }
+            }
+            // Fully download the video before revealing "tap to play" — so playback is
+            // instant with zero buffering the moment the card flips to its completed state.
+            _ = try? await VideoCache.shared.ensureCached(id: item.id, remoteURL: url)
+        }
+    }
+
     private func loadThumbnail() {
-        guard !item.isImage, item.status == .completed, let urlString = item.videoUrl,
-              let url = URL(string: urlString), thumbnail == nil else { return }
+        guard !item.isImage, item.status == .completed,
+              let urlString = item.videoUrl, let url = URL(string: urlString),
+              thumbnail == nil else { return }
         Task {
+            if let cached = await ThumbnailCache.shared.image(for: item.id) { thumbnail = cached; return }
             let asset = AVURLAsset(url: url)
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
             gen.maximumSize = CGSize(width: 400, height: 400)
             if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
-                thumbnail = UIImage(cgImage: cgImg)
+                let image = UIImage(cgImage: cgImg)
+                ThumbnailCache.shared[item.id] = image
+                thumbnail = image
             }
         }
     }
 
-    // MARK: - Aspect Ratio Helper (D-06)
-    // Images use width/height; videos use the requested aspectRatio string.
-    private var cardAspectRatio: CGFloat {
-        if item.isImage, let w = item.params.width, let h = item.params.height, h != 0 {
-            return CGFloat(w) / CGFloat(h)
+    private func loadCachedImage() {
+        guard item.isImage, item.status == .completed,
+              let urlString = item.completedMediaUrl, let url = URL(string: urlString),
+              cachedImage == nil else { return }
+        let gridKey = item.id + "-grid"
+        Task {
+            if let cached = await ThumbnailCache.shared.image(for: gridKey) { cachedImage = cached; return }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return }
+            let thumb = image.preparingThumbnail(of: CGSize(width: 400, height: 400)) ?? image
+            ThumbnailCache.shared[gridKey] = thumb
+            cachedImage = thumb
         }
-        return aspectRatioValue(item.params.aspectRatio ?? "16:9")
+    }
+
+    // MARK: - Aspect Ratio Helper (D-06)
+    private var cardAspectRatio: CGFloat {
+        let raw = aspectRatioValue(item.params.aspectRatio ?? (item.isImage ? "1:1" : "16:9"))
+        // Clamp between 4:5 (portrait cap) and 16:9 (landscape cap) — matches Instagram/Twitter feed behaviour
+        return max(min(raw, 16.0 / 9.0), 4.0 / 5.0)
     }
 
     private func aspectRatioValue(_ ratio: String) -> CGFloat {
@@ -292,6 +395,7 @@ struct GenerationCardView: View {
         case "9:16": return 9.0 / 16.0
         case "1:1":  return 1.0
         case "4:3":  return 4.0 / 3.0
+        case "3:4":  return 3.0 / 4.0
         default:     return 16.0 / 9.0
         }
     }

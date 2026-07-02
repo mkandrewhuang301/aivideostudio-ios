@@ -27,10 +27,26 @@ final class PurchaseManager {
         purchaseError = nil
         defer { isLoading = false }
 
+        // Captured before the purchase so the post-purchase poll below waits for the balance
+        // to actually increase — not just for it to become nonzero (see fix note below).
+        let balanceBefore = creditManager.creditsBalance
+
         do {
             let (_, customerInfo, _) = try await Purchases.shared.purchase(package: package)
             updateEntitlement(from: customerInfo)
             await creditManager.fetchBalance() // D-19: refresh post-purchase
+            // RC webhook arrives asynchronously — poll until credits land (up to ~10s).
+            // Perf/correctness fix: polling on `creditsBalance == 0` meant a user who already
+            // had a nonzero balance before this purchase (the common case — anyone topping up
+            // or resubscribing) exited immediately without ever waiting for the webhook, showing
+            // the stale pre-purchase balance. Polling on "> balanceBefore" waits for an actual
+            // increase regardless of what the balance was before the purchase.
+            var retries = 5
+            while creditManager.creditsBalance <= balanceBefore && retries > 0 {
+                try? await Task.sleep(for: .seconds(2))
+                await creditManager.fetchBalance()
+                retries -= 1
+            }
         } catch ErrorCode.purchaseCancelledError {
             // User cancelled — silent, not an error (UI-SPEC interaction contract)
         } catch ErrorCode.paymentPendingError {
@@ -70,8 +86,8 @@ final class PurchaseManager {
             creditManager.entitlementLevel = .pro
         } else if customerInfo.entitlements["basic"]?.isActive == true {
             creditManager.entitlementLevel = .basic
-        } else {
-            creditManager.entitlementLevel = .none
         }
+        // When RC has no active entitlement, defer to the server value from /api/me
+        // rather than overriding — the server is the source of truth via the RC webhook.
     }
 }

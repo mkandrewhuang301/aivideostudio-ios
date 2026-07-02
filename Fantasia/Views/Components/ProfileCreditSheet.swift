@@ -1,7 +1,6 @@
 // ProfileCreditSheet.swift
 // Fantasia
-// Bottom sheet presented on CircularCreditIndicator tap (D-18).
-// Shows: username, dot grid (20 dots), Top Up Credits, Manage Subscription (PAY-06), View Profile.
+// Profile bottom sheet: identity, credits, actions, account management.
 
 import SwiftUI
 import StoreKit
@@ -9,19 +8,30 @@ import StoreKit
 struct ProfileCreditSheet: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
-    @State private var showTopUpSheet = false
     @Binding var isPresented: Bool
+
+    @State private var showCreditStore = false
+    @State private var showSignOutConfirm = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
-    private var username: String {
+    private var displayName: String {
         authManager.currentUser?.displayName
-            ?? authManager.currentUser?.email
+            ?? authManager.currentUser?.email?.components(separatedBy: "@").first
             ?? "Account"
     }
 
+    private var tierLabel: String {
+        switch creditManager.entitlementLevel {
+        case .pro:      return "Pro"
+        case .basic:    return "Basic"
+        case .creator:  return "Creator"
+        case .none:     return "Free"
+        }
+    }
+
     private var filledDots: Int {
-        Int((creditManager.fillRatio * 20).rounded())
+        Int((creditManager.fillRatio * 22).rounded())
     }
 
     var body: some View {
@@ -30,124 +40,222 @@ struct ProfileCreditSheet: View {
             Capsule()
                 .fill(Color.secondary.opacity(0.4))
                 .frame(width: 36, height: 4)
-                .padding(.top, 16)
+                .padding(.top, 10)
                 .padding(.bottom, 16)
 
-            VStack(spacing: 0) {
-                // Username row
-                HStack {
-                    Text(username)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 28)
-                        .accessibilityHidden(true)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    identityBlock
+                    creditsBlock
+                    menuSection
+                    footer
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
-
-                // Divider
-                Rectangle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: 1)
-                    .padding(.horizontal, 24)
-
-                VStack(spacing: 8) {
-                    // Credits label row
-                    HStack {
-                        Text("Credits remaining")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(creditManager.creditsBalance)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-
-                    // Dot grid (20 dots, 10-column)
-                    // UI-SPEC Dot Grid: accessibilityLabel on grid, individual dots hidden
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 10),
-                        spacing: 4
-                    ) {
-                        ForEach(0..<20, id: \.self) { index in
-                            Circle()
-                                .fill(index < filledDots ? accent : Color.white.opacity(0.12))
-                                .frame(width: 10, height: 10)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Credit balance: \(filledDots) of 20 dots filled")
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-
-                // Action buttons
-                VStack(spacing: 8) {
-                    // Top Up Credits
-                    Button {
-                        isPresented = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            showTopUpSheet = true
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.body)
-                                .foregroundStyle(.white)
-                            Text("Top Up Credits")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.white)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(accent, in: RoundedRectangle(cornerRadius: 12))
-                    }
-
-                    // Manage Subscription (PAY-06)
-                    Button {
-                        if let windowScene = UIApplication.shared.connectedScenes
-                            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
-                            Task { try? await AppStore.showManageSubscriptions(in: windowScene) }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "creditcard")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                            Text("Manage Subscription")
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                        }
-                    }
-
-                    // View Profile (placeholder — Phase 6)
-                    Button {
-                        isPresented = false
-                    } label: {
-                        Text("View Profile")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 32)
-                .padding(.bottom, 48)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 40)
             }
         }
-        .sheet(isPresented: $showTopUpSheet) {
-            TopUpSheet()
+        .frame(maxHeight: .infinity, alignment: .top)
+        .fullScreenCover(isPresented: $showCreditStore) {
+            CreditStoreView(isPresented: $showCreditStore)
                 .environment(creditManager)
         }
     }
+
+    // MARK: - Identity
+
+    private var identityBlock: some View {
+        HStack(spacing: 14) {
+            CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(displayName)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(tierLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Credits
+
+    private var creditsBlock: some View {
+        VStack(spacing: 14) {
+            HStack {
+                Text("Credits")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(creditManager.creditsBalance) remaining")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 22),
+                spacing: 0
+            ) {
+                ForEach(0..<22, id: \.self) { index in
+                    Circle()
+                        .fill(index < filledDots ? accent : Color.white.opacity(0.1))
+                        .frame(height: 6)
+                        .accessibilityHidden(true)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Credit balance: \(filledDots) of 22")
+
+            Button {
+                showCreditStore = true
+            } label: {
+                Text("Top Up Credits")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .foregroundStyle(.white)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.65, green: 0.45, blue: 1.0),
+                                     Color(red: 0.40, green: 0.35, blue: 0.95)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 13)
+                    )
+                    .shadow(color: accent.opacity(0.4), radius: 10, x: 0, y: 4)
+            }
+            .padding(.top, 6)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+    }
+
+    // MARK: - Menu section
+
+    private var menuSection: some View {
+        VStack(spacing: 0) {
+            // Primary actions card
+            VStack(spacing: 0) {
+                menuRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription") {
+                    if let windowScene = UIApplication.shared.connectedScenes
+                        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+                        Task { try? await AppStore.showManageSubscriptions(in: windowScene) }
+                    }
+                }
+
+                rowDivider
+
+                menuRow(icon: "star.fill", iconColor: Color(red: 1.0, green: 0.8, blue: 0.15), label: "Rate Fantasia") {
+                    if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+                        SKStoreReviewController.requestReview(in: scene)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+
+            // Dashed separator
+            GeometryReader { geo in
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 0.5))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: 0.5))
+                }
+                .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            }
+            .frame(height: 1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 10)
+
+            // Sign out card
+            VStack(spacing: 0) {
+                Button { showSignOutConfirm = true } label: {
+                    HStack(spacing: 12) {
+                        iconContainer(systemName: "rectangle.portrait.and.arrow.right", color: .red.opacity(0.9))
+                        Text("Sign Out")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.red)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 52)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.red.opacity(0.15), lineWidth: 0.5))
+            .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
+                Button("Sign Out", role: .destructive) { try? authManager.signOut() }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(spacing: 8) {
+            Text("Fantasia · v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            HStack(spacing: 20) {
+                Link(destination: URL(string: "https://fantasiaai.app/privacy")!) {
+                    Text("Privacy Policy")
+                        .underline()
+                }
+                Link(destination: URL(string: "https://fantasiaai.app/terms")!) {
+                    Text("Terms of Service")
+                        .underline()
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(Color.white.opacity(0.3))
+            .tint(Color.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 4)
+    }
+
+    // MARK: - Row helpers
+
+    private func menuRow(icon: String, iconColor: Color, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                iconContainer(systemName: icon, color: iconColor)
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.25))
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 52)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func iconContainer(systemName: String, color: Color) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: 32, height: 32)
+            .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.07))
+            .frame(height: 0.5)
+            .padding(.leading, 42)
+    }
+
 }

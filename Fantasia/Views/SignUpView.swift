@@ -85,6 +85,8 @@ struct SignUpView: View {
                 FillingVideoPlayerView(player: videoViewModel.player)
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
+                    .opacity(videoViewModel.isReady ? 1 : 0)
+                    .animation(.easeIn(duration: 0.4), value: videoViewModel.isReady)
                     .onDisappear {
                         videoViewModel.player.pause()
                     }

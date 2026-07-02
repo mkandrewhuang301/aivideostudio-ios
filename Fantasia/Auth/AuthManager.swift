@@ -61,6 +61,11 @@ final class AuthManager {
         // The listener fires automatically and sets currentUser = nil
     }
 
+    func deleteAccount() async throws {
+        try await Auth.auth().currentUser?.delete()
+        // The listener fires automatically and sets currentUser = nil
+    }
+
     // MARK: - Sign in with Google
 
     func signInWithGoogle() async throws {
@@ -85,18 +90,15 @@ final class AuthManager {
         return nonce
     }
 
-    func signInWithApple(credential appleCredential: ASAuthorizationAppleIDCredential) async throws {
-        guard let nonce = currentNonce else {
-            throw AuthManagerError.missingNonce
-        }
+    func signInWithApple(credential appleCredential: ASAuthorizationAppleIDCredential, rawNonce: String) async throws {
         guard let idTokenData = appleCredential.identityToken,
               let idTokenString = String(data: idTokenData, encoding: .utf8) else {
             throw AuthManagerError.missingAppleIdToken
         }
-        let firebaseCredential = OAuthProvider.credential(
-            providerID: AuthProviderID.apple,
-            idToken: idTokenString,
-            rawNonce: nonce
+        let firebaseCredential = OAuthProvider.appleCredential(
+            withIDToken: idTokenString,
+            rawNonce: rawNonce,
+            fullName: appleCredential.fullName
         )
         _ = try await Auth.auth().signIn(with: firebaseCredential)
         currentNonce = nil
@@ -107,10 +109,19 @@ final class AuthManager {
 
     private static func rootViewController() async -> UIViewController? {
         await MainActor.run {
-            UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first?.windows
-                .first(where: \.isKeyWindow)?.rootViewController
+            guard let root = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?
+                .rootViewController else {
+                return nil
+            }
+            // Walk the presentation chain so Google Sign-In presents from the visible VC.
+            var top = root
+            while let presented = top.presentedViewController {
+                top = presented
+            }
+            return top
         }
     }
 

@@ -1,10 +1,9 @@
 // OnboardingView.swift
 // Fantasia
-// Container for the 5-screen onboarding flow: video intro + 4 bubble-picker question screens.
-// Screen 0: OnboardingVideoView (keep identical to Phase 3).
-// Screens 1-4: BubblePickerView driven by currentPage.
-// Q4 is conditional on the Q2 answer stored in answers["useCase"].
-// Answers are cached to UserDefaults under "pendingOnboardingAnswers" for 06-06 post-auth persistence.
+// 4-slide feature carousel onboarding.
+// Slide 0: OnboardingVideoView (text-to-cinematic video, existing).
+// Slides 1-3: OnboardingFeatureSlideView — motion transfer, try-on, ads/social.
+// After slide 3: onComplete() → straight into app (deferred sign-in).
 
 import SwiftUI
 
@@ -12,7 +11,29 @@ struct OnboardingView: View {
     var onComplete: () -> Void
 
     @State private var currentPage: Int = 0
-    @State private var answers: [String: Set<String>] = [:]
+
+    private let featureSlides: [OnboardingFeatureSlide] = [
+        .init(
+            videoName: "onboarding-motion-transfer",
+            headline: "Bring any image to life",
+            subtitle: "Upload a photo and transform it into fluid, cinematic motion.",
+            ctaLabel: "Continue →"
+        ),
+        .init(
+            videoName: "onboarding-tryon",
+            headline: "Try on any look instantly",
+            subtitle: "See yourself wearing any outfit, style, or vibe.",
+            ctaLabel: "Continue →"
+        ),
+        .init(
+            videoName: "onboarding-social",
+            headline: "Content that stops the scroll",
+            subtitle: "Cinematic ads, reels, and clips — generated in seconds.",
+            ctaLabel: "Get Started"
+        ),
+    ]
+
+    private let totalPages = 4
 
     private var pageTransition: AnyTransition {
         .asymmetric(
@@ -21,68 +42,31 @@ struct OnboardingView: View {
         )
     }
 
-    private var conditionalQ4: OnboardingQuestion {
-        OnboardingQuestionBank.conditionalQuestion(for: answers["useCase"] ?? [])
-    }
-
     var body: some View {
         ZStack {
             Group {
                 switch currentPage {
                 case 0:
                     OnboardingVideoView(onContinue: { advance() })
-                case 1:
-                    questionScreen(OnboardingQuestionBank.q1)
-                case 2:
-                    questionScreen(OnboardingQuestionBank.q2)
-                case 3:
-                    questionScreen(OnboardingQuestionBank.q3)
                 default:
-                    questionScreen(conditionalQ4)
+                    let slideIndex = currentPage - 1
+                    OnboardingFeatureSlideView(
+                        slide: featureSlides[slideIndex],
+                        pageIndex: currentPage,
+                        totalPages: totalPages,
+                        onContinue: { advance() }
+                    )
                 }
             }
+            .id(currentPage)
             .transition(pageTransition)
         }
         .ignoresSafeArea()
     }
 
-    private func questionScreen(_ question: OnboardingQuestion) -> some View {
-        ZStack {
-            backgroundLayer
-            BubblePickerView(
-                question: question,
-                onNext: { selections in
-                    answers[question.id] = selections
-                    advance()
-                },
-                onSkip: { advance() }
-            )
-        }
-    }
-
-    private var backgroundLayer: some View {
-        ZStack {
-            Color(red: 6.0/255, green: 4.0/255, blue: 14.0/255)
-            Color(red: 6.0/255, green: 4.0/255, blue: 14.0/255).opacity(0.63)
-                .background(.ultraThinMaterial)
-        }
-        .ignoresSafeArea()
-    }
-
-    // Persists answers to UserDefaults so 06-06 can read them back after first sign-in
-    // without changing OnboardingView's onComplete() signature.
-    private func persistAnswersIfComplete() {
-        guard currentPage >= 4 else { return }
-        let encodable = answers.mapValues { Array($0) }
-        if let data = try? JSONEncoder().encode(encodable) {
-            UserDefaults.standard.set(data, forKey: "pendingOnboardingAnswers")
-        }
-    }
-
     private func advance() {
-        persistAnswersIfComplete()
         withAnimation(.easeOut(duration: 0.18)) {
-            if currentPage >= 4 {
+            if currentPage >= totalPages - 1 {
                 onComplete()
             } else {
                 currentPage += 1

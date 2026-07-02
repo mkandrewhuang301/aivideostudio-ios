@@ -6,6 +6,7 @@
 import SwiftUI
 import UserNotifications
 import UIKit
+import GoogleSignIn
 
 @Observable
 @MainActor
@@ -73,6 +74,14 @@ final class FantasiaAppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         print("[FantasiaAppDelegate] Failed to register for remote notifications: \(error)")
+    }
+
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        GIDSignIn.sharedInstance.handle(url)
     }
 }
 

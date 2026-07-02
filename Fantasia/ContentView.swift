@@ -1,14 +1,14 @@
 // ContentView.swift
 // Fantasia
-// 4-state routing (paywall case removed in 06-06; Phase 7 re-introduces enforcement at Generate button):
+// Routing order:
 //   1. Loading (splash)
-//   2. No onboarding completed → OnboardingView
-//   3. Not authenticated → SignInView
-//   3a. Authenticated, email not verified → CheckInboxView (email/password only; Apple/Google skip this)
-//   4. Authenticated → MainTabView
-// D-11: Routing order is fixed. hasCompletedOnboarding checked before auth state.
+//   2. Authenticated + email verified → MainTabView (skip onboarding entirely)
+//   3. Authenticated + email not verified → CheckInboxView (email/password only)
+//   4. Not authenticated + no onboarding → OnboardingView (first launch)
+//   5. Not authenticated + onboarding done → SignInView
 
 import SwiftUI
+import RevenueCat
 
 struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
@@ -37,25 +37,27 @@ struct ContentView: View {
             } else if authManager.isLoading || !minSplashElapsed {
                 // State 1: Loading — show splash until auth state resolves + 2s minimum
                 SplashView()
-            } else if !hasCompletedOnboarding {
-                // State 2: First ever launch — onboarding
-                OnboardingView(onComplete: {
-                    hasCompletedOnboarding = true
-                })
-            } else if authManager.currentUser == nil {
-                // State 3: No auth session — sign in
-                SignInView()
-            } else if let currentUser = authManager.currentUser, !currentUser.isEmailVerified {
-                // State 3a (email/password): Account created but email not yet verified.
-                // Apple and Google auth users always have isEmailVerified = true, so they skip
-                // this state. Without this gate, ContentView would route email-signup users to
-                // MainTabView immediately after createUser(), before they verify. (Rule 2: AUTH-02)
-                CheckInboxView(email: currentUser.email ?? "")
-            } else {
-                // State 4: Authenticated + email verified — main app
-                // NOTE: Paywall enforcement (AUTH-03) moves to Phase 7's Generate button trigger
-                // (creditManager.balance == 0 → fullScreenCover PaywallView per T-06-06-02 accept).
+            } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState {
+                // State 1b: Authenticated but profile/credits haven't loaded yet, and we have no
+                // locally-cached balance to show in the meantime — keep showing splash so
+                // MainTabView never renders the 0-credits/free-tier CreditManager defaults
+                // before the real GET /api/me response lands. Once hydrateFromCache() has
+                // populated state from a previous session (see onChange below), this is skipped
+                // and MainTabView renders immediately with the last-known balance; fetchBalance()
+                // silently corrects it moments later.
+                SplashView()
+            } else if let currentUser = authManager.currentUser, currentUser.isEmailVerified {
+                // State 2: Authenticated + verified — skip onboarding, go straight to app
                 MainTabView()
+            } else if let currentUser = authManager.currentUser, !currentUser.isEmailVerified {
+                // State 3: Email/password sign-up, not yet verified (Apple/Google always skip this)
+                CheckInboxView(email: currentUser.email ?? "")
+            } else if !hasCompletedOnboarding {
+                // State 4: Unauthenticated, first launch — show onboarding before sign-in
+                OnboardingView(onComplete: { hasCompletedOnboarding = true })
+            } else {
+                // State 5: Unauthenticated, onboarding already seen — sign in
+                SignInView()
             }
         }
         .preferredColorScheme(.dark)
@@ -63,8 +65,10 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.35), value: authManager.currentUser == nil)
         .animation(.easeInOut(duration: 0.35), value: authManager.currentUser?.isEmailVerified)
         .animation(.easeInOut(duration: 0.35), value: hasCompletedOnboarding)
+        .animation(.easeInOut(duration: 0.35), value: creditManager.hasLoaded)
+        .animation(.easeInOut(duration: 0.35), value: creditManager.hasCachedState)
         .task {
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .milliseconds(800))
             minSplashElapsed = true
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -74,9 +78,27 @@ struct ContentView: View {
             }
         }
         .onChange(of: authManager.currentUser) { old, new in
-            // Fire push permission + flush cached onboarding answers on first sign-in
-            if old == nil && new != nil {
-                Task { await handleFirstSignIn() }
+            if new == nil {
+                // Signed out — clear stale credit state and reset RC to anonymous user
+                creditManager.reset()
+                Task { try? await Purchases.shared.logOut() }
+            } else if old == nil && new != nil {
+                // Signed in (or cold-launch restore from Keychain — this fires for both).
+                // Hydrate from the last-known cached balance synchronously so State 1b above
+                // can skip the splash immediately; the real fetchBalance() below corrects it.
+                creditManager.hydrateFromCache()
+
+                // Identify RC user with Firebase UID so the webhook app_user_id is resolvable
+                // to a DB user (otherwise credit grants are silently skipped). This is
+                // independent of our own backend, so run it alongside the balance fetch instead
+                // of blocking the splash screen on it first.
+                Task {
+                    async let rcLogin = try? await Purchases.shared.logIn(new!.uid)
+                    async let balance: Void = creditManager.fetchBalance()
+                    _ = await rcLogin
+                    await balance
+                    await handleFirstSignIn()
+                }
             }
         }
     }

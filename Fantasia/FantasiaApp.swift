@@ -9,9 +9,12 @@ import GoogleSignIn
 @main
 struct FantasiaApp: App {
     @UIApplicationDelegateAdaptor(FantasiaAppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var authManager: AuthManager
     @State private var creditManager = CreditManager()
     @State private var generationManager = GenerationManager()
+    @State private var ratesManager = RatesManager()
+    @State private var offeringsManager = OfferingsManager()
 
     init() {
         // UIWindow's default backgroundColor is black. Between the launch-screen snapshot
@@ -31,10 +34,13 @@ struct FantasiaApp: App {
                 .environment(authManager)
                 .environment(creditManager)
                 .environment(generationManager)
+                .environment(ratesManager)
+                .environment(offeringsManager)
                 .task {
                     // Deferred off init() so this runs after the first frame is already on
                     // screen — splash shows instantly, Firebase/RevenueCat set up behind it.
                     // IMPORTANT: FirebaseApp.configure() MUST run before any Auth.auth() call.
+                    Task { await ratesManager.load() }  // public endpoint — fire in parallel with auth setup
                     FirebaseApp.configure()
                     GIDSignIn.sharedInstance.configuration = GIDConfiguration(
                         clientID: FirebaseApp.app()?.options.clientID ?? ""
@@ -43,16 +49,30 @@ struct FantasiaApp: App {
 
                     // Configure RevenueCat AFTER Firebase so Firebase UID is potentially available.
                     // Configured with nil appUserID here (anonymous user) per RESEARCH.md Pitfall 2.
-                    // AuthManager calls Purchases.shared.logIn(uid) when currentUser is set.
+                    // ContentView.onChange(currentUser) calls Purchases.shared.logIn(uid) on sign-in.
                     Purchases.logLevel = AppConfig.nodeEnv == "production" ? .error : .debug
                     Purchases.configure(
                         withAPIKey: AppConfig.revenueCatApiKey,
                         appUserID: nil // Set to Firebase UID in AuthManager after auth state restores
                     )
+                    Task { await offeringsManager.refreshIfNeeded() } // throttled — see OfferingsManager
 
                     // Listen for RevenueCat entitlement updates in real time (RESEARCH.md Pattern 5)
                     let purchaseManager = PurchaseManager(creditManager: creditManager)
                     await purchaseManager.listenForEntitlementUpdates()
+                }
+                .onOpenURL { url in
+                    // Required for Google Sign-In OAuth redirect back into the app.
+                    GIDSignIn.sharedInstance.handle(url)
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        Task { await ratesManager.loadIfNeeded() } // no-op unless stale (>1h)
+                        Task { await offeringsManager.refreshIfNeeded() } // no-op unless stale
+                        generationManager.resumePollingIfNeeded() // no-op unless a job is active
+                    } else if phase == .background {
+                        generationManager.stopPolling()
+                    }
                 }
         }
     }

@@ -21,7 +21,7 @@ actor APIClient {
         let (data, response) = try await session.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         return try JSONDecoder().decode(RatesResponse.self, from: data)
     }
@@ -31,7 +31,7 @@ actor APIClient {
         let (data, response) = try await session.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         return try JSONDecoder().decode(HealthResponse.self, from: data)
     }
@@ -88,7 +88,7 @@ actor APIClient {
         let (_, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 204 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
     }
 
@@ -118,7 +118,7 @@ actor APIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         return try decoder.decode(GenerationsResponse.self, from: data)
     }
@@ -133,7 +133,7 @@ actor APIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         return try decoder.decode(GenerationItem.self, from: data)
     }
@@ -160,7 +160,7 @@ actor APIClient {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             print("[APIClient] fetchMyUploads HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1): \(String(data: data, encoding: .utf8) ?? "no body")")
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         print("[APIClient] fetchMyUploads raw: \(String(data: data, encoding: .utf8) ?? "nil")")
         let decoder = JSONDecoder()
@@ -183,8 +183,29 @@ actor APIClient {
         request.httpBody = body
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
+    }
+
+    // POST /api/uploads/from-generation — promote a completed generation's output into the
+    // permanent reference library (named, non-expiring) instead of the one-shot "Reference"
+    // attach that only reuses the generation's short-lived presigned URL.
+    func createReferenceFromGeneration(generationId: String, displayName: String) async throws -> UploadResponse {
+        let body = try JSONEncoder().encode([
+            "generation_id": generationId,
+            "display_name": displayName,
+        ])
+        let token = try await getIDToken()
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/uploads/from-generation"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (responseData, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
+        }
+        return try JSONDecoder().decode(UploadResponse.self, from: responseData)
     }
 
     func uploadReferenceMedia(data: Data, mimeType: String, fileName: String) async throws -> UploadResponse {
@@ -205,7 +226,7 @@ actor APIClient {
         request.httpBody = body
         let (responseData, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse
+            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
         }
         return try JSONDecoder().decode(UploadResponse.self, from: responseData)
     }
@@ -215,10 +236,12 @@ actor APIClient {
 struct RatesResponse: Decodable {
     let rates: [String: [String: [String: Double]]]
     let imageCosts: [String: Int]?   // flat credits per image model; optional for backward compat
+    let grokImagineRate: Int?        // flat credits/sec for xai/grok-imagine-video-1.5; optional for backward compat
 
     enum CodingKeys: String, CodingKey {
         case rates
         case imageCosts = "imageCosts"
+        case grokImagineRate = "grokImagineRate"
     }
 }
 
@@ -275,10 +298,18 @@ struct GenerationSubmitResponse: Decodable {
     }
 }
 
-// Upload response — returned by POST /api/uploads
+// Upload response — returned by POST /api/uploads and POST /api/uploads/from-generation
 struct UploadResponse: Decodable {
     let id: String?   // reference_uploads UUID — stored so remix/regen can restore the reference
     let url: String
+    let mimeType: String?     // only set by /from-generation
+    let displayName: String?  // only set by /from-generation
+
+    enum CodingKeys: String, CodingKey {
+        case id, url
+        case mimeType = "mime_type"
+        case displayName = "display_name"
+    }
 }
 
 // A previously-uploaded reference file returned by GET /api/uploads
@@ -303,7 +334,7 @@ private struct UploadsListResponse: Decodable {
 
 // Generation request body — sent to POST /api/generations
 // Video fields (duration/resolution/aspectRatio/audioEnabled) are optional so that image
-// generation requests can omit them; width/height are image-only.
+// generation requests can omit them; imageAspectRatio is image-only.
 struct GenerationRequestBody: Encodable {
     let prompt: String
     let model: String
@@ -313,6 +344,7 @@ struct GenerationRequestBody: Encodable {
     let aspectRatio: String?        // video-only; nil for image mode
     let audioEnabled: Bool?         // video-only; nil for image mode
     let imageAspectRatio: String?   // image-only; nil for video mode
+    let imageQuality: String?       // "high" | "standard"; GPT Image 2 only
     let referenceImages: [String]?
     let referenceVideos: [String]?
     let referenceUploadIds: [String]?   // reference_uploads UUIDs — stored server-side for remix/regen
@@ -323,8 +355,8 @@ struct GenerationRequestBody: Encodable {
         case duration, resolution
         case aspectRatio = "aspect_ratio"
         case audioEnabled = "audio_enabled"
-        case width, height
         case imageAspectRatio = "image_aspect_ratio"
+        case imageQuality = "image_quality"
         case referenceImages = "reference_images"
         case referenceVideos = "reference_videos"
         case referenceUploadIds = "reference_upload_ids"

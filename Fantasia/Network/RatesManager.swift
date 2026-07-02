@@ -11,7 +11,11 @@ final class RatesManager {
     private(set) var rates: [String: [String: [String: Double]]] = [:]
     // Flat credit cost per image model (e.g. "black-forest-labs/flux-schnell" → 5)
     private(set) var imageCosts: [String: Int] = [:]
+    // Flat credits/sec for xai/grok-imagine-video-1.5 — not resolution-tiered like `rates`.
+    private(set) var grokImagineRate: Int = 8
     private(set) var isLoaded = false
+    private var lastLoadDate: Date?
+    private static let staleAfter: TimeInterval = 3600
 
     // Fallback in credits/sec (50 credits/$1 × dollar rate), used if network call fails.
     private static let fallback: [String: [String: [String: Double]]] = [
@@ -29,10 +33,11 @@ final class RatesManager {
         ],
     ]
 
-    // Fallback image costs — matches IMAGE_MODEL_COSTS on backend (08-02)
+    // Fallback image costs — matches IMAGE_MODEL_COSTS on backend
     private static let imageCostFallback: [String: Int] = [
-        "black-forest-labs/flux-schnell": 5,
-        "black-forest-labs/flux-dev": 15,
+        "openai/gpt-image-2-high":   13,
+        "openai/gpt-image-2-medium": 5,
+        "openai/gpt-image-2-low":    2,
     ]
 
     func load() async {
@@ -44,6 +49,8 @@ final class RatesManager {
             } else {
                 imageCosts = Self.imageCostFallback
             }
+            grokImagineRate = response.grokImagineRate ?? 8
+            lastLoadDate = Date()
         } catch {
             if !isLoaded {
                 rates = Self.fallback
@@ -53,7 +60,21 @@ final class RatesManager {
         isLoaded = true
     }
 
+    /// Perf: GET /rates was previously re-fetched on every single foreground with no guard.
+    /// Rates change rarely (a manual server-side pricing update), so skip the network call
+    /// unless we've never loaded successfully or it's been over an hour. Used for the
+    /// scenePhase == .active trigger; the launch-time call still uses load() unconditionally.
+    func loadIfNeeded() async {
+        let isStale = lastLoadDate.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
+        guard isStale else { return }
+        await load()
+    }
+
     func cost(model: String, durationSeconds: Int, resolution: String, hasVideoReference: Bool) -> Int {
+        // Flat credits/sec, not resolution-tiered — bypasses the `rates` table entirely.
+        if model == "xai/grok-imagine-video-1.5" {
+            return Int(ceil(Double(durationSeconds) * Double(grokImagineRate)))
+        }
         let table = rates.isEmpty ? Self.fallback : rates
         let rateSet = hasVideoReference ? "videoIn" : "nonVideoIn"
         let creditsPerSec = table[model]?[rateSet]?[resolution] ?? 0

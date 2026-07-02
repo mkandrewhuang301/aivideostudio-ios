@@ -54,9 +54,17 @@ final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate,
     }
 
     nonisolated func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.windows.first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+        // ASAuthorizationController calls this on the main thread; avoid invalid UIWindow() fallback.
+        MainActor.assumeIsolated {
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)
+                ?? UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                    .flatMap(\.windows)
+                    .first!
+        }
     }
 }
 
@@ -120,6 +128,8 @@ struct SignInView: View {
         FillingVideoPlayerView(player: videoViewModel.player)
             .ignoresSafeArea()
             .accessibilityHidden(true)
+            .opacity(videoViewModel.isReady ? 1 : 0)
+            .animation(.easeIn(duration: 0.4), value: videoViewModel.isReady)
             .onAppear {
                 // D-04: 0.85x playback rate — slow enough not to distract, visibly moving.
                 videoViewModel.player.rate = 0.85
@@ -405,8 +415,8 @@ struct SignInView: View {
     private func handleAppleSignIn() async {
         isSocialAuthLoading = true
         socialAuthError = nil
-        let nonce = authManager.generateNonce()
-        let hashedNonce = authManager.sha256(nonce)
+        let rawNonce = authManager.generateNonce()
+        let hashedNonce = authManager.sha256(rawNonce)
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             appleCoordinator.onCompletion = { result in
@@ -414,12 +424,17 @@ struct SignInView: View {
                     switch result {
                     case .success(let credential):
                         do {
-                            try await authManager.signInWithApple(credential: credential)
+                            try await authManager.signInWithApple(
+                                credential: credential,
+                                rawNonce: rawNonce
+                            )
                         } catch {
-                            socialAuthError = error.localizedDescription
+                            socialAuthError = Self.socialAuthErrorMessage(error)
                         }
                     case .failure(let error):
-                        socialAuthError = error.localizedDescription
+                        if (error as NSError).code != ASAuthorizationError.canceled.rawValue {
+                            socialAuthError = Self.socialAuthErrorMessage(error)
+                        }
                     }
                     isSocialAuthLoading = false
                     continuation.resume()
@@ -427,6 +442,36 @@ struct SignInView: View {
             }
             appleCoordinator.start(nonce: hashedNonce)
         }
+    }
+
+    private static func socialAuthErrorMessage(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == AuthErrorDomain,
+           let code = AuthErrorCode(rawValue: nsError.code) {
+            switch code {
+            case .invalidCredential:
+                return "Apple sign-in failed. Confirm Sign in with Apple is enabled in Firebase Auth."
+            case .operationNotAllowed:
+                return "Apple sign-in is not enabled for this app."
+            case .networkError:
+                return "Network error. Check your connection and try again."
+            default:
+                break
+            }
+        }
+        if nsError.domain == ASAuthorizationError.errorDomain {
+            switch ASAuthorizationError.Code(rawValue: nsError.code) {
+            case .failed:
+                return "Apple sign-in failed. Confirm the Sign in with Apple capability is enabled for com.fantasiaai."
+            case .notHandled:
+                return "Apple sign-in could not be started. Try again."
+            case .unknown:
+                return "Apple sign-in failed. Rebuild the app after enabling Sign in with Apple in Xcode."
+            default:
+                break
+            }
+        }
+        return error.localizedDescription
     }
 }
 

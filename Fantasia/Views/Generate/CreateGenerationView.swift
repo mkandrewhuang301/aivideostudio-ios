@@ -40,8 +40,7 @@ struct CreateGenerationView: View {
             promptBar
         }
         .task {
-            // Brief delay so sheet animation completes before keyboard appears
-            try? await Task.sleep(for: .milliseconds(380))
+            try? await Task.sleep(for: .milliseconds(200))
             promptFocused = true
         }
         .contentShape(Rectangle())
@@ -181,6 +180,7 @@ struct CreateGenerationView: View {
                 .tint(accent)
                 .focused($promptFocused)
                 .opacity(promptText.isEmpty ? 1 : 1) // ensure text always white
+                .keyboardDoneButton()
 
             // Send — always purple gradient per spec
             Button {

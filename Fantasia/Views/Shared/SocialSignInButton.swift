@@ -79,16 +79,15 @@ struct SocialSignInButton: View {
     private var logoImage: some View {
         switch provider {
         case .apple:
-            // D-06: Apple mark must render as white template (not a colored glyph).
-            Image(provider.assetName)
+            Image(systemName: "apple.logo")
                 .resizable()
-                .renderingMode(.template)
+                .scaledToFit()
                 .foregroundStyle(.white)
         case .google:
-            // D-07: Google G mark must stay full-color — no template rendering.
-            Image(provider.assetName)
+            Image("google_logo")
                 .resizable()
-                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 18, height: 18)
         }
     }
 }

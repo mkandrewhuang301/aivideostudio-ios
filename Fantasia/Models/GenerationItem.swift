@@ -66,6 +66,7 @@ struct GenerationItem: Decodable, Identifiable, Equatable {
     let referenceUrls: [GenerationReference]?  // presigned URLs for reference media (remix/regen)
     let createdAt: Date
     let completedAt: Date?
+    let failureReason: String?   // 'content_policy' | 'copyright' | 'generic_error' | nil (legacy rows)
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -79,6 +80,7 @@ struct GenerationItem: Decodable, Identifiable, Equatable {
         case referenceUrls = "reference_urls"
         case createdAt = "created_at"
         case completedAt = "completed_at"
+        case failureReason = "failure_reason"
     }
 
     // Custom init: decodes mediaType with a .video fallback for existing rows that have no
@@ -96,6 +98,7 @@ struct GenerationItem: Decodable, Identifiable, Equatable {
         referenceUrls = try container.decodeIfPresent([GenerationReference].self, forKey: .referenceUrls)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        failureReason = try container.decodeIfPresent(String.self, forKey: .failureReason)
     }
 
     /// True when this item is an image generation (not a video).

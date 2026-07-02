@@ -45,18 +45,18 @@ struct CircularCreditIndicator: View {
                 .trim(from: 0, to: clampedRatio)
                 .stroke(ringColor,
                         style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .rotationEffect(.degrees(90)) // 6 o'clock start, clockwise fill
+                .rotationEffect(.degrees(-90)) // 12 o'clock start, clockwise fill
                 .animation(
                     reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.75),
                     value: clampedRatio
                 )
 
-            // Red dot at 6 o'clock when credits are 0
+            // Red dot at 12 o'clock when credits are 0
             if clampedRatio < 0.001 {
                 Circle()
                     .fill(Color(red: 0.878, green: 0.278, blue: 0.247))
                     .frame(width: 6, height: 6)
-                    .offset(y: size / 2)
+                    .offset(y: -size / 2)
             }
 
             // Profile picture placeholder (Phase 6: replace with AsyncImage)

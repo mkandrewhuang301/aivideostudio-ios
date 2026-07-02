@@ -8,11 +8,14 @@ import SwiftUI
 import AVKit
 import AVFoundation
 
-// FillingVideoPlayerView wraps AVPlayerLayer directly with videoGravity = .resizeAspectFill.
-// SwiftUI's VideoPlayer defaults to aspect-fit (letterboxes when the video's aspect ratio
-// doesn't match the screen) — this fills edge-to-edge instead, cropping as needed.
+// FillingVideoPlayerView wraps AVPlayerLayer directly. Defaults to videoGravity =
+// .resizeAspectFill (edge-to-edge, cropping as needed) — SwiftUI's VideoPlayer defaults to
+// aspect-fit (letterboxes when the video's aspect ratio doesn't match the screen), so this
+// exists to opt into the fill behavior. Pass .resizeAspect for letterboxed/no-crop playback
+// (used by the tap-to-inspect full-screen player, where the full generated frame must stay visible).
 struct FillingVideoPlayerView: UIViewRepresentable {
     let player: AVPlayer
+    var videoGravity: AVLayerVideoGravity = .resizeAspectFill
 
     final class PlayerView: UIView {
         override static var layerClass: AnyClass { AVPlayerLayer.self }
@@ -22,12 +25,13 @@ struct FillingVideoPlayerView: UIViewRepresentable {
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.videoGravity = videoGravity
         return view
     }
 
     func updateUIView(_ uiView: PlayerView, context: Context) {
         uiView.playerLayer.player = player
+        uiView.playerLayer.videoGravity = videoGravity
     }
 }
 
@@ -39,6 +43,8 @@ final class LoopingPlayerViewModel {
     let player: AVQueuePlayer
     private var looper: AVPlayerLooper?
     var hasVideo: Bool = false
+    var isReady: Bool = false
+    private var playbackObservation: NSKeyValueObservation?
 
     init(videoName: String) {
         player = AVQueuePlayer()
@@ -51,6 +57,17 @@ final class LoopingPlayerViewModel {
         player.isMuted = true
         player.play()
         hasVideo = true
+
+        // Flip isReady only when the first frame is actually rendered — AVPlayer needs
+        // time to decode after play() is called, so hasVideo alone isn't enough.
+        playbackObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            guard player.timeControlStatus == .playing else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isReady = true
+                self.playbackObservation = nil
+            }
+        }
     }
 }
 
@@ -149,16 +166,16 @@ struct OnboardingVideoView: View {
     // whale→anime cut at 11.7s that the first pass missed) — keeps the caption switching
     // exactly on each cut. Every caption must stay one line — verified against the chip width.
     @State private var captionController = PromptCaptionController(scenes: [
-        .init(start: 0.0,    caption: "Man riding motorcycle through the open desert"),
-        .init(start: 2.2333, caption: "Dragon breathing fire over a burning battlefield"),
-        .init(start: 4.27,   caption: "Car tire splashing through puddles in the rain"),
-        .init(start: 7.03,   caption: "Figure skater gliding across a frozen winter lake"),
-        .init(start: 9.5,    caption: "Bioluminescent whale breaching on a starry night"),
-        .init(start: 11.7,   caption: "Anime boy steps through a door portal into a mystical world"),
-        .init(start: 14.57,  caption: "Woman in a gown twirling outside a stone villa"),
-        .init(start: 17.53,  caption: "Animated baby squirrel running through a meadow"),
-        .init(start: 20.23,  caption: "Kung fu masters fighting on ancient temple steps"),
-        .init(start: 22.63,  caption: "HS football player gearing up on game day"),
+        .init(start: 0.0,    caption: "Man riding motorcycle through the desert"),
+        .init(start: 2.2333, caption: "Dragon breathing fire over a battlefield"),
+        .init(start: 4.27,   caption: "Car driving through puddles in the rain"),
+        .init(start: 7.03,   caption: "Figure skater gliding across a frozen lake"),
+        .init(start: 9.5,    caption: "Bioluminescent whale breaching at night"),
+        .init(start: 11.7,   caption: "Anime boy opens door to a mystical world"),
+        .init(start: 14.57,  caption: "Woman in a gown twirling outside a villa"),
+        .init(start: 17.53,  caption: "Squirrel running through a meadow"),
+        .init(start: 20.23,  caption: "Kung fu masters fighting on temple steps"),
+        .init(start: 22.63,  caption: "Football player gearing up on game day"),
     ])
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
@@ -278,29 +295,47 @@ struct OnboardingVideoView: View {
     }
 
     private var promptChip: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.7))
-                Text("prompt")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .tracking(1.2)
-                    .textCase(.uppercase)
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text("prompt")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .tracking(1.2)
+                        .textCase(.uppercase)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(captionController.displayedText)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.92))
+                    Rectangle()
+                        .fill(.white.opacity(0.7))
+                        .frame(width: 1.5, height: 14)
+                        .opacity(captionController.caretVisible ? 1 : 0)
+                }
+                .frame(height: 20, alignment: .leading)
+                .clipped()
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text(captionController.displayedText)
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.92))
-                Rectangle()
-                    .fill(.white.opacity(0.7))
-                    .frame(width: 1.5, height: 14)
-                    .opacity(captionController.caretVisible ? 1 : 0)
-            }
-            .frame(height: 20, alignment: .leading)
-            .clipped()
+            Spacer()
+
+            Image(systemName: "arrow.up")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
+                                 Color(red: 0.357, green: 0.561, blue: 0.851)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Circle())
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)

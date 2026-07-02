@@ -5,15 +5,27 @@
 
 import SwiftUI
 import PhotosUI
-import AVFoundation
+import UniformTypeIdentifiers
 
 struct GenerateView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
     @Environment(RatesManager.self) private var ratesManager
+    @Environment(DrawerManager.self) private var drawer
+
+    // Perf: these were previously compiled fresh inside highlightedPrompt (recomputed on every
+    // body render, i.e. every keystroke), atomicTokenDeletion, and rebuildPromptTokens. Hoisted
+    // to compile-once static constants — same patterns, no behavior change.
+    private static let bracketTokenRegex = try? NSRegularExpression(pattern: #"\[[^\]]+\]"#)
+    private static let bracketTokenWithLeadingSpaceRegex = try? NSRegularExpression(pattern: "\\s*\\[[^\\]]+\\]")
+    private static let mentionTriggerRegex = try? NSRegularExpression(pattern: #"@(\w*)$"#)
 
     @State private var promptText = ""
+    // Cursor/selection in the prompt field — the @-mention trigger needs to know where the
+    // caret actually is, since editing text earlier in the prompt leaves the caret short of
+    // promptText's end (e.g. after a previously inserted [Image1] token).
+    @State private var promptSelection: TextSelection?
     @State private var showProfileSheet = false
     @FocusState private var promptFocused: Bool
 
@@ -30,16 +42,33 @@ struct GenerateView: View {
     // Multi-reference attachment state
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var attachedReferences: [AttachedReference] = []
+    @State private var showPhotosPicker = false
+    @State private var showCameraPicker = false
+    @State private var showFileImporter = false
 
     // Rename sheet
     @State private var renamingItem: ReferenceUploadItem? = nil
     @State private var renameText = ""
 
-    // @ media library picker
-    @State private var showMediaLibrary = false
+    // "Name as reference" — promotes a past generation's output into the permanent
+    // reference library (distinct from renamingItem, which renames an existing upload)
+    @State private var namingReferenceFromGeneration: GenerationItem? = nil
+    @State private var newReferenceName = ""
+
+    // Media library + @-mention state
+    @State private var mentionQuery: String? = nil
+    @State private var showMentionSuggestions = false
     @State private var mediaLibraryItems: [ReferenceUploadItem] = []
     @State private var isLoadingLibrary = false
     @State private var libraryLoadFailed = false
+    // Perf: reopening the @-mention popup used to refetch GET /api/uploads from scratch every
+    // single time (each open/close cycle reset showMentionSuggestions, re-arming the fetch
+    // guard below). New/renamed/deleted items are already applied to mediaLibraryItems in place
+    // elsewhere (attach, rename, delete), so a real refetch is only needed once per session or
+    // after a longer idle gap — not on every reopen.
+    @State private var hasLoadedMediaLibraryOnce = false
+    @State private var mediaLibraryLastLoadDate: Date? = nil
+    private static let mediaLibraryStaleAfter: TimeInterval = 300
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -55,12 +84,79 @@ struct GenerateView: View {
         attachedReferences.contains { $0.isVideo }
     }
 
+    private var mentionSuggestions: [MentionCandidate] {
+        guard let q = mentionQuery, !q.isEmpty else { return defaultMentionSuggestions }
+        // When filtering, unnamed uploads are hidden (nothing to match against); the synthetic
+        // "latest generation" entry has no name either, so it only ever appears in the
+        // unfiltered (just-typed-@) list below.
+        return mediaLibraryItems
+            .filter { ($0.displayName ?? "").localizedCaseInsensitiveContains(q) }
+            .map { .upload($0) }
+    }
+
+    /// Suggestions shown right after typing "@", before any filter text — in priority order:
+    /// (1) the most recent upload overall, (2) the most recent *image* upload if different from
+    /// #1, (3) the latest completed generation, then (4) everything else. mediaLibraryItems is
+    /// already newest-first (server returns desc(created_at); new uploads are inserted at index 0),
+    /// so "most recent" is just .first.
+    private var defaultMentionSuggestions: [MentionCandidate] {
+        var result: [MentionCandidate] = []
+        var usedUploadIds = Set<String>()
+
+        if let mostRecent = mediaLibraryItems.first {
+            result.append(.upload(mostRecent))
+            usedUploadIds.insert(mostRecent.id)
+        }
+        if let mostRecentImage = mediaLibraryItems.first(where: { !$0.isVideo }),
+           !usedUploadIds.contains(mostRecentImage.id) {
+            result.append(.upload(mostRecentImage))
+            usedUploadIds.insert(mostRecentImage.id)
+        }
+        if let latestGeneration = generationManager.generations.first(where: {
+            $0.status == .completed && !($0.completedMediaUrl ?? "").isEmpty
+        }) {
+            result.append(.generation(latestGeneration))
+        }
+        for item in mediaLibraryItems where !usedUploadIds.contains(item.id) {
+            result.append(.upload(item))
+        }
+        return result
+    }
+
+    private var highlightedPrompt: AttributedString {
+        var result = AttributedString(promptText)
+        guard let re = Self.bracketTokenRegex else { return result }
+        let ns = promptText as NSString
+        for match in re.matches(in: promptText, range: NSRange(location: 0, length: ns.length)) {
+            guard let sr = Range(match.range, in: promptText) else { continue }
+            let startDist = promptText.distance(from: promptText.startIndex, to: sr.lowerBound)
+            let lenDist   = promptText.distance(from: sr.lowerBound, to: sr.upperBound)
+            var lo = result.characters.startIndex
+            result.characters.formIndex(&lo, offsetBy: startDist)
+            var hi = lo
+            result.characters.formIndex(&hi, offsetBy: lenDist)
+            result[lo..<hi].foregroundColor = accent
+            result[lo..<hi].backgroundColor = accent.opacity(0.18)
+        }
+        return result
+    }
+
     private var isAnyUploading: Bool {
         attachedReferences.contains { $0.isUploading }
     }
 
+    private var selectedModelRequiresImage: Bool {
+        (ModelCatalog.video + ModelCatalog.image)
+            .first(where: { $0.id == selectedModel })?.requiresImage ?? false
+    }
+
+    private var missingRequiredImage: Bool {
+        guard selectedModelRequiresImage else { return false }
+        return !attachedReferences.contains { !$0.isVideo }
+    }
+
     private var isSubmitDisabled: Bool {
-        isSubmitting || hasInsufficientCredits || isAnyUploading
+        isSubmitting || hasInsufficientCredits || isAnyUploading || missingRequiredImage
     }
 
     private var generationCost: Int {
@@ -102,25 +198,48 @@ struct GenerateView: View {
 
     var body: some View {
         ZStack {
+            // Tap-to-dismiss lives on the background layer alone (not a screen-wide gesture)
+            // so it only fires when a tap lands on genuinely empty space — SwiftUI hit-tests
+            // top-down, so buttons, the history list, and the prompt bar all still consume
+            // their own taps first. A screen-wide simultaneousGesture here previously covered
+            // the prompt bar too, which both dismissed the keyboard on every line-to-line tap
+            // in a multiline prompt AND fought with the paperclip/options/remove-reference
+            // buttons for the touch.
             background
+                .onTapGesture { promptFocused = false }
 
             VStack(spacing: 0) {
                 topBar
 
-                if generationManager.generations.isEmpty {
+                if generationManager.generations.isEmpty && !generationManager.hasLoadedOnce {
+                    // Initial history fetch still in flight — show a spinner instead of the
+                    // "What will you create?" empty state, which was misleadingly flashing
+                    // for returning users while their (non-empty) history was still loading.
+                    Spacer()
+                    ProgressView()
+                        .tint(.white.opacity(0.6))
+                    Spacer()
+                } else if generationManager.generations.isEmpty {
                     Spacer()
                     centerContent
                     Spacer()
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVStack(spacing: 12) {
+                            // Plain VStack (not Lazy): this list is a single bounded page of
+                            // history, not an infinite feed. Eagerly measuring every card is
+                            // what makes defaultScrollAnchor(.bottom) below land on the exact
+                            // bottom — LazyVStack doesn't size off-screen variable-height rows
+                            // ahead of time, so the anchor's initial offset came out wrong.
+                            VStack(spacing: 12) {
                                 ForEach(generationManager.generations.reversed()) { item in
                                     GenerationCardView(
                                         item: item,
                                         onTapDetail: { selectedItem = item },
                                         onRemix: { handleRemix(item: item) },
                                         onRegenerate: { Task { await handleRegenerate(item: item) } },
+                                        onReference: { handleReference(item: item) },
+                                        onNameAsReference: { handleNameAsReference(item: item) },
                                         onDelete: { Task { await handleDelete(item: item) } }
                                     )
                                     .id(item.id)
@@ -129,52 +248,78 @@ struct GenerateView: View {
                             .padding(.top, 12)
                             .padding(.bottom, 12)
                         }
+                        .defaultScrollAnchor(.bottom)
                         .onChange(of: generationManager.generations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
-                        .onAppear { scrollToNewest(proxy: proxy) }
                     }
                 }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    promptFocused = false
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                if showMediaLibrary {
-                    mediaLibraryPicker
+                if showMentionSuggestions && !mentionSuggestions.isEmpty {
+                    mentionSuggestionList
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                HStack {
-                    Spacer()
-                    creditCostLabel
+                if let msg = errorMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .transition(.opacity)
                 }
-                .padding(.trailing, 38)
                 promptBar
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMediaLibrary)
-            .padding(.bottom, 71)
+            .frame(maxWidth: .infinity)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMentionSuggestions)
+            .padding(.bottom, promptFocused ? 2 : 65)
+            .background(
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 40)
+                    Color(red: 0.13, green: 0.125, blue: 0.15)
+                }
+                .ignoresSafeArea(edges: .bottom)
+            )
         }
-        .contentShape(Rectangle())
-        .onTapGesture { promptFocused = false }
         .onChange(of: promptText) { old, new in
-            // Auto-switch mode based on keywords
-            let lower = new.lowercased()
-            let imageWords = ["image", "photo", "picture", "illustration", "drawing", "painting", "poster", "portrait"]
-            let videoWords = ["video", "animate", "animation", "motion", "clip", "movie", "reel"]
-            if videoWords.contains(where: { lower.contains($0) }), selectedMode != "AI Video" {
-                selectedMode = "AI Video"
-                selectedModel = ModelCatalog.defaultModel(for: "AI Video")
-            } else if imageWords.contains(where: { lower.contains($0) }), selectedMode != "AI Image" {
-                selectedMode = "AI Image"
-                selectedModel = ModelCatalog.defaultModel(for: "AI Image")
+            // Atomic token deletion: if user deleted one char inside [token], remove whole token
+            if let (snapped, removedInner) = atomicTokenDeletion(old: old, new: new) {
+                promptText = snapped
+                if let inner = removedInner { dereferenceToken(inner) }
+                return
             }
 
-            // @ trigger for media library
-            if new.hasSuffix("@") && !old.hasSuffix("@") {
-                showMediaLibrary = true
-                Task { await loadMediaLibrary() }
-            } else if !new.hasSuffix("@") && showMediaLibrary {
-                showMediaLibrary = false
+            // @-mention trigger: detect @word immediately before the caret, not just at the
+            // very end of the string — otherwise editing text earlier in the prompt (before a
+            // previously inserted [Image1]-style token) leaves the caret short of promptText's
+            // end, and the old end-anchored check would silently never match again.
+            // NSRegularExpression anchors "$" to the end of the search range by default (not
+            // the whole string), so bounding the range at the caret makes "@(\w*)$" match
+            // "@word" immediately before the caret rather than only at promptText's true end.
+            let caretEnd = promptCursorIndex(in: new) ?? new.endIndex
+            let searchRange = NSRange(new.startIndex..<caretEnd, in: new)
+            if let match = Self.mentionTriggerRegex?.firstMatch(in: new, range: searchRange),
+               let r = Range(match.range, in: new) {
+                let q = String(new[r].dropFirst())
+                mentionQuery = q
+                if !showMentionSuggestions {
+                    showMentionSuggestions = true
+                    Task { await loadMediaLibrary() }
+                }
+            } else {
+                mentionQuery = nil
+                showMentionSuggestions = false
             }
         }
         .onChange(of: selectedPickerItem) { _, newItem in
@@ -198,6 +343,10 @@ struct GenerateView: View {
                 }
                 generationManager.pendingRemix = nil
             }
+            if let refItem = generationManager.pendingReference {
+                attachReference(from: refItem)
+                generationManager.pendingReference = nil
+            }
         }
         .onDisappear { generationManager.stopPolling() }
         .onReceive(NotificationCenter.default.publisher(for: .generationCompleted)) { _ in
@@ -214,27 +363,59 @@ struct GenerateView: View {
             PaywallView(isPresented: $showPaywall)
                 .environment(creditManager)
         }
-        .alert("Name this reference", isPresented: Binding(
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraPicker(
+                allowsVideo: !selectedModelRequiresImage,
+                onCapture: { data, isVideo in
+                    showCameraPicker = false
+                    Task { await handleAttachedData(data, isVideo: isVideo) }
+                },
+                onCancel: { showCameraPicker = false }
+            )
+            .ignoresSafeArea()
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: selectedModelRequiresImage ? [.image] : [.image, .movie]
+        ) { result in
+            guard case .success(let url) = result else { return }
+            Task { await handleImportedFile(url) }
+        }
+        .sheet(isPresented: Binding(
             get: { renamingItem != nil },
             set: { if !$0 { renamingItem = nil } }
         )) {
-            TextField("e.g. sarah", text: $renameText)
-                .autocorrectionDisabled()
-            Button("Save") {
-                guard let item = renamingItem else { return }
-                let name = String(renameText.trimmingCharacters(in: .whitespaces).prefix(40))
-                Task { await applyRename(to: item, name: name) }
-                renamingItem = nil
-            }
-            Button("Cancel", role: .cancel) { renamingItem = nil }
+            NameReferenceSheet(
+                placeholder: renamingItem.map { defaultSlotPlaceholder(for: $0) } ?? "",
+                text: $renameText,
+                onSave: { name in
+                    guard let item = renamingItem else { return }
+                    let trimmed = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
+                    Task { await applyRename(to: item, name: trimmed) }
+                    renamingItem = nil
+                },
+                onCancel: { renamingItem = nil }
+            )
+            .presentationDetents([.height(230)])
+            .presentationDragIndicator(.hidden)
         }
-        .alert("Generation Failed", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
+        .sheet(isPresented: Binding(
+            get: { namingReferenceFromGeneration != nil },
+            set: { if !$0 { namingReferenceFromGeneration = nil } }
         )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+            NameReferenceSheet(
+                placeholder: namingReferenceFromGeneration.map { $0.isImage ? "Image" : "Video" } ?? "",
+                text: $newReferenceName,
+                onSave: { name in
+                    guard let item = namingReferenceFromGeneration else { return }
+                    let trimmed = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
+                    Task { await saveGenerationAsReference(item: item, name: trimmed) }
+                    namingReferenceFromGeneration = nil
+                },
+                onCancel: { namingReferenceFromGeneration = nil }
+            )
+            .presentationDetents([.height(230)])
+            .presentationDragIndicator(.hidden)
         }
         .sheet(item: $selectedItem) { item in
             GenerationDetailSheet(
@@ -242,6 +423,7 @@ struct GenerateView: View {
                 isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
             )
             .environment(authManager)
+            .environment(generationManager)
         }
     }
 
@@ -266,7 +448,7 @@ struct GenerateView: View {
 
     private var topBar: some View {
         HStack(alignment: .center, spacing: 11) {
-            Button { } label: {
+            Button { drawer.open() } label: {
                 VStack(spacing: 5) {
                     Rectangle().frame(width: 22, height: 2)
                     Rectangle().frame(width: 22, height: 2)
@@ -308,6 +490,7 @@ struct GenerateView: View {
         .padding(.horizontal, 18)
         .padding(.top, 2)
         .padding(.bottom, 10)
+        .background(Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea(edges: .top))
     }
 
     // MARK: - Center inspiration content
@@ -376,6 +559,14 @@ struct GenerateView: View {
                         .font(.caption.weight(.bold))
                 }
                 .foregroundStyle(Color.red)
+            } else if missingRequiredImage {
+                HStack(spacing: 4) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("Attach an image to use this model")
+                        .font(.caption.weight(.bold))
+                }
+                .foregroundStyle(Color.white.opacity(0.6))
             } else if isAnyUploading {
                 HStack(spacing: 4) {
                     ProgressView()
@@ -402,26 +593,79 @@ struct GenerateView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(hasInsufficientCredits ? "Insufficient credits" : "Estimated cost \(generationCost) credits")
+        .accessibilityLabel(
+            hasInsufficientCredits ? "Insufficient credits" :
+            missingRequiredImage ? "Attach an image to use this model" :
+            "Estimated cost \(generationCost) credits"
+        )
     }
 
     // MARK: - Prompt bar
 
     private var promptBar: some View {
+        ZStack(alignment: .topTrailing) {
+            promptBarContent
+            if !promptText.isEmpty {
+                clearPromptButton
+                    .padding(.trailing, 50)
+                    .offset(y: 4)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: promptText.isEmpty)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+
+    private var clearPromptButton: some View {
+        Button {
+            clearPrompt()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 20, height: 20)
+                .background(Color(red: 0.24, green: 0.22, blue: 0.28), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var promptBarContent: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 // Left column: paperclip + card stack
                 VStack(alignment: .leading, spacing: 6) {
-                    PhotosPicker(
-                        selection: $selectedPickerItem,
-                        matching: .any(of: [.images, .videos])
-                    ) {
+                    Menu {
+                        Button {
+                            showPhotosPicker = true
+                        } label: {
+                            Label("Photo Library", systemImage: "photo.on.rectangle")
+                        }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button {
+                                showCameraPicker = true
+                            } label: {
+                                Label(selectedModelRequiresImage ? "Take Photo" : "Take Photo or Video", systemImage: "camera")
+                            }
+                        }
+                        Button {
+                            showFileImporter = true
+                        } label: {
+                            Label("Choose File", systemImage: "folder")
+                        }
+                    } label: {
                         Image(systemName: "paperclip")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 19, weight: .medium))
                             .foregroundStyle(.white.opacity(0.55))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.plain)
+                    .photosPicker(
+                        isPresented: $showPhotosPicker,
+                        selection: $selectedPickerItem,
+                        matching: selectedModelRequiresImage ? .images : .any(of: [.images, .videos])
+                    )
 
                     if !attachedReferences.isEmpty {
                         referenceCardStack
@@ -431,16 +675,46 @@ struct GenerateView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 2)
 
-                // Prompt text
-                TextField("Describe a scene...", text: $promptText, axis: .vertical)
-                    .lineLimit(1...5)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .tint(accent)
-                    .focused($promptFocused)
-                    .padding(.leading, 6)
-                    .padding(.top, 14)
-                    .padding(.bottom, 2)
+                // Prompt text — ghost-text layer for token highlighting.
+                // Wrapped in a ScrollView (rather than relying on the TextField's own
+                // internal scrolling) so the highlight layer and the real text field
+                // scroll together in lockstep past 5 lines.
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        ZStack(alignment: .topLeading) {
+                            if promptText.isEmpty {
+                                Text("Describe a scene...")
+                                    .font(.body)
+                                    .foregroundStyle(.white.opacity(0.3))
+                                    .allowsHitTesting(false)
+                                    .padding(.top, 0.5)
+                            } else {
+                                Text(highlightedPrompt)
+                                    .font(.body)
+                                    .allowsHitTesting(false)
+                            }
+                            TextField("", text: $promptText, selection: $promptSelection, axis: .vertical)
+                                .font(.body)
+                                .foregroundStyle(.clear)
+                                .tint(accent)
+                                .focused($promptFocused)
+                                .submitLabel(.return)
+                        }
+                        .id("promptTextBottom")
+                    }
+                    .onChange(of: promptText) { _, _ in
+                        proxy.scrollTo("promptTextBottom", anchor: .bottom)
+                    }
+                }
+                // Programmatic scrollTo above (fired on every keystroke once the prompt
+                // wraps past one line) otherwise gets misread as a user drag and resigns
+                // the TextField's first responder, dismissing the keyboard mid-type.
+                .scrollDismissesKeyboard(.never)
+                .frame(maxHeight: 112)
+                .padding(.leading, 4)
+                .padding(.trailing, 15)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
 
                 // Submit
                 Button {
@@ -474,6 +748,12 @@ struct GenerateView: View {
                 .padding(.bottom, 2)
             }
 
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 0.5)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+
             // Options row
             HStack(spacing: 6) {
                 Button {
@@ -501,6 +781,7 @@ struct GenerateView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                creditCostLabel
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
@@ -520,255 +801,306 @@ struct GenerateView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .background(.ultraThinMaterial)
+        .background(Color(red: 0.13, green: 0.125, blue: 0.15))
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2), lineWidth: 1))
-        .padding(.horizontal, 22)
-        .padding(.bottom, 8)
     }
 
     // MARK: - Reference card stack (below paperclip)
     // Cards fan to the right: index 0 = leftmost/oldest, last = rightmost/newest (top).
-    // X button only on top card; tapping it pops the card and removes its prompt token.
 
     private var referenceCardStack: some View {
         let visible = Array(attachedReferences.suffix(3))
-        let totalWidth = 32 + CGFloat(max(0, visible.count - 1)) * 3
+        let totalWidth = 40 + CGFloat(max(0, visible.count - 1)) * 3
         return ZStack(alignment: .bottomLeading) {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, ref in
-                referenceCard(ref, isTop: index == visible.count - 1)
+                referenceCard(ref)
                     .offset(x: CGFloat(index) * 3, y: 0)
                     .zIndex(Double(index))
             }
         }
-        .frame(width: totalWidth, height: 36)
+        .frame(width: totalWidth, height: 54)
     }
 
     @ViewBuilder
-    private func referenceCard(_ ref: AttachedReference, isTop: Bool) -> some View {
+    private func referenceCard(_ ref: AttachedReference) -> some View {
+        let label = attachedReferenceLabel(ref)
         ZStack(alignment: .topTrailing) {
-            Group {
-                if ref.isUploading {
-                    ZStack {
-                        Color.white.opacity(0.08)
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
-                            .scaleEffect(0.55)
-                    }
-                } else if let thumb = ref.thumbnail {
-                    Image(uiImage: thumb)
-                        .resizable()
-                        .scaledToFill()
-                } else if let urlStr = ref.thumbnailURL ?? (ref.isVideo ? nil : ref.url),
-                          let url = URL(string: urlStr) {
-                    AsyncImage(url: url) { phase in
-                        if case .success(let img) = phase {
-                            img.resizable().scaledToFill()
-                        } else {
+            VStack(spacing: 3) {
+                // Thumbnail
+                Group {
+                    if ref.isUploading {
+                        ZStack {
                             Color.white.opacity(0.08)
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
+                                .scaleEffect(0.5)
+                        }
+                    } else if let thumb = ref.thumbnail {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                    } else if let urlStr = ref.thumbnailURL ?? (ref.isVideo ? nil : ref.url),
+                              let url = URL(string: urlStr) {
+                        // Perf: uploadId (when present) is a stable server-side id, unlike the
+                        // presigned URL which rotates per-fetch and would defeat AsyncImage's
+                        // (nonexistent) caching. See CachedThumbnailImage.
+                        CachedThumbnailImage(cacheKey: (ref.uploadId ?? ref.id) + "-ref", url: url)
+                    } else {
+                        ZStack {
+                            Color.white.opacity(0.08)
+                            Image(systemName: "video.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.6))
                         }
                     }
-                } else {
-                    ZStack {
-                        Color.white.opacity(0.08)
-                        Image(systemName: "video.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
                 }
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
 
-            if isTop {
-                Button { removeTopReference() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white)
-                        .background(Color.black.opacity(0.5), in: Circle())
-                }
-                .offset(x: 4, y: -4)
+                // Name label
+                Text(label)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .frame(width: 40)
             }
+
+            Button { removeReference(ref) } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .background(Color.black.opacity(0.5), in: Circle())
+            }
+            .offset(x: 5, y: -16)
         }
+        .contextMenu(menuItems: {
+            if !ref.isUploading,
+               let uploadId = ref.uploadId,
+               let libItem = mediaLibraryItems.first(where: { $0.id == uploadId }) {
+                Button("Rename") {
+                    renamingItem = libItem
+                    renameText = libItem.displayName ?? ""
+                }
+            } else if !ref.isUploading,
+                      ref.uploadId == nil,
+                      let generationId = ref.sourceGenerationId,
+                      let sourceItem = generationManager.generations.first(where: { $0.id == generationId }) {
+                // Attached straight from a generation's output (no reference_uploads row yet) —
+                // route through the same "Name as reference" flow as the generation card's
+                // long-press, which creates that row and then backfills this chip.
+                Button("Name as reference") {
+                    handleNameAsReference(item: sourceItem)
+                }
+            }
+            Button("Remove", role: .destructive) { removeReference(ref) }
+        })
     }
 
-    // MARK: - Media library picker (horizontal scroll, per-item delete)
-
-    private var mediaLibraryPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("My Uploads")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Button { showMediaLibrary = false } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .frame(width: 24, height: 24)
-                        .background(Color.white.opacity(0.08), in: Circle())
-                }
+    private func attachedReferenceLabel(_ ref: AttachedReference) -> String {
+        if let name = ref.displayName, !name.isEmpty { return name }
+        var imageCount = 0
+        var videoCount = 0
+        for r in attachedReferences {
+            if r.isVideo { videoCount += 1 } else { imageCount += 1 }
+            if r.id == ref.id {
+                return ref.isVideo ? "Video \(videoCount)" : "Image \(imageCount)"
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
+        }
+        return ref.isVideo ? "Video" : "Image"
+    }
 
-            if isLoadingLibrary {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white.opacity(0.07))
-                                .frame(width: 64, height: 64)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-            } else if mediaLibraryItems.isEmpty {
-                Button {
-                    Task { await loadMediaLibrary() }
-                } label: {
+    // MARK: - @-mention inline suggestion list
+
+    private var mentionSuggestionList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if isLoadingLibrary {
                     HStack(spacing: 8) {
-                        Image(systemName: libraryLoadFailed ? "arrow.clockwise" : "photo.on.rectangle")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.white.opacity(libraryLoadFailed ? 0.5 : 0.2))
-                        Text(libraryLoadFailed ? "Tap to retry" : "No uploads yet")
+                        ProgressView().tint(.white)
+                        Text("Loading…")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(.white.opacity(0.5))
                     }
-                    .padding(.horizontal, 16)
-                }
-                .buttonStyle(.plain)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(mediaLibraryItems) { item in
-                            ZStack(alignment: .topTrailing) {
-                                Button {
-                                    Task { await selectLibraryItem(item) }
-                                } label: {
-                                    libraryItemThumbnail(item)
-                                        .overlay(alignment: .bottom) {
-                                            if let name = item.displayName {
-                                                Text(name)
-                                                    .font(.system(size: 8, weight: .semibold))
-                                                    .foregroundStyle(.white)
-                                                    .lineLimit(1)
-                                                    .padding(.horizontal, 3)
-                                                    .padding(.vertical, 2)
-                                                    .background(.black.opacity(0.6))
-                                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                                    .padding(.bottom, 3)
-                                            }
-                                        }
+                    .padding()
+                } else {
+                    ForEach(Array(mentionSuggestions.enumerated()), id: \.element.id) { idx, candidate in
+                        Button {
+                            commitMention(candidate)
+                        } label: {
+                            HStack(spacing: 10) {
+                                libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 40)
+                                Text(candidate.displayLabel(in: mediaLibraryItems))
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(candidate.hasCustomName ? .white : .white.opacity(0.55))
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            switch candidate {
+                            case .upload(let item):
+                                Button("Rename") {
+                                    renamingItem = item
+                                    renameText = item.displayName ?? ""
+                                    mentionQuery = nil
+                                    showMentionSuggestions = false
                                 }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("Rename") {
-                                        renamingItem = item
-                                        renameText = item.displayName ?? ""
-                                    }
-                                    Button("Delete", role: .destructive) {
-                                        Task { await deleteLibraryItem(item) }
-                                    }
-                                }
-
-                                Button {
+                                Button("Delete", role: .destructive) {
+                                    mentionQuery = nil
+                                    showMentionSuggestions = false
                                     Task { await deleteLibraryItem(item) }
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.white)
-                                        .background(Color.black.opacity(0.55), in: Circle())
                                 }
-                                .offset(x: 5, y: -5)
+                            case .generation(let item):
+                                Button("Name as reference") {
+                                    mentionQuery = nil
+                                    showMentionSuggestions = false
+                                    handleNameAsReference(item: item)
+                                }
                             }
                         }
+                        if candidate.id != mentionSuggestions.last?.id {
+                            Divider().overlay(Color.white.opacity(0.08))
+                        }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
                 }
             }
-
-            Spacer().frame(height: 8)
         }
+        .frame(maxHeight: 220)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .padding(.horizontal, 22)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .padding(.horizontal, 14)
     }
 
     @ViewBuilder
-    private func libraryItemThumbnail(_ item: ReferenceUploadItem) -> some View {
+    private func libraryItemThumbnail(cacheKey: String, isVideo: Bool, url: String?, size: CGFloat = 64) -> some View {
+        let radius = size * 0.125
         ZStack {
-            if item.isVideo {
+            if isVideo {
                 LinearGradient(
                     colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
                              Color(red: 0.416, green: 0.561, blue: 0.878)],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
                 Image(systemName: "video.fill")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: size * 0.31, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
             } else {
-                AsyncImage(url: URL(string: item.url)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        Color.white.opacity(0.07)
-                    }
-                }
+                // Perf: cacheKey is the mention candidate's stable DB id (upload or generation
+                // id) — see CachedThumbnailImage for why this replaces AsyncImage here.
+                CachedThumbnailImage(cacheKey: cacheKey + "-lib", url: url.flatMap(URL.init(string:)))
             }
         }
-        .frame(width: 64, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: radius))
+        .overlay(RoundedRectangle(cornerRadius: radius).stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+    }
+
+    /// The name this item will effectively be called if the rename sheet is submitted blank —
+    /// shown as the sheet's placeholder so the user knows the default before they type anything.
+    private func defaultSlotPlaceholder(for item: ReferenceUploadItem) -> String {
+        var count = 0
+        for lib in mediaLibraryItems {
+            if lib.isVideo == item.isVideo { count += 1 }
+            if lib.id == item.id { return item.isVideo ? "Video \(count)" : "Image \(count)" }
+        }
+        return item.isVideo ? "Video" : "Image"
     }
 
     // MARK: - Library actions
 
     private func loadMediaLibrary() async {
+        // Cache hit: show the existing list instantly, no network call, no spinner.
+        let isStale = mediaLibraryLastLoadDate.map { Date().timeIntervalSince($0) > Self.mediaLibraryStaleAfter } ?? true
+        guard !hasLoadedMediaLibraryOnce || isStale else { return }
         guard !isLoadingLibrary else { return }
         isLoadingLibrary = true
         libraryLoadFailed = false
         defer { isLoadingLibrary = false }
         do {
             mediaLibraryItems = try await APIClient.shared.fetchMyUploads()
+            hasLoadedMediaLibraryOnce = true
+            mediaLibraryLastLoadDate = Date()
         } catch {
             print("[GenerateView] fetchMyUploads failed: \(error)")
             libraryLoadFailed = true
         }
     }
 
-    private func selectLibraryItem(_ item: ReferenceUploadItem) async {
-        showMediaLibrary = false
+    /// Finds the "@query" the user just typed, searching only up to the caret so a stray
+    /// identical "@query" substring elsewhere in the prompt (after the caret) can't be
+    /// matched instead — the same caret-bounding fix as the trigger detection above.
+    private func rangeOfActiveMention(query q: String) -> Range<String.Index>? {
+        let caretEnd = promptCursorIndex(in: promptText) ?? promptText.endIndex
+        return promptText[..<caretEnd].range(of: "@\(q)", options: .backwards)
+    }
 
-        let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
-        let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
-        let token: String
-        if let name = item.displayName, !name.isEmpty {
-            token = "[\(name)]"
-        } else {
-            token = item.isVideo ? "[Video\(videoSlot)]" : "[Image\(imageSlot)]"
+    private func commitMention(_ candidate: MentionCandidate) {
+        guard let q = mentionQuery else { return }
+
+        switch candidate {
+        case .upload(let item):
+            let token: String
+            if let name = item.displayName, !name.isEmpty {
+                token = "[\(name)]"
+            } else {
+                let imageSlot = attachedReferences.filter { !$0.isVideo && $0.uploadId != item.id }.count + 1
+                let videoSlot = attachedReferences.filter { $0.isVideo && $0.uploadId != item.id }.count + 1
+                token = item.isVideo ? "[Video\(videoSlot)]" : "[Image\(imageSlot)]"
+            }
+
+            if let range = rangeOfActiveMention(query: q) {
+                promptText.replaceSubrange(range, with: token)
+            }
+
+            if !attachedReferences.contains(where: { $0.uploadId == item.id }) {
+                let ref = AttachedReference(
+                    mimeType: item.mimeType,
+                    thumbnailURL: item.isVideo ? nil : item.url,
+                    fromLibrary: true,
+                    isUploading: false,
+                    uploadId: item.id,
+                    url: item.url,
+                    displayName: item.displayName
+                )
+                attachedReferences.append(ref)
+            }
+
+        case .generation(let item):
+            // Same shape as attachReference(from:), plus the @-mention token insertion that
+            // flow doesn't need (the "Reference" button never touches the prompt text).
+            guard item.status == .completed, let urlString = item.completedMediaUrl, !urlString.isEmpty else { break }
+            let isVideo = !item.isImage
+            let alreadyAttached = attachedReferences.contains { $0.url == urlString }
+
+            if !alreadyAttached {
+                let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
+                let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
+                let token = isVideo ? "[Video\(videoSlot)]" : "[Image\(imageSlot)]"
+                if let range = rangeOfActiveMention(query: q) {
+                    promptText.replaceSubrange(range, with: token)
+                }
+                let ref = AttachedReference(
+                    mimeType: isVideo ? "video/mp4" : "image/jpeg",
+                    thumbnailURL: isVideo ? nil : urlString,
+                    fromLibrary: true,
+                    isUploading: false,
+                    uploadId: nil,
+                    url: urlString,
+                    sourceGenerationId: item.id
+                )
+                attachedReferences.append(ref)
+            } else if let range = rangeOfActiveMention(query: q) {
+                promptText.replaceSubrange(range, with: "")
+            }
         }
 
-        if promptText.hasSuffix("@") {
-            promptText = String(promptText.dropLast()) + token
-        } else {
-            insertToken(token)
-        }
-
-        let ref = AttachedReference(
-            mimeType: item.mimeType,
-            thumbnailURL: item.isVideo ? nil : item.url,
-            fromLibrary: true,
-            isUploading: false,
-            uploadId: item.id,
-            url: item.url,
-            displayName: item.displayName
-        )
-        attachedReferences.append(ref)
+        mentionQuery = nil
+        showMentionSuggestions = false
     }
 
     private func applyRename(to item: ReferenceUploadItem, name: String) async {
@@ -792,7 +1124,7 @@ struct GenerateView: View {
         }
     }
 
-    // MARK: - Photo picker handler
+    // MARK: - Attachment handlers
 
     private func handlePickerSelection(_ pickerItem: PhotosPickerItem?) async {
         guard let item = pickerItem else { return }
@@ -800,25 +1132,56 @@ struct GenerateView: View {
 
         let contentTypes = item.supportedContentTypes
         let isVideo = contentTypes.contains(.movie) || contentTypes.contains(.mpeg4Movie)
+        await handleAttachedData(data, isVideo: isVideo)
 
+        // Reset picker so it can fire again for the next image
+        selectedPickerItem = nil
+    }
+
+    private func handleImportedFile(_ url: URL) async {
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+        guard let data = try? Data(contentsOf: url) else { return }
+
+        let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
+        let isVideo = contentType?.conforms(to: .movie) ?? false
+        await handleAttachedData(data, isVideo: isVideo)
+    }
+
+    /// Uploads a raw attachment and adds its reference card + prompt token. Shared by the
+    /// photo library, camera, and file import sources behind the paperclip menu.
+    private func handleAttachedData(_ data: Data, isVideo: Bool) async {
         // Compute slot before appending
         let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
         let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
 
         if isVideo {
-            let tmpInput = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(UUID().uuidString).tmp")
-            try? data.write(to: tmpInput)
-            let finalUrl = try? await transcodeToH264IfNeeded(url: tmpInput)
-            let finalData = (try? Data(contentsOf: finalUrl ?? tmpInput)) ?? data
-            let thumbUrl = finalUrl ?? tmpInput
-            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: thumbUrl))
-            generator.appliesPreferredTrackTransform = true
-            let thumbnail = (try? generator.copyCGImage(at: .zero, actualTime: nil)).map(UIImage.init)
+            // Perf: file write, duration probe, transcode, final-data read, and thumbnail
+            // extraction all happen off the main actor inside MediaPrepService (a plain actor,
+            // not @MainActor) — this used to run inline here and stutter the UI on attach.
+            guard let written = try? await MediaPrepService.shared.writeAndProbeDuration(data) else {
+                showError("Couldn't read the selected video. Try a different file.")
+                return
+            }
+
+            // Replicate caps total reference-video duration at 15s across all attached videos.
+            let newDuration = written.durationSeconds
+            let existingDuration = attachedReferences
+                .filter { $0.isVideo }
+                .reduce(0.0) { $0 + ($1.durationSeconds ?? 0) }
+            guard existingDuration + newDuration <= 15 else {
+                showError("Reference video is too long — reference videos can't total more than 15 seconds.")
+                try? FileManager.default.removeItem(at: written.url)
+                return
+            }
+
+            let prepared = await MediaPrepService.shared.prepareForUpload(inputURL: written.url, fallbackData: data)
+            let finalData = prepared.data
+            let thumbnail = prepared.thumbnail
 
             // Add card in uploading state
             let token = "[Video\(videoSlot)]"
-            let ref = AttachedReference(mimeType: "video/mp4", thumbnail: thumbnail, isUploading: true)
+            let ref = AttachedReference(mimeType: "video/mp4", thumbnail: thumbnail, isUploading: true, durationSeconds: newDuration)
             let tempId = ref.id
             attachedReferences.append(ref)
             insertToken(token)
@@ -840,9 +1203,10 @@ struct GenerateView: View {
                     }
                 }
             } else {
-                // Upload failed — remove card and token
+                // Upload failed — remove card and token, and tell the user why instead of failing silently
                 attachedReferences.removeAll { $0.id == tempId }
                 rebuildPromptTokens()
+                showError("Couldn't upload reference video — it may be too large. Try a shorter or lower-resolution clip.")
             }
         } else {
             let thumbnail = UIImage(data: data)
@@ -871,23 +1235,115 @@ struct GenerateView: View {
                 rebuildPromptTokens()
             }
         }
-
-        // Reset picker so it can fire again for the next image
-        selectedPickerItem = nil
     }
 
     // MARK: - Reference management
 
     private func removeTopReference() {
         guard let ref = attachedReferences.last else { return }
+        removeReference(ref)
+    }
 
-        // Delete fresh uploads from server (library items stay in library)
+    private func removeReference(_ ref: AttachedReference) {
+        cancelUploadIfNeeded(ref)
+        attachedReferences.removeAll { $0.id == ref.id }
+        rebuildPromptTokens()
+    }
+
+    /// Clears the whole prompt: text plus every attached reference. Used by the "clear text"
+    /// button — without this, attached references silently survived a text clear (no visible
+    /// token pointing at them) and still got sent along with whatever the user typed next.
+    private func clearPrompt() {
+        for ref in attachedReferences { cancelUploadIfNeeded(ref) }
+        attachedReferences.removeAll()
+        promptText = ""
+    }
+
+    private func cancelUploadIfNeeded(_ ref: AttachedReference) {
         if let uploadId = ref.uploadId, !ref.fromLibrary {
             Task { try? await APIClient.shared.deleteUpload(id: uploadId) }
         }
+    }
 
-        attachedReferences.removeLast()
-        rebuildPromptTokens()
+    /// The caret's insertion-point index within `text`, or nil if there's a range selection
+    /// or the field hasn't reported a selection yet (e.g. right after a programmatic edit).
+    private func promptCursorIndex(in text: String) -> String.Index? {
+        guard let selection = promptSelection, selection.isInsertion,
+              case .selection(let range) = selection.indices else { return nil }
+        let idx = range.lowerBound
+        // promptSelection can be stale relative to `text` when promptText was just changed
+        // programmatically (e.g. removing a reference rebuilds the prompt) rather than by a
+        // live keystroke — using an out-of-bounds index here crashes deep inside Foundation's
+        // NSRange conversion, so fall back to "unknown cursor" instead of trusting it blindly.
+        guard idx >= text.startIndex, idx <= text.endIndex else { return nil }
+        return idx
+    }
+
+    /// Detects a single-character deletion that landed inside a [token] and returns
+    /// the snapped text (whole token removed) plus the token's inner content for dereferencing.
+    private func atomicTokenDeletion(old: String, new: String) -> (text: String, inner: String?)? {
+        let oldNS = old as NSString
+        let newNS = new as NSString
+        guard newNS.length == oldNS.length - 1 else { return nil }
+
+        // Find the position (in old) of the deleted character
+        var diffPos = 0
+        while diffPos < newNS.length && oldNS.character(at: diffPos) == newNS.character(at: diffPos) {
+            diffPos += 1
+        }
+
+        guard let re = Self.bracketTokenRegex else { return nil }
+        for match in re.matches(in: old, range: NSRange(location: 0, length: oldNS.length)) {
+            let start = match.range.location
+            let end = start + match.range.length
+            guard diffPos >= start && diffPos < end else { continue }
+
+            // Deleted char was inside this token — snap to removing the whole thing
+            guard let tokenRange = Range(match.range, in: old) else { continue }
+            let inner = String(String(old[tokenRange]).dropFirst().dropLast())
+
+            // Eat one flanking space to avoid double-spaces
+            var removeRange = match.range
+            if removeRange.location > 0 && oldNS.character(at: removeRange.location - 1) == 32 {
+                removeRange.location -= 1
+                removeRange.length += 1
+            } else if end < oldNS.length && oldNS.character(at: end) == 32 {
+                removeRange.length += 1
+            }
+
+            var result = old
+            if let r = Range(removeRange, in: old) { result.removeSubrange(r) }
+            return (result, inner)
+        }
+        return nil
+    }
+
+    /// Removes the attachment whose prompt token had the given inner content.
+    /// For named refs ([bob] → inner="bob"), matches by displayName.
+    /// For positional refs ([Image1] → inner="Image1"), matches by slot index then rebuilds.
+    private func dereferenceToken(_ inner: String) {
+        // Named token
+        if let idx = attachedReferences.firstIndex(where: {
+            let name = ($0.displayName ?? "").trimmingCharacters(in: .whitespaces)
+            return !name.isEmpty && name.caseInsensitiveCompare(inner) == .orderedSame
+        }) {
+            attachedReferences.remove(at: idx)
+            return
+        }
+
+        // Positional token: "Image2" or "Video1"
+        let isVideo = inner.hasPrefix("Video")
+        let prefix = isVideo ? "Video" : "Image"
+        if inner.hasPrefix(prefix), let n = Int(inner.dropFirst(prefix.count)), n >= 1 {
+            let indices = attachedReferences.indices.filter {
+                attachedReferences[$0].isVideo == isVideo &&
+                (attachedReferences[$0].displayName ?? "").isEmpty
+            }
+            if n - 1 < indices.count {
+                attachedReferences.remove(at: indices[n - 1])
+                rebuildPromptTokens()
+            }
+        }
     }
 
     /// Rebuilds [ImageN]/[VideoN] tokens in the prompt to match current attachedReferences.
@@ -895,7 +1351,7 @@ struct GenerateView: View {
     private func rebuildPromptTokens() {
         var text = promptText
         // Strip ALL [anything] tokens — covers named ([sarah]) and positional ([Image1])
-        if let re = try? NSRegularExpression(pattern: "\\s*\\[[^\\]]+\\]") {
+        if let re = Self.bracketTokenWithLeadingSpaceRegex {
             text = re.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
         }
         text = text.trimmingCharacters(in: .whitespaces)
@@ -958,6 +1414,7 @@ struct GenerateView: View {
                     aspectRatio: nil,
                     audioEnabled: nil,
                     imageAspectRatio: selectedImageResolution.rawValue,
+                    imageQuality: nil,
                     referenceImages: refImages.isEmpty ? nil : refImages,
                     referenceVideos: refVideos.isEmpty ? nil : refVideos,
                     referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
@@ -971,8 +1428,8 @@ struct GenerateView: View {
                     resolution: selectedResolution,
                     aspectRatio: selectedAspectRatio,
                     audioEnabled: audioEnabled,
-                    width: nil,
-                    height: nil,
+                    imageAspectRatio: nil,
+                    imageQuality: nil,
                     referenceImages: refImages.isEmpty ? nil : refImages,
                     referenceVideos: refVideos.isEmpty ? nil : refVideos,
                     referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
@@ -982,20 +1439,31 @@ struct GenerateView: View {
 
             promptText = ""
             attachedReferences = []
-            await generationManager.refresh()
-            generationManager.startPolling()
+            // forceRefresh: the just-created item isn't in the cached array yet, so the
+            // staleness guard in startPolling() must be bypassed here regardless of how
+            // recently the list was last fetched (was a separate explicit refresh() call before).
+            generationManager.startPolling(forceRefresh: true)
+            await creditManager.fetchBalance()
 
         } catch let apiError as APIError {
             if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
-                errorMessage = "Prompt may not adhere to our community guidelines. Please try again."
+                showError("Prompt may not adhere to our community guidelines. Please try again.")
             } else {
-                errorMessage = "An error has occurred. Please try again."
+                showError("An error has occurred. Please try again.")
             }
             await generationManager.refresh()
         } catch {
             print("[GenerateView] dispatch error: \(error)")
-            errorMessage = "An error has occurred. Please try again."
+            showError("An error has occurred. Please try again.")
             await generationManager.refresh()
+        }
+    }
+
+    private func showError(_ message: String) {
+        withAnimation { errorMessage = message }
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            withAnimation { errorMessage = nil }
         }
     }
 
@@ -1036,6 +1504,76 @@ struct GenerateView: View {
         promptFocused = true
     }
 
+    // Reference — attach this generation's own output as a new reference input,
+    // without touching the current prompt or settings. Unlike Remix (which
+    // reloads the original prompt/settings/references for editing), this lets
+    // the user build on the *result* of a past generation.
+    private func handleReference(item: GenerationItem) {
+        attachReference(from: item)
+    }
+
+    private func attachReference(from item: GenerationItem) {
+        guard item.status == .completed else { return }
+        let urlString = item.isImage ? item.completedMediaUrl : item.videoUrl
+        guard let urlString, !urlString.isEmpty else { return }
+        let isVideo = !item.isImage
+        let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
+        let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
+        let token = isVideo ? "[Video\(videoSlot)]" : "[Image\(imageSlot)]"
+        let attached = AttachedReference(
+            mimeType: isVideo ? "video/mp4" : "image/jpeg",
+            thumbnailURL: item.isImage ? urlString : nil,
+            fromLibrary: true,
+            isUploading: false,
+            uploadId: nil,
+            url: urlString,
+            sourceGenerationId: item.id
+        )
+        attachedReferences.append(attached)
+        insertToken(token)
+        promptFocused = true
+    }
+
+    // Long-press "Name as reference" — promotes this generation's output into the permanent
+    // reference library (server copies the R2 object so it's independently owned and never
+    // expires), unlike the "Reference" button which only attaches a short-lived presigned URL
+    // to the current draft.
+    private func handleNameAsReference(item: GenerationItem) {
+        guard item.status == .completed else { return }
+        newReferenceName = ""
+        namingReferenceFromGeneration = item
+    }
+
+    private func saveGenerationAsReference(item: GenerationItem, name: String) async {
+        guard let response = try? await APIClient.shared.createReferenceFromGeneration(
+            generationId: item.id, displayName: name
+        ), let id = response.id else {
+            showError("Couldn't save this as a reference.")
+            return
+        }
+        let resolvedName = response.displayName ?? (name.isEmpty ? nil : name)
+        withAnimation(.spring(response: 0.3)) {
+            mediaLibraryItems.insert(
+                ReferenceUploadItem(
+                    id: id,
+                    url: response.url,
+                    mimeType: response.mimeType ?? (item.isImage ? "image/jpeg" : "video/mp4"),
+                    displayName: resolvedName
+                ),
+                at: 0
+            )
+        }
+        // If this generation's output is already attached to the current draft (e.g. via the
+        // "Reference" button or an @-mention), it was attached with uploadId: nil since no
+        // reference_uploads row existed yet — now that we've just created one, back-fill it so
+        // the chip picks up the name/token and future long-presses use the normal rename path.
+        if let idx = attachedReferences.firstIndex(where: { $0.sourceGenerationId == item.id && $0.uploadId == nil }) {
+            attachedReferences[idx].uploadId = id
+            attachedReferences[idx].displayName = resolvedName
+            rebuildPromptTokens()
+        }
+    }
+
     private func handleRegenerate(item: GenerationItem) async {
         let cost: Int
         if item.isImage {
@@ -1064,18 +1602,17 @@ struct GenerateView: View {
             mediaType: item.isImage ? "image" : "video",
             duration: item.params.duration,
             resolution: item.params.resolution,
-            aspectRatio: item.params.aspectRatio,
+            aspectRatio: item.isImage ? nil : item.params.aspectRatio,
             audioEnabled: item.params.audioEnabled,
-            width: item.params.width,
-            height: item.params.height,
+            imageAspectRatio: item.isImage ? item.params.aspectRatio : nil,
+            imageQuality: nil,
             referenceImages: refImages,
             referenceVideos: refVideos,
             referenceUploadIds: nil
         )
         do {
             _ = try await APIClient.shared.submitGeneration(body: body)
-            await generationManager.refresh()
-            generationManager.startPolling()
+            generationManager.startPolling(forceRefresh: true)
         } catch {
             print("[GenerateView] regenerate error: \(error)")
         }
@@ -1098,6 +1635,173 @@ struct GenerateView: View {
     }
 }
 
+// MARK: - NameReferenceSheet
+
+/// Shared naming UI for both "rename an existing upload" and "name this generation as a
+/// reference" flows. The leading "@" is a static prefix (not editable) so the field reads as
+/// "@name" — teaching the user that whatever they type here is what they'll type after "@" in
+/// the prompt bar to recall this reference later. The placeholder shows the positional default
+/// (e.g. "Image 1") the item falls back to if saved blank.
+private struct NameReferenceSheet: View {
+    let placeholder: String
+    @Binding var text: String
+    let onSave: (String) -> Void
+    let onCancel: () -> Void
+
+    @FocusState private var focused: Bool
+    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Text("Name this reference")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .padding(.top, 22)
+
+            HStack(spacing: 2) {
+                Text("@")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(accent)
+                TextField(placeholder, text: $text)
+                    .autocorrectionDisabled()
+                    .foregroundStyle(.white)
+                    .focused($focused)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 1))
+            .padding(.horizontal, 20)
+
+            Text("Type \"@\(text.isEmpty ? placeholder : text)\" in a prompt to use it again.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.4))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+
+            HStack(spacing: 12) {
+                Button {
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    onSave(text)
+                } label: {
+                    Text("Save")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+
+            Spacer(minLength: 0)
+        }
+        .background(Color(red: 0.1, green: 0.095, blue: 0.12))
+        .onAppear { focused = true }
+    }
+}
+
+// MARK: - MentionCandidate
+
+/// An entry in the @-mention suggestion list — either a saved reference_uploads item, or a
+/// synthetic candidate wrapping a live GenerationItem (e.g. "latest generation"). GenerationItem
+/// has no display_name of its own, so it's never eligible for name-filtered search results;
+/// it only ever appears in the default (just-typed-@, no filter text) suggestion list.
+private enum MentionCandidate: Identifiable {
+    case upload(ReferenceUploadItem)
+    case generation(GenerationItem)
+
+    var id: String {
+        switch self {
+        case .upload(let item): return "upload-\(item.id)"
+        case .generation(let item): return "generation-\(item.id)"
+        }
+    }
+
+    var isVideo: Bool {
+        switch self {
+        case .upload(let item): return item.isVideo
+        case .generation(let item): return !item.isImage
+        }
+    }
+
+    var thumbnailURL: String? {
+        switch self {
+        case .upload(let item): return item.isVideo ? nil : item.url
+        case .generation(let item): return item.isImage ? item.completedMediaUrl : nil
+        }
+    }
+
+    var hasCustomName: Bool {
+        if case .upload(let item) = self { return item.displayName != nil }
+        return false
+    }
+
+    /// mediaLibraryItems is passed in so unnamed uploads can compute the same "Video N"/"Image N"
+    /// positional label GenerateView already shows elsewhere (librarySlotLabel).
+    func displayLabel(in mediaLibraryItems: [ReferenceUploadItem]) -> String {
+        switch self {
+        case .upload(let item):
+            if let name = item.displayName { return name }
+            var count = 0
+            for lib in mediaLibraryItems {
+                if lib.isVideo == item.isVideo { count += 1 }
+                if lib.id == item.id { return item.isVideo ? "Video \(count)" : "Image \(count)" }
+            }
+            return item.isVideo ? "Video" : "Image"
+        case .generation:
+            return "Latest generation"
+        }
+    }
+}
+
+// MARK: - CachedThumbnailImage
+
+/// AsyncImage replacement that caches by a caller-supplied stable key instead of the URL —
+/// presigned URLs rotate on every fetch, which defeats AsyncImage's built-in (URL-keyed, and
+/// otherwise nonexistent beyond in-flight dedup) caching for the same underlying asset.
+/// Downscales to a small thumbnail size before caching (these are always shown at ≤64pt).
+private struct CachedThumbnailImage: View {
+    let cacheKey: String
+    let url: URL?
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Color.white.opacity(0.08)
+            }
+        }
+        .task(id: cacheKey) {
+            guard image == nil else { return }
+            if let cached = await ThumbnailCache.shared.image(for: cacheKey) { image = cached; return }
+            guard let url, let (data, _) = try? await URLSession.shared.data(from: url),
+                  let downloaded = UIImage(data: data) else { return }
+            let thumb = downloaded.preparingThumbnail(of: CGSize(width: 160, height: 160)) ?? downloaded
+            ThumbnailCache.shared[cacheKey] = thumb
+            image = thumb
+        }
+    }
+}
+
 // MARK: - AttachedReference
 
 private struct AttachedReference: Identifiable {
@@ -1110,6 +1814,11 @@ private struct AttachedReference: Identifiable {
     var fromLibrary: Bool
     var isUploading: Bool
     var displayName: String?   // nil = positional token; set = "[name]" shown in prompt
+    var durationSeconds: Double?   // video references only — used to enforce Replicate's 15s total cap
+    // Set when this reference's media came directly from a generation's output (via the
+    // "Reference" button or an @-mention on a live generation) rather than an existing
+    // reference_uploads row. uploadId is nil until the user names it — see saveGenerationAsReference.
+    var sourceGenerationId: String?
 
     var isVideo: Bool { mimeType.hasPrefix("video/") }
     var isReady: Bool { !isUploading && !url.isEmpty }
@@ -1121,7 +1830,8 @@ private struct AttachedReference: Identifiable {
 
     init(mimeType: String, thumbnail: UIImage? = nil, thumbnailURL: String? = nil,
          fromLibrary: Bool = false, isUploading: Bool = false,
-         uploadId: String? = nil, url: String = "", displayName: String? = nil) {
+         uploadId: String? = nil, url: String = "", displayName: String? = nil,
+         durationSeconds: Double? = nil, sourceGenerationId: String? = nil) {
         self.id = UUID().uuidString
         self.mimeType = mimeType
         self.thumbnail = thumbnail
@@ -1131,54 +1841,9 @@ private struct AttachedReference: Identifiable {
         self.uploadId = uploadId
         self.url = url
         self.displayName = displayName
+        self.durationSeconds = durationSeconds
+        self.sourceGenerationId = sourceGenerationId
     }
-}
-
-// MARK: - HEVC transcoding helper
-
-private extension AVAssetExportSession {
-    func exportAsync() async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exportAsynchronously {
-                switch self.status {
-                case .completed:
-                    continuation.resume()
-                case .failed:
-                    continuation.resume(throwing: self.error ?? NSError(domain: "AVExport", code: -1))
-                case .cancelled:
-                    continuation.resume(throwing: CancellationError())
-                default:
-                    continuation.resume(throwing: NSError(domain: "AVExport", code: -1))
-                }
-            }
-        }
-    }
-}
-
-@MainActor
-private func transcodeToH264IfNeeded(url: URL) async throws -> URL {
-    let asset = AVURLAsset(url: url)
-    let tracks = try await asset.loadTracks(withMediaType: .video)
-    guard let track = tracks.first else { return url }
-    let descs = try await track.load(.formatDescriptions)
-    let isHEVC = descs.contains {
-        CMFormatDescriptionGetMediaSubType($0 as! CMFormatDescription) == kCMVideoCodecType_HEVC
-    }
-    guard isHEVC else { return url }
-
-    let tmpURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString)
-        .appendingPathExtension("mp4")
-    guard let session = AVAssetExportSession(
-        asset: asset,
-        presetName: AVAssetExportPresetHighestQuality
-    ) else {
-        throw NSError(domain: "AVExport", code: -1)
-    }
-    session.outputURL = tmpURL
-    session.outputFileType = .mp4
-    try await session.exportAsync()
-    return tmpURL
 }
 
 #Preview {

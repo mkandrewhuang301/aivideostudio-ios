@@ -2,7 +2,7 @@ name: Fantasia
 options:
   bundleIdPrefix: com.fantasiaai
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
   xcodeVersion: "15"
 packages:
   firebase-ios-sdk:
@@ -18,7 +18,7 @@ targets:
   Fantasia:
     type: application
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "18.0"
     sources: [Fantasia]
     dependencies:
       - package: firebase-ios-sdk
@@ -27,6 +27,8 @@ targets:
         product: RevenueCat
       - package: google-signin
         product: GoogleSignIn
+      - package: google-signin
+        product: GoogleSignInSwift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai
@@ -34,8 +36,9 @@ targets:
         MARKETING_VERSION: 0.0.1
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
-        IPHONEOS_DEPLOYMENT_TARGET: 17.0
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0
         TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_ENTITLEMENTS: Fantasia/Fantasia.entitlements
     info:
       path: Fantasia/Info.plist
       properties:
@@ -43,7 +46,7 @@ targets:
         CFBundleIconName: AppIcon
         CFBundleURLTypes:
           - CFBundleURLSchemes:
-              - com.googleusercontent.apps.PLACEHOLDER_CLIENT_ID
+              - com.googleusercontent.apps.969774210522-77jg1i3do9e5go118tf4asddulvr6ps2
         ITSAppUsesNonExemptEncryption: false
         UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:
@@ -56,7 +59,7 @@ targets:
   FantasiaTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "18.0"
     sources: [FantasiaTests]
     dependencies:
       - target: Fantasia
@@ -64,4 +67,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fantasiaai.tests
         SWIFT_VERSION: 5.9
-        IPHONEOS_DEPLOYMENT_TARGET: 17.0
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0

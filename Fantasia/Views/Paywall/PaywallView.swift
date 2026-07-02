@@ -16,10 +16,9 @@ enum BillingPeriod: String, CaseIterable {
 struct PaywallView: View {
     @Binding var isPresented: Bool
     @Environment(CreditManager.self) private var creditManager
+    @Environment(OfferingsManager.self) private var offeringsManager
     @State private var purchaseManager: PurchaseManager?
     @State private var selectedPeriod: BillingPeriod = .annual   // D-02: annual pre-selected
-    @State private var packages: [Package] = []
-    @State private var loadingPackages: Bool = true
     @State private var purchasingPlanId: String? = nil
     @State private var isRestoring: Bool = false
     @State private var restoreMessage: String? = nil
@@ -139,14 +138,15 @@ struct PaywallView: View {
     }
 
     private func package(for productId: String) -> Package? {
-        packages.first { $0.storeProduct.productIdentifier == productId }
+        offeringsManager.package(for: productId)
     }
 
     private func displayPrice(for data: PlanData) -> String {
         if let pkg = package(for: data.productId) {
             return pkg.storeProduct.localizedPriceString
         }
-        return data.monthlyDisplayPrice
+        // Offline fallback: locally-cached last-known price, else the hardcoded default.
+        return offeringsManager.cachedPrice(for: data.productId) ?? data.monthlyDisplayPrice
     }
 
     // MARK: — Body
@@ -214,7 +214,7 @@ struct PaywallView: View {
         .task {
             let manager = PurchaseManager(creditManager: creditManager)
             purchaseManager = manager
-            await loadOfferings()
+            await offeringsManager.refreshIfNeeded() // no-op if we already have fresh packages
         }
     }
 
@@ -375,17 +375,6 @@ struct PaywallView: View {
 
     // MARK: — Actions
 
-    private func loadOfferings() async {
-        loadingPackages = true
-        let offerings = try? await Purchases.shared.offerings()
-        packages = offerings?.current?.availablePackages
-            .filter { pkg in
-                let id = pkg.storeProduct.productIdentifier
-                return id.contains("basic") || id.contains("pro") || id.contains("creator")
-            } ?? []
-        loadingPackages = false
-    }
-
     private func purchase(productId: String) async {
         guard let pm = purchaseManager else { return }
         guard let pkg = package(for: productId) else {
@@ -398,8 +387,9 @@ struct PaywallView: View {
         purchasingPlanId = nil
         if let err = pm.purchaseError {
             errorMessage = err
+        } else {
+            isPresented = false
         }
-        // On success: creditManager.entitlementLevel updates → ContentView routes to MainTabView automatically
     }
 
     private func restore() async {
@@ -413,12 +403,14 @@ struct PaywallView: View {
             restoreMessage = err
         } else if creditManager.entitlementLevel == .none {
             restoreMessage = "No active subscription found."
+        } else {
+            isPresented = false
         }
-        // On success: entitlementLevel updates → ContentView routes to MainTabView
     }
 }
 
 #Preview {
     PaywallView(isPresented: .constant(true))
         .environment(CreditManager())
+        .environment(OfferingsManager())
 }

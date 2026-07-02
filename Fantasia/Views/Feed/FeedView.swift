@@ -39,6 +39,8 @@ struct FeedView: View {
                             },
                             onRemix: { handleRemix(item: item) },
                             onRegenerate: { Task { await handleRegenerate(item: item) } },
+                            onReference: { handleReference(item: item) },
+                            onNameAsReference: {},
                             onDelete: { Task { await handleDelete(item: item) } }
                         )
                     }
@@ -65,6 +67,7 @@ struct FeedView: View {
         .sheet(item: $selectedItem) { item in
             GenerationDetailSheet(item: item, isPresented: $showDetailSheet)
                 .environment(authManager)
+                .environment(generationManager)
         }
         // D-36: Low-credits alert for Regenerate
         // Shown when creditsBalance < estimatedCost(for: item); user may still proceed
@@ -102,6 +105,13 @@ struct FeedView: View {
         NotificationCenter.default.post(name: .remixGenerationRequested, object: nil)
     }
 
+    // Reference — attach this generation's own output as a reference input,
+    // then switch to Generate tab via notification (mirrors handleRemix above).
+    private func handleReference(item: GenerationItem) {
+        generationManager.pendingReference = item
+        NotificationCenter.default.post(name: .referenceGenerationRequested, object: nil)
+    }
+
     // D-36: Regenerate — check credit balance first; show confirmation if low
     // Backend still enforces credits server-side; this alert is a UX pre-flight only
     private func handleRegenerate(item: GenerationItem) async {
@@ -132,10 +142,10 @@ struct FeedView: View {
             mediaType: item.isImage ? "image" : "video",
             duration: item.params.duration,
             resolution: item.params.resolution,
-            aspectRatio: item.params.aspectRatio,
+            aspectRatio: item.isImage ? nil : item.params.aspectRatio,
             audioEnabled: item.params.audioEnabled,
-            width: item.params.width,
-            height: item.params.height,
+            imageAspectRatio: item.isImage ? item.params.aspectRatio : nil,
+            imageQuality: nil,
             referenceImages: nil,
             referenceVideos: nil,
             referenceUploadIds: nil
@@ -163,4 +173,5 @@ struct FeedView: View {
 
 extension Notification.Name {
     static let remixGenerationRequested = Notification.Name("remixGenerationRequested")
+    static let referenceGenerationRequested = Notification.Name("referenceGenerationRequested")
 }
