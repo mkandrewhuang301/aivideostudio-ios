@@ -58,14 +58,11 @@ struct GenerateView: View {
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
 
-    // Rename sheet
+    // Rename an existing upload (distinct from generationManager.pendingNameAsReference,
+    // which promotes a past generation's output into a brand-new reference — see
+    // NameAsReferenceAlertModifier).
     @State private var renamingItem: ReferenceUploadItem? = nil
     @State private var renameText = ""
-
-    // "Name as reference" — promotes a past generation's output into the permanent
-    // reference library (distinct from renamingItem, which renames an existing upload)
-    @State private var namingReferenceFromGeneration: GenerationItem? = nil
-    @State private var newReferenceName = ""
 
     // Media library + @-mention state
     @State private var mentionQuery: String? = nil
@@ -365,10 +362,19 @@ struct GenerateView: View {
                 attachReference(from: refItem)
                 generationManager.pendingReference = nil
             }
-            if let nameItem = generationManager.pendingNameAsReference {
-                handleNameAsReference(item: nameItem)
-                generationManager.pendingNameAsReference = nil
-            }
+        }
+        .onChange(of: mediaLibrary.lastSavedReference) { _, saved in
+            // If the just-named generation's raw output was already attached to the current
+            // draft (via the "Reference" button or an @-mention), it was attached with
+            // uploadId: nil since no reference_uploads row existed yet — back-fill it now so
+            // the chip picks up the name/token and future long-presses use the rename path.
+            guard let saved,
+                  let idx = attachedReferences.firstIndex(where: {
+                      $0.sourceGenerationId == saved.generationId && $0.uploadId == nil
+                  }) else { return }
+            attachedReferences[idx].uploadId = saved.uploadId
+            attachedReferences[idx].displayName = saved.displayName
+            rebuildPromptTokens()
         }
         .onDisappear { generationManager.stopPolling() }
         .onReceive(NotificationCenter.default.publisher(for: .generationCompleted)) { _ in
@@ -403,41 +409,21 @@ struct GenerateView: View {
             guard case .success(let url) = result else { return }
             Task { await handleImportedFile(url) }
         }
-        .sheet(isPresented: Binding(
+        .alert("Rename Reference", isPresented: Binding(
             get: { renamingItem != nil },
             set: { if !$0 { renamingItem = nil } }
         )) {
-            NameReferenceSheet(
-                placeholder: renamingItem.map { defaultSlotPlaceholder(for: $0) } ?? "",
-                text: $renameText,
-                onSave: { name in
-                    guard let item = renamingItem else { return }
-                    let trimmed = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
-                    Task { await applyRename(to: item, name: trimmed) }
-                    renamingItem = nil
-                },
-                onCancel: { renamingItem = nil }
-            )
-            .presentationDetents([.height(230)])
-            .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: Binding(
-            get: { namingReferenceFromGeneration != nil },
-            set: { if !$0 { namingReferenceFromGeneration = nil } }
-        )) {
-            NameReferenceSheet(
-                placeholder: namingReferenceFromGeneration.map { $0.isImage ? "Image" : "Video" } ?? "",
-                text: $newReferenceName,
-                onSave: { name in
-                    guard let item = namingReferenceFromGeneration else { return }
-                    let trimmed = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
-                    Task { await saveGenerationAsReference(item: item, name: trimmed) }
-                    namingReferenceFromGeneration = nil
-                },
-                onCancel: { namingReferenceFromGeneration = nil }
-            )
-            .presentationDetents([.height(230)])
-            .presentationDragIndicator(.hidden)
+            TextField(renamingItem.map { defaultSlotPlaceholder(for: $0) } ?? "", text: $renameText)
+                .autocorrectionDisabled()
+            Button("Save") {
+                guard let item = renamingItem else { return }
+                let trimmed = String(renameText.trimmingCharacters(in: .whitespaces).prefix(40))
+                Task { await applyRename(to: item, name: trimmed) }
+                renamingItem = nil
+            }
+            Button("Cancel", role: .cancel) { renamingItem = nil }
+        } message: {
+            Text("Use [name] in prompts to reference this media.")
         }
         .sheet(item: $selectedItem) { item in
             GenerationDetailPagerView(
@@ -1551,40 +1537,13 @@ struct GenerateView: View {
     // Long-press "Name as reference" — promotes this generation's output into the permanent
     // reference library (server copies the R2 object so it's independently owned and never
     // expires), unlike the "Reference" button which only attaches a short-lived presigned URL
-    // to the current draft.
+    // to the current draft. The actual save + chip backfill are handled by
+    // NameAsReferenceAlertModifier (hosted in MainTabView) and the .onChange(of:
+    // mediaLibrary.lastSavedReference) above, since this trigger can also fire from Library,
+    // the detail sheet, and the fullscreen image viewer — not just this screen.
     private func handleNameAsReference(item: GenerationItem) {
         guard item.status == .completed else { return }
-        newReferenceName = ""
-        namingReferenceFromGeneration = item
-    }
-
-    private func saveGenerationAsReference(item: GenerationItem, name: String) async {
-        guard let response = try? await APIClient.shared.createReferenceFromGeneration(
-            generationId: item.id, displayName: name
-        ), let id = response.id else {
-            showError("Couldn't save this as a reference.")
-            return
-        }
-        let resolvedName = response.displayName ?? (name.isEmpty ? nil : name)
-        withAnimation(.spring(response: 0.3)) {
-            mediaLibrary.insert(
-                ReferenceUploadItem(
-                    id: id,
-                    url: response.url,
-                    mimeType: response.mimeType ?? (item.isImage ? "image/jpeg" : "video/mp4"),
-                    displayName: resolvedName
-                )
-            )
-        }
-        // If this generation's output is already attached to the current draft (e.g. via the
-        // "Reference" button or an @-mention), it was attached with uploadId: nil since no
-        // reference_uploads row existed yet — now that we've just created one, back-fill it so
-        // the chip picks up the name/token and future long-presses use the normal rename path.
-        if let idx = attachedReferences.firstIndex(where: { $0.sourceGenerationId == item.id && $0.uploadId == nil }) {
-            attachedReferences[idx].uploadId = id
-            attachedReferences[idx].displayName = resolvedName
-            rebuildPromptTokens()
-        }
+        generationManager.pendingNameAsReference = item
     }
 
     private func handleRegenerate(item: GenerationItem) async {
@@ -1730,88 +1689,6 @@ private struct SwipeToDeleteRow<Content: View>: View {
                         onRequestDelete()
                     }
             )
-    }
-}
-
-// MARK: - NameReferenceSheet
-
-/// Shared naming UI for both "rename an existing upload" and "name this generation as a
-/// reference" flows. The leading "@" is a static prefix (not editable) so the field reads as
-/// "@name" — teaching the user that whatever they type here is what they'll type after "@" in
-/// the prompt bar to recall this reference later. The placeholder shows the positional default
-/// (e.g. "Image 1") the item falls back to if saved blank.
-private struct NameReferenceSheet: View {
-    let placeholder: String
-    @Binding var text: String
-    let onSave: (String) -> Void
-    let onCancel: () -> Void
-
-    @FocusState private var focused: Bool
-    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
-
-    var body: some View {
-        VStack(spacing: 18) {
-            Text("Name this reference")
-                .font(.headline)
-                .foregroundStyle(.white)
-                .padding(.top, 22)
-
-            HStack(spacing: 2) {
-                Text("@")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(accent)
-                TextField(placeholder, text: $text)
-                    .autocorrectionDisabled()
-                    .foregroundStyle(.white)
-                    .focused($focused)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 1))
-            .padding(.horizontal, 20)
-
-            Text("Type \"@\(text.isEmpty ? placeholder : text)\" in a prompt to use it again.")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-
-            HStack(spacing: 12) {
-                Button {
-                    onCancel()
-                } label: {
-                    Text("Cancel")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    onSave(text)
-                } label: {
-                    Text("Save")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
-
-            Spacer(minLength: 0)
-        }
-        .background(Color(red: 0.1, green: 0.095, blue: 0.12))
-        .onAppear { focused = true }
     }
 }
 

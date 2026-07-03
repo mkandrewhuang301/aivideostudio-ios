@@ -63,7 +63,6 @@ struct LibraryThumbnailView: View {
             if item.status == .completed {
                 Button("Name as reference", systemImage: "tag") {
                     generationManager.pendingNameAsReference = item
-                    NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
                 }
             }
         }

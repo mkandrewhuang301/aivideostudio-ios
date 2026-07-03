@@ -61,8 +61,6 @@ struct FullScreenImageView: View {
                     if item.status == .completed {
                         Button("Name as reference", systemImage: "tag") {
                             generationManager.pendingNameAsReference = item
-                            NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
-                            dismiss()
                         }
                     }
                 }
@@ -96,6 +94,7 @@ struct FullScreenImageView: View {
         }
         .background(TransparentFullScreenBackground())
         .statusBar(hidden: true)
+        .nameAsReferenceAlert()
         .onAppear {
             Task {
                 if let cached = await ThumbnailCache.shared.image(for: item.id) {

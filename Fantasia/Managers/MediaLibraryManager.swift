@@ -7,6 +7,7 @@
 // responds.
 
 import Foundation
+import SwiftUI
 import FirebaseAuth
 
 @Observable
@@ -15,9 +16,19 @@ final class MediaLibraryManager {
     private static let snapshotName = "uploadsSnapshot"
     private static let staleAfter: TimeInterval = 300
 
+    /// Emitted after a successful `saveGenerationAsReference` so callers that had already
+    /// attached the source generation's raw output as a draft chip (uploadId == nil) can
+    /// backfill that chip with the newly-created reference_uploads id.
+    struct SavedReference: Equatable {
+        let generationId: String
+        let uploadId: String
+        let displayName: String?
+    }
+
     var items: [ReferenceUploadItem] = []
     var isLoading = false
     var loadFailed = false
+    private(set) var lastSavedReference: SavedReference?
     // Perf: reopening the @-mention popup used to refetch GET /api/uploads from scratch every
     // single time (each open/close cycle reset showMentionSuggestions, re-arming the fetch
     // guard below). New/renamed/deleted items are already applied to `items` in place elsewhere
@@ -88,5 +99,26 @@ final class MediaLibraryManager {
     func remove(id: String) {
         items.removeAll { $0.id == id }
         persistSnapshot()
+    }
+
+    // Promotes a completed generation's output into the permanent reference library (server
+    // copies the R2 object so it's independently owned and never expires). Returns false on
+    // failure so the caller can surface an error.
+    @discardableResult
+    func saveGenerationAsReference(item: GenerationItem, name: String) async -> Bool {
+        guard let response = try? await APIClient.shared.createReferenceFromGeneration(
+            generationId: item.id, displayName: name
+        ), let id = response.id else { return false }
+        let resolvedName = response.displayName ?? (name.isEmpty ? nil : name)
+        withAnimation(.spring(response: 0.3)) {
+            insert(ReferenceUploadItem(
+                id: id,
+                url: response.url,
+                mimeType: response.mimeType ?? (item.isImage ? "image/jpeg" : "video/mp4"),
+                displayName: resolvedName
+            ))
+        }
+        lastSavedReference = SavedReference(generationId: item.id, uploadId: id, displayName: resolvedName)
+        return true
     }
 }

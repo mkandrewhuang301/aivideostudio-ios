@@ -74,9 +74,7 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
             selectedTab = 1
         }
-        .onReceive(NotificationCenter.default.publisher(for: .nameAsReferenceRequested)) { _ in
-            selectedTab = 1
-        }
+        .nameAsReferenceAlert()
         .sheet(isPresented: $showProfileSheet) {
             ProfileCreditSheet(isPresented: $showProfileSheet)
                 .environment(creditManager)

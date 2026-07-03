@@ -269,6 +269,7 @@ struct GenerationDetailSheet: View {
         } message: {
             Text(shareError ?? "")
         }
+        .nameAsReferenceAlert()
         .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
@@ -304,8 +305,6 @@ struct GenerationDetailSheet: View {
         if item.status == .completed {
             Button("Name as reference", systemImage: "tag") {
                 generationManager.pendingNameAsReference = item
-                NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
-                isPresented = false
             }
         }
     }

@@ -187,7 +187,6 @@ struct FeedView: View {
 }
 
 extension Notification.Name {
-    static let nameAsReferenceRequested = Notification.Name("nameAsReferenceRequested")
     static let remixGenerationRequested = Notification.Name("remixGenerationRequested")
     static let referenceGenerationRequested = Notification.Name("referenceGenerationRequested")
 }
