@@ -171,6 +171,14 @@ struct GenerateView: View {
         !audioEnabled
     }
 
+    /// Compact "current settings at a glance" label shown on the closed Options pill.
+    private var optionsSummary: String {
+        if selectedMode == "AI Image" {
+            return "Options · \(selectedImageResolution.rawValue)"
+        }
+        return "Options · \(selectedResolution) · \(selectedDuration)s · \(selectedAspectRatio)"
+    }
+
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
         ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
         ("Underwater city",      "water.waves",        "An ancient sunken city lit by bioluminescent coral, camera drifting through archways"),
@@ -808,15 +816,21 @@ struct GenerateView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 11, weight: .medium))
-                        ZStack {
-                            Text("Options").opacity(0)
+                        ZStack(alignment: .leading) {
+                            // Sized against the longest realistic summary (not literal "Options")
+                            // so the pill doesn't reflow width as settings change.
+                            Text("Options · 1080p · 12s · 16:9").opacity(0).lineLimit(1)
                             if showOptions {
                                 Text("Hide").transition(.opacity)
                             } else {
-                                Text("Options").transition(.opacity)
+                                Text(optionsSummary).transition(.opacity).lineLimit(1)
                             }
                         }
                         .font(.caption.weight(.medium))
+                        if !showOptions, selectedMode != "AI Image", !audioEnabled {
+                            Image(systemName: "speaker.slash.fill")
+                                .font(.system(size: 9, weight: .medium))
+                        }
                     }
                     .foregroundStyle(hasNonDefaultSettings ? theme.textPrimary : theme.textTertiary)
                     .padding(.horizontal, 10)
@@ -825,9 +839,11 @@ struct GenerateView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(hasNonDefaultSettings ? theme.surfaceStrongBorder : theme.surfaceBorder, lineWidth: 0.5))
                 }
-                .buttonStyle(.plain)
-                Spacer()
+                .buttonStyle(PressableButtonStyle())
+                .layoutPriority(0)
+                Spacer(minLength: 4)
                 creditCostLabel
+                    .layoutPriority(1)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
