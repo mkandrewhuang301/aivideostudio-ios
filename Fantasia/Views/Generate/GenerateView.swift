@@ -80,7 +80,6 @@ struct GenerateView: View {
     // Card actions
     @State private var selectedItem: GenerationItem? = nil
     @State private var isLoadingOlderHistory = false
-    @State private var openSwipeRowId: String? = nil
     @State private var confirmDeleteItem: GenerationItem? = nil
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
@@ -235,8 +234,6 @@ struct GenerateView: View {
                                 }
                                 ForEach(generationManager.generations.reversed()) { item in
                                     SwipeToDeleteRow(
-                                        id: item.id,
-                                        openRowId: $openSwipeRowId,
                                         onRequestDelete: { confirmDeleteItem = item }
                                     ) {
                                         GenerationCardView(
@@ -250,6 +247,13 @@ struct GenerateView: View {
                                         )
                                     }
                                     .id(item.id)
+                                    // Deleted card exits stage-left (handleDelete wraps the
+                                    // removal in withAnimation); insertions just fade so new
+                                    // pending cards don't slide in from the edge.
+                                    .transition(.asymmetric(
+                                        insertion: .opacity,
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
                                 }
                             }
                             .padding(.top, 12)
@@ -1709,75 +1713,72 @@ struct GenerateView: View {
 
 // MARK: - SwipeToDeleteRow
 
-/// Wraps a generation card in a leading-drag-to-reveal delete action. The history list is a
-/// plain VStack in a ScrollView (not a List), so there's no free .swipeActions — this reproduces
-/// the standard pattern by hand: offset-driven reveal, snap open/closed, rubber-band past the
-/// open width, and a horizontal-vs-vertical angle gate so the drag doesn't fight scrolling.
+/// Standard iOS drag-to-delete for a plain VStack-in-ScrollView (no free .swipeActions here).
+/// Nothing is rendered at rest — a red trash pane grows behind the card's trailing edge only
+/// while the finger drags left, with a haptic tick when the drag crosses the delete threshold.
+/// Releasing past the threshold asks for confirmation (the card springs back while the alert
+/// shows); confirming slides the card off-screen via the row transition at the call site.
+/// There is deliberately no persistent "open" state: rows are stateless at rest, so a stuck
+/// reveal is impossible.
 private struct SwipeToDeleteRow<Content: View>: View {
-    let id: String
-    @Binding var openRowId: String?
     var onRequestDelete: () -> Void
     @ViewBuilder var content: () -> Content
 
-    @State private var dragTranslation: CGFloat = 0
-    private let revealWidth: CGFloat = 72
+    // @GestureState (not @State) auto-resets to 0 whenever the gesture ends for ANY reason,
+    // including being cancelled mid-drag when the ScrollView claims the touch instead (the
+    // common case: a mostly-vertical scroll with a slight horizontal wobble). resetTransaction
+    // animates that snap-back so the card springs home instead of teleporting.
+    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.35, dampingFraction: 0.8)))
+    private var dragWidth: CGFloat = 0
 
-    private var isOpen: Bool { openRowId == id }
-    private var baseOffset: CGFloat { isOpen ? -revealWidth : 0 }
+    private let deleteThreshold: CGFloat = 90   // release past this = ask to delete
+    private let maxReveal: CGFloat = 130
 
-    // Rubber-bands past fully-open or fully-closed instead of tracking the finger 1:1.
-    private var displayOffset: CGFloat {
-        let raw = baseOffset + dragTranslation
-        if raw < -revealWidth { return -revealWidth + (raw + revealWidth) * 0.3 }
-        if raw > 0 { return raw * 0.3 }
-        return raw
+    // Leftward only, rubber-banding past maxReveal instead of tracking the finger 1:1.
+    private var offset: CGFloat {
+        guard dragWidth < 0 else { return 0 }
+        if dragWidth < -maxReveal { return -maxReveal + (dragWidth + maxReveal) * 0.25 }
+        return dragWidth
     }
 
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            Button(role: .destructive, action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { openRowId = nil }
-                onRequestDelete()
-            }) {
-                Image(systemName: "trash.fill")
-                    .foregroundStyle(.white)
-                    .frame(width: revealWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.red)
-            }
-            .buttonStyle(.plain)
+    private var isPastThreshold: Bool { offset <= -deleteThreshold }
 
-            content()
-                .offset(x: displayOffset)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 20)
-                        .onChanged { value in
-                            // Only claim a mostly-horizontal, leftward-leaning drag — otherwise
-                            // let the ScrollView handle vertical/diagonal scrolling untouched.
-                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                            dragTranslation = value.translation.width
+    var body: some View {
+        content()
+            .offset(x: offset)
+            .background(alignment: .trailing) {
+                if offset < 0 {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.red.opacity(isPastThreshold ? 1.0 : 0.85))
+                        .overlay {
+                            Image(systemName: "trash.fill")
+                                .foregroundStyle(.white)
+                                .scaleEffect(isPastThreshold ? 1.2 : 1.0)
+                                .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPastThreshold)
+                                .opacity(min(1, -offset / 60))
                         }
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5 || isOpen else {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { dragTranslation = 0 }
-                                return
-                            }
-                            let candidate = baseOffset + value.translation.width
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                if candidate < -revealWidth / 2 {
-                                    openRowId = id
-                                } else if isOpen {
-                                    openRowId = nil
-                                }
-                                dragTranslation = 0
-                            }
-                        }
-                )
-                .onChange(of: openRowId) { _, newValue in
-                    if newValue != id { dragTranslation = 0 }
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .frame(width: -offset)
+                        // Match GenerationCardView's own 16pt horizontal inset so the pane
+                        // aligns with the card face, not the row edge.
+                        .padding(.trailing, 16)
                 }
-        }
+            }
+            .sensoryFeedback(.impact(weight: .medium), trigger: isPastThreshold) { _, crossed in crossed }
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .updating($dragWidth) { value, state, _ in
+                        // Only claim a mostly-horizontal, leftward drag — otherwise let the
+                        // ScrollView handle vertical/diagonal scrolling untouched.
+                        guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
+                        state = min(value.translation.width, 0)
+                    }
+                    .onEnded { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) * 1.5,
+                              value.translation.width <= -deleteThreshold else { return }
+                        onRequestDelete()
+                    }
+            )
     }
 }
 
