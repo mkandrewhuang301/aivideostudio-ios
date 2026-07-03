@@ -39,7 +39,8 @@ struct GenerateView: View {
     @State private var promptTextRange: NSRange?
     @State private var promptTextHeight: CGFloat = 22
     @State private var showProfileSheet = false
-    @FocusState private var promptFocused: Bool
+    @State private var promptFocused: Bool = false
+    @State private var composerTopY: CGFloat = .infinity
 
     // D-18: option state with defaults
     @State private var selectedMode = "AI Video"
@@ -269,8 +270,13 @@ struct GenerateView: View {
                         // GenerationManager.mergeLatest() buffers new items instead of
                         // prepending mid-touch (ported from the old FeedView pattern).
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { _ in generationManager.isInteracting = true }
+                            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                                .onChanged { value in
+                                    generationManager.isInteracting = true
+                                    if promptFocused, value.location.y >= composerTopY {
+                                        promptFocused = false
+                                    }
+                                }
                                 .onEnded { _ in generationManager.isInteracting = false }
                         )
                     }
@@ -302,12 +308,25 @@ struct GenerateView: View {
             .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMentionSuggestions)
             .padding(.bottom, promptFocused ? 2 : 65)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .global).minY
+            } action: { composerTopY = $0 }
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
                     theme.elevatedBackground
                 }
                 .ignoresSafeArea(edges: .bottom)
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        // Predominantly-downward drag on the composer = dismiss, like Messages.
+                        if value.translation.height > 30,
+                           value.translation.height > abs(value.translation.width) {
+                            promptFocused = false
+                        }
+                    }
             )
         }
         .onChange(of: promptText) { old, new in
@@ -907,7 +926,7 @@ struct GenerateView: View {
                     .foregroundStyle(.white)
                     .background(Color.black.opacity(0.5), in: Circle())
             }
-            .offset(x: 5, y: -16)
+            .offset(x: 1, y: -10)
         }
         .contextMenu(menuItems: {
             if !ref.isUploading,
