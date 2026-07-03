@@ -40,6 +40,11 @@ struct GenerateView: View {
     @State private var promptTextHeight: CGFloat = 22
     @State private var showProfileSheet = false
     @State private var promptFocused: Bool = false
+    // T2: keyboard-overlap tracking so the composer rides the keyboard during interactive
+    // scroll-to-dismiss (UIKeyboardLayoutGuide tracks the drag frame-by-frame; SwiftUI's own
+    // keyboard safe-area avoidance only animates begin/end and stays put mid-drag).
+    @State private var keyboardOverlap: CGFloat = 0
+    @State private var bottomSafeAreaInset: CGFloat = 0
 
     // D-18: option state with defaults
     @State private var selectedMode = "AI Video"
@@ -160,6 +165,12 @@ struct GenerateView: View {
         creditManager.entitlementLevel != .none && creditManager.creditsBalance < generationCost
     }
 
+    // T2: when the keyboard is fully hidden, keyboardLayoutGuide.topAnchor sits at the bottom
+    // safe-area edge, so raw keyboardOverlap reads ~34 (home indicator height), not 0. Subtract
+    // the actual safe-area inset so "keyboard hidden" resolves to 0 overlap.
+    private var effectiveKeyboardOverlap: CGFloat {
+        max(0, keyboardOverlap - bottomSafeAreaInset)
+    }
 
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
         ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
@@ -271,6 +282,17 @@ struct GenerateView: View {
                 }
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { bottomSafeAreaInset = geo.safeAreaInsets.bottom }
+                    .onChange(of: geo.safeAreaInsets.bottom) { _, newValue in
+                        bottomSafeAreaInset = newValue
+                    }
+            }
+        )
+        .background(KeyboardHeightReader(keyboardOverlap: $keyboardOverlap))
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
@@ -295,7 +317,12 @@ struct GenerateView: View {
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMentionSuggestions)
-            .padding(.bottom, promptFocused ? 2 : 65)
+            // T2: driven by KeyboardHeightReader instead of the old binary promptFocused switch —
+            // tracks interactive scroll-to-dismiss frame-by-frame. The interactiveSpring smooths
+            // the non-interactive show/hide jump (focus change); during an active drag the value
+            // already changes continuously so the spring mostly rides along rather than lagging.
+            .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.86), value: keyboardOverlap)
+            .padding(.bottom, max(65, effectiveKeyboardOverlap + 2))
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)

@@ -38,10 +38,6 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 	</dict>
-	<key>NSCameraUsageDescription</key>
-	<string>Fantasia uses the camera to capture reference photos and videos for your generations.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Fantasia uses the microphone when recording reference videos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Fantasia saves your generated videos to your photo library.</string>
 	<key>UILaunchStoryboardName</key>
