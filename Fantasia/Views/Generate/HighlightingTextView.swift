@@ -20,6 +20,9 @@ struct HighlightingTextView: UIViewRepresentable {
     var textColor: UIColor = .white
     var maxHeight: CGFloat = 112
     var font: UIFont = .preferredFont(forTextStyle: .body)
+    /// Fired with a token's inner content (no brackets) when a backspace/delete atomically
+    /// removed a whole [token] — see Coordinator.textView(_:shouldChangeTextIn:replacementText:).
+    var onTokenDeleted: ((String) -> Void)?
 
     private static let bracketTokenRegex = try? NSRegularExpression(pattern: #"\[[^\]]+\]"#)
 
@@ -112,6 +115,46 @@ struct HighlightingTextView: UIViewRepresentable {
 
         init(_ parent: HighlightingTextView) {
             self.parent = parent
+        }
+
+        // Atomic token deletion, done here rather than via the SwiftUI text round trip: a
+        // backspace that lands inside [bob] used to delete one char, bounce through
+        // parent.text -> onChange(of:) -> a rewrite of the whole token -> back into
+        // updateUIView, which resets attributedText and restores the caret to the *old*
+        // character offset (never adjusted for the characters removed before it) — the caret
+        // landed visually inside a later word. Deleting the whole token directly against
+        // textStorage means only one write happens, so the caret we set is the caret that stays.
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard text.isEmpty else { return true }
+            guard let re = HighlightingTextView.bracketTokenRegex else { return true }
+            let ns = textView.text as NSString
+            let matches = re.matches(in: textView.text, range: NSRange(location: 0, length: ns.length))
+            guard let tokenMatch = matches.first(where: {
+                NSMaxRange($0.range) > range.location && $0.range.location < NSMaxRange(range)
+            }) else { return true }
+
+            // Union the token's range with the proposed deletion range — covers a plain
+            // backspace at "]", a forward-delete at "[", and a selection that clips into the
+            // token from either side.
+            var removeRange = NSUnionRange(tokenMatch.range, range)
+
+            // Eat one flanking space to avoid double-spaces: prefer the leading space, else
+            // the trailing one.
+            if removeRange.location > 0, ns.character(at: removeRange.location - 1) == 32 {
+                removeRange.location -= 1
+                removeRange.length += 1
+            } else if NSMaxRange(removeRange) < ns.length, ns.character(at: NSMaxRange(removeRange)) == 32 {
+                removeRange.length += 1
+            }
+
+            let tokenText = ns.substring(with: tokenMatch.range)
+            let inner = String(tokenText.dropFirst().dropLast())
+
+            textView.textStorage.replaceCharacters(in: removeRange, with: "")
+            textView.selectedRange = NSRange(location: removeRange.location, length: 0)
+            textViewDidChange(textView)
+            parent.onTokenDeleted?(inner)
+            return false
         }
 
         func textViewDidChange(_ textView: UITextView) {

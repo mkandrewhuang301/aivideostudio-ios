@@ -26,10 +26,9 @@ struct GenerateView: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(MediaLibraryManager.self) private var mediaLibrary
 
-    // Perf: these were previously compiled fresh inside highlightedPrompt (recomputed on every
-    // body render, i.e. every keystroke), atomicTokenDeletion, and rebuildPromptTokens. Hoisted
-    // to compile-once static constants — same patterns, no behavior change.
-    private static let bracketTokenRegex = try? NSRegularExpression(pattern: #"\[[^\]]+\]"#)
+    // Perf: previously compiled fresh inside highlightedPrompt (recomputed on every body render,
+    // i.e. every keystroke) and rebuildPromptTokens. Hoisted to a compile-once static constant —
+    // same pattern, no behavior change.
     private static let bracketTokenWithLeadingSpaceRegex = try? NSRegularExpression(pattern: "\\s*\\[[^\\]]+\\]")
     private static let mentionTriggerRegex = try? NSRegularExpression(pattern: #"@(\w*)$"#)
 
@@ -322,12 +321,9 @@ struct GenerateView: View {
             )
         }
         .onChange(of: promptText) { old, new in
-            // Atomic token deletion: if user deleted one char inside [token], remove whole token
-            if let (snapped, removedInner) = atomicTokenDeletion(old: old, new: new) {
-                promptText = snapped
-                if let inner = removedInner { dereferenceToken(inner) }
-                return
-            }
+            // Atomic token deletion now happens inside HighlightingTextView's UITextView
+            // delegate (shouldChangeTextIn) — see onTokenDeleted below — so it never round-trips
+            // through this onChange.
 
             // @-mention trigger: detect @word immediately before the caret, not just at the
             // very end of the string — otherwise editing text earlier in the prompt (before a
@@ -748,7 +744,8 @@ struct GenerateView: View {
                         isFocused: Binding(get: { promptFocused }, set: { promptFocused = $0 }),
                         contentHeight: $promptTextHeight,
                         accentColor: UIColor(accent),
-                        textColor: UIColor(theme.textPrimary)
+                        textColor: UIColor(theme.textPrimary),
+                        onTokenDeleted: { inner in dereferenceToken(inner) }
                     )
                     .frame(height: max(22, promptTextHeight))
                 }
@@ -1303,45 +1300,6 @@ struct GenerateView: View {
         // UTF-16 index conversion, so fall back to "unknown cursor" instead of trusting it blindly.
         guard range.location >= 0, range.location <= text.utf16.count else { return nil }
         return String.Index(utf16Offset: range.location, in: text)
-    }
-
-    /// Detects a single-character deletion that landed inside a [token] and returns
-    /// the snapped text (whole token removed) plus the token's inner content for dereferencing.
-    private func atomicTokenDeletion(old: String, new: String) -> (text: String, inner: String?)? {
-        let oldNS = old as NSString
-        let newNS = new as NSString
-        guard newNS.length == oldNS.length - 1 else { return nil }
-
-        // Find the position (in old) of the deleted character
-        var diffPos = 0
-        while diffPos < newNS.length && oldNS.character(at: diffPos) == newNS.character(at: diffPos) {
-            diffPos += 1
-        }
-
-        guard let re = Self.bracketTokenRegex else { return nil }
-        for match in re.matches(in: old, range: NSRange(location: 0, length: oldNS.length)) {
-            let start = match.range.location
-            let end = start + match.range.length
-            guard diffPos >= start && diffPos < end else { continue }
-
-            // Deleted char was inside this token — snap to removing the whole thing
-            guard let tokenRange = Range(match.range, in: old) else { continue }
-            let inner = String(String(old[tokenRange]).dropFirst().dropLast())
-
-            // Eat one flanking space to avoid double-spaces
-            var removeRange = match.range
-            if removeRange.location > 0 && oldNS.character(at: removeRange.location - 1) == 32 {
-                removeRange.location -= 1
-                removeRange.length += 1
-            } else if end < oldNS.length && oldNS.character(at: end) == 32 {
-                removeRange.length += 1
-            }
-
-            var result = old
-            if let r = Range(removeRange, in: old) { result.removeSubrange(r) }
-            return (result, inner)
-        }
-        return nil
     }
 
     /// Removes the attachment whose prompt token had the given inner content.
