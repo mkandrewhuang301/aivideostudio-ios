@@ -87,6 +87,12 @@ struct HighlightingTextView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        let fit = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: min(fit.height, maxHeight))
+    }
+
     private func applyHighlighting(to tv: UITextView, text: String) {
         let attributed = NSMutableAttributedString(
             string: text,
