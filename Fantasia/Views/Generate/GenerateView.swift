@@ -7,6 +7,16 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+// Tracks the top-load-trigger row's position within the history ScrollView so we know when
+// it has scrolled into the visible viewport, without relying on onAppear (which fires
+// immediately for offscreen rows in a non-lazy VStack — see Issue 2 in fix-ux-batch2-plan.md).
+private struct HistoryTopOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
 struct GenerateView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
@@ -69,6 +79,7 @@ struct GenerateView: View {
 
     // Card actions
     @State private var selectedItem: GenerationItem? = nil
+    @State private var isLoadingOlderHistory = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -206,6 +217,20 @@ struct GenerateView: View {
                             // bottom — LazyVStack doesn't size off-screen variable-height rows
                             // ahead of time, so the anchor's initial offset came out wrong.
                             VStack(spacing: 12) {
+                                if generationManager.nextCursor != nil {
+                                    // Reports its position instead of using onAppear — onAppear
+                                    // fires immediately for offscreen rows in a non-lazy VStack.
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .background(
+                                            GeometryReader { geo in
+                                                Color.clear.preference(
+                                                    key: HistoryTopOffsetKey.self,
+                                                    value: geo.frame(in: .named("generateHistoryScroll")).minY
+                                                )
+                                            }
+                                        )
+                                }
                                 ForEach(generationManager.generations.reversed()) { item in
                                     GenerationCardView(
                                         item: item,
@@ -222,10 +247,23 @@ struct GenerateView: View {
                             .padding(.top, 12)
                             .padding(.bottom, 12)
                         }
+                        .coordinateSpace(name: "generateHistoryScroll")
+                        .onPreferenceChange(HistoryTopOffsetKey.self) { minY in
+                            guard let minY, minY > 0, minY < 700 else { return }
+                            Task { await loadOlderHistory(proxy: proxy) }
+                        }
                         .defaultScrollAnchor(.bottom)
                         .onChange(of: generationManager.generations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
+                        // Brackets touch-down -> touch-up with isInteracting so
+                        // GenerationManager.mergeLatest() buffers new items instead of
+                        // prepending mid-touch (ported from the old FeedView pattern).
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { _ in generationManager.isInteracting = true }
+                                .onEnded { _ in generationManager.isInteracting = false }
+                        )
                     }
                 }
             }
@@ -1581,6 +1619,20 @@ struct GenerateView: View {
     private func scrollToNewest(proxy: ScrollViewProxy) {
         guard let id = generationManager.generations.first?.id else { return }
         withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .bottom) }
+    }
+
+    // Loads the next (older) page and re-anchors the scroll position on the item that was
+    // previously the oldest loaded one, so the newly-inserted older cards appear above it
+    // instead of the view jumping.
+    private func loadOlderHistory(proxy: ScrollViewProxy) async {
+        guard !isLoadingOlderHistory, generationManager.nextCursor != nil else { return }
+        isLoadingOlderHistory = true
+        defer { isLoadingOlderHistory = false }
+        let anchorID = generationManager.generations.last?.id
+        await generationManager.loadNextPage()
+        if let anchorID {
+            proxy.scrollTo(anchorID, anchor: .top)
+        }
     }
 }
 

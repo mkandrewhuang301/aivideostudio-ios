@@ -106,10 +106,10 @@ actor APIClient {
 
     // D-31: GET /api/generations with optional cursor parameter
     // Uses custom JSONDecoder with .iso8601 to decode createdAt/completedAt Date fields.
-    func fetchGenerations(cursor: String? = nil) async throws -> GenerationsResponse {
-        var path = "api/generations"
+    func fetchGenerations(cursor: String? = nil, limit: Int = 50) async throws -> GenerationsResponse {
+        var path = "api/generations?limit=\(limit)"
         if let cursor, let encoded = cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "?cursor=\(encoded)"
+            path += "&cursor=\(encoded)"
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

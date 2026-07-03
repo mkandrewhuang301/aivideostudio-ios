@@ -68,10 +68,26 @@ struct LibraryView: View {
                                     dayHeader(for: group.date)
                                 }
                             }
+                            // Load-more footer (cursor pagination) — this VStack is lazy, so a
+                            // plain onAppear correctly fires only once this row scrolls into view.
+                            if generationManager.nextCursor != nil {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 20)
+                                    .onAppear { Task { await generationManager.loadNextPage() } }
+                            }
                         }
                         .padding(.top, 8)
                         .padding(.bottom, 100)
                     }
+                    // Brackets touch-down -> touch-up with isInteracting so
+                    // GenerationManager.mergeLatest() buffers new items instead of
+                    // prepending mid-touch (ported from the old FeedView pattern).
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in generationManager.isInteracting = true }
+                            .onEnded { _ in generationManager.isInteracting = false }
+                    )
                 }
             }
         }

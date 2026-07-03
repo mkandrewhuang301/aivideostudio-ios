@@ -1,5 +1,8 @@
 // FeedView.swift
 // Fantasia
+// dead code: not referenced by MainTabView or anywhere else — GenerateView + LibraryView
+// are the only two tabs. Kept only because GenerationCardView/GenerationDetailSheet, which
+// this file also exercises, are still used elsewhere.
 // D-01: Feed tab (replaces Home tab — tab index 0)
 // D-02: unified vertical list, newest on top — in-progress and completed together, no sections
 // D-03: polls GET /api/generations every 3s while active jobs exist; push notification triggers immediate refresh
