@@ -40,7 +40,6 @@ struct GenerateView: View {
     @State private var promptTextHeight: CGFloat = 22
     @State private var showProfileSheet = false
     @State private var promptFocused: Bool = false
-    @State private var composerTopY: CGFloat = .infinity
 
     // D-18: option state with defaults
     @State private var selectedMode = "AI Video"
@@ -271,11 +270,8 @@ struct GenerateView: View {
                         // prepending mid-touch (ported from the old FeedView pattern).
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                                .onChanged { value in
+                                .onChanged { _ in
                                     generationManager.isInteracting = true
-                                    if promptFocused, value.location.y >= composerTopY {
-                                        promptFocused = false
-                                    }
                                 }
                                 .onEnded { _ in generationManager.isInteracting = false }
                         )
@@ -308,9 +304,6 @@ struct GenerateView: View {
             .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMentionSuggestions)
             .padding(.bottom, promptFocused ? 2 : 65)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.frame(in: .global).minY
-            } action: { composerTopY = $0 }
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
