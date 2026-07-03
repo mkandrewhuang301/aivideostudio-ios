@@ -40,7 +40,6 @@ struct GenerationCardView: View {
     @State private var animatedProgress: Double = 0
     @State private var jitterTask: Task<Void, Never>? = nil
     @State private var progressMessage: String? = nil   // elapsed-time-tiered "taking a while" copy
-    @State private var showDeleteAlert = false
     @State private var thumbnail: UIImage? = nil
     @State private var showPlayer = false
     @State private var revealCompleted = false    // gates media reveal after fill-to-100 animation
@@ -78,12 +77,13 @@ struct GenerationCardView: View {
                 .padding(.horizontal, 14)
 
 
-            // Action buttons (D-09: always visible; disabled/greyed while active)
+            // Action buttons (D-09: always visible; disabled/greyed while active). Delete lives
+            // on swipe-to-delete + the detail sheet only — a destructive accent on every card's
+            // action row was unwarranted given those two paths already exist.
             HStack(spacing: 8) {
-                actionButton("arrow.2.squarepath", "Remix", isDestructive: false, action: onRemix)
-                actionButton("arrow.clockwise", "Regen", isDestructive: false, action: onRegenerate)
-                actionButton("paperclip", "Reference", isDestructive: false, action: onReference)
-                actionButton("trash", "Delete", isDestructive: true) { showDeleteAlert = true }
+                actionButton("arrow.2.squarepath", "Remix", action: onRemix)
+                actionButton("arrow.clockwise", "Regen", action: onRegenerate)
+                actionButton("paperclip", "Reference", action: onReference)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -99,14 +99,6 @@ struct GenerationCardView: View {
             } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
             }
-        }
-
-        // Delete confirmation alert (D-37)
-        .alert(item.isImage ? "Delete this image?" : "Delete this video?", isPresented: $showDeleteAlert) {
-            Button("Delete", role: .destructive) { onDelete() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This cannot be undone.")
         }
 
         // Progress jitter lifecycle (D-10, D-11) — Task.sleep, not Timer
@@ -263,16 +255,10 @@ struct GenerationCardView: View {
     }
 
     // MARK: - Action Button Helper
-    private func actionButton(_ icon: String, _ label: String, isDestructive: Bool, action: @escaping () -> Void) -> some View {
-        let fg: Color = isActive
-            ? theme.textTertiary
-            : isDestructive ? Color.red.opacity(0.85) : theme.textPrimary.opacity(0.8)
-        let bg: Color = isActive
-            ? theme.surface.opacity(0.6)
-            : isDestructive ? Color.red.opacity(0.1) : theme.surface
-        let border: Color = isActive
-            ? theme.divider
-            : isDestructive ? Color.red.opacity(0.25) : theme.surfaceBorder
+    private func actionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+        let fg: Color = isActive ? theme.textTertiary : theme.textPrimary.opacity(0.8)
+        let bg: Color = isActive ? theme.surface.opacity(0.6) : theme.surface
+        let border: Color = isActive ? theme.divider : theme.surfaceBorder
 
         return Button(action: action) {
             HStack(spacing: 5) {
@@ -290,7 +276,7 @@ struct GenerationCardView: View {
             .frame(minHeight: 44)
         }
         .disabled(isActive)
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
     }
 
     // MARK: - Progress Curve (D-10, D-11, D-12)
