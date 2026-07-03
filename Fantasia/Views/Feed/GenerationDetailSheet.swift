@@ -130,24 +130,30 @@ struct GenerationDetailSheet: View {
                     }
 
                     // Parameters
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("Parameters")
-                            .font(.caption)
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        paramRow("Model", value: ModelCatalog.displayName(for: item.model))
-                        if item.isImage {
-                            if let w = item.params.width, let h = item.params.height {
-                                paramRow("Resolution", value: "\(w) × \(h)")
+                        // T18: paramRow draws its own trailing hairline; the last visible row
+                        // (Credits used when present, else the last param in its branch) passes
+                        // showDivider: false so no line dangles after the final row.
+                        let hasCredits = item.costCredits > 0
+                        VStack(alignment: .leading, spacing: 0) {
+                            paramRow("Model", value: ModelCatalog.displayName(for: item.model))
+                            if item.isImage {
+                                if let w = item.params.width, let h = item.params.height {
+                                    paramRow("Resolution", value: "\(w) × \(h)")
+                                }
+                                paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—", showDivider: hasCredits)
+                            } else {
+                                paramRow("Resolution", value: item.params.resolution ?? "—")
+                                paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
+                                paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
+                                paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off", showDivider: hasCredits)
                             }
-                            paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
-                        } else {
-                            paramRow("Resolution", value: item.params.resolution ?? "—")
-                            paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
-                            paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
-                            paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off")
-                        }
-                        if item.costCredits > 0 {
-                            paramRow("Credits used", value: "\(item.costCredits)")
+                            if hasCredits {
+                                paramRow("Credits used", value: "\(item.costCredits)", showDivider: false)
+                            }
                         }
                     }
                     .padding(12)
@@ -383,11 +389,17 @@ struct GenerationDetailSheet: View {
         cachedImage = image
     }
 
-    private func paramRow(_ label: String, value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary).font(.subheadline)
-            Spacer()
-            Text(value).foregroundStyle(.primary).font(.subheadline.weight(.medium))
+    private func paramRow(_ label: String, value: String, showDivider: Bool = true) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(label).foregroundStyle(.secondary).font(.subheadline)
+                Spacer()
+                Text(value).foregroundStyle(.primary).font(.subheadline.weight(.medium))
+            }
+            .padding(.vertical, 9)
+            if showDivider {
+                Rectangle().fill(theme.divider).frame(height: 0.5)
+            }
         }
     }
 
