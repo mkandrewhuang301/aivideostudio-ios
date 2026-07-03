@@ -34,6 +34,7 @@
 		404B057D9B2E3C1CFCBB9B4A /* TransparentFullScreenBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA736381FE914D7303D5DE5E /* TransparentFullScreenBackground.swift */; };
 		43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */; };
 		49D6A39D8DAD04C18910877C /* FullScreenVideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */; };
+		FC16F3FC8856400A94C04D12 /* ZoomPanScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7EA7E8E9A04CC2B795C405 /* ZoomPanScrollView.swift */; };
 		4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
@@ -148,6 +149,7 @@
 		EA736381FE914D7303D5DE5E /* TransparentFullScreenBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparentFullScreenBackground.swift; sourceTree = "<group>"; };
 		F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationOptionsPanel.swift; sourceTree = "<group>"; };
 		F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenVideoPlayerView.swift; sourceTree = "<group>"; };
+		CB7EA7E8E9A04CC2B795C405 /* ZoomPanScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomPanScrollView.swift; sourceTree = "<group>"; };
 		F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		FF98D41F7BDC89D993199016 /* GenerationCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationCardView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -279,6 +281,7 @@
 			children = (
 				67E710D93903D4F18F9ED05D /* FullScreenImageView.swift */,
 				F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */,
+				CB7EA7E8E9A04CC2B795C405 /* ZoomPanScrollView.swift */,
 			);
 			path = Player;
 			sourceTree = "<group>";
@@ -536,6 +539,7 @@
 				1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */,
 				7C6DCB2D7E143459E39D77B5 /* FullScreenImageView.swift in Sources */,
 				49D6A39D8DAD04C18910877C /* FullScreenVideoPlayerView.swift in Sources */,
+				FC16F3FC8856400A94C04D12 /* ZoomPanScrollView.swift in Sources */,
 				E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */,
 				6CD697CD5B204B3BA4305909 /* HighlightingTextView.swift in Sources */,
 				17422C8DCDE8B4EAF6E6DADA /* GenerationCardView.swift in Sources */,

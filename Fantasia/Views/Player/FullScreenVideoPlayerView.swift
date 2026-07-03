@@ -127,6 +127,7 @@ private final class URLLoopingPlayerViewModel {
 // QuickTime-style bar's proportions.
 private struct ScrubberView: View {
     var vm: URLLoopingPlayerViewModel
+    var trackColor: Color = .white
     var onInteract: () -> Void = {}
     @State private var isDragging = false
 
@@ -137,13 +138,13 @@ private struct ScrubberView: View {
 
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(0.3))
+                    .fill(trackColor.opacity(0.3))
                     .frame(height: 3)
                 Capsule()
-                    .fill(Color.white)
+                    .fill(trackColor)
                     .frame(width: width * progress, height: 3)
                 Circle()
-                    .fill(Color.white)
+                    .fill(trackColor)
                     .frame(width: 10, height: 10)
                     .offset(x: width * progress - 5)
             }
@@ -175,19 +176,27 @@ struct FullScreenVideoPlayerView: View {
     let videoUrl: URL
     var generationId: String? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var theme
 
     @State private var viewModel: URLLoopingPlayerViewModel?
     @State private var contentOpacity: Double = 1
     @State private var dragOffset: CGSize = .zero
+    @State private var zoomScale: CGFloat = 1.0
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
 
     private let dismissDistanceThreshold: CGFloat = 120
+    // Legacy path only (see dismissDragGesture below) — SwiftUI DragGesture has no true
+    // velocity, so this is calibrated against predictedEndTranslation - translation instead.
     private let dismissVelocityThreshold: CGFloat = 800
+    // Native path (ZoomPanScrollView) — true gesture velocity in points/second, a different
+    // scale than the legacy approximation above, so calibrated separately.
+    private let nativeDismissVelocityThreshold: CGFloat = 1200
 
     /// 0...1 progress of an in-flight swipe-to-dismiss drag (mirrors FullScreenImageView).
     private var dismissProgress: CGFloat {
-        min(1, abs(dragOffset.height) / 300)
+        guard zoomScale <= 1.01 else { return 0 }
+        return min(1, abs(dragOffset.height) / 300)
     }
 
     var body: some View {
@@ -196,7 +205,7 @@ struct FullScreenVideoPlayerView: View {
 
             ZStack {
                 Group {
-                    Color.black.ignoresSafeArea()
+                    theme.background.ignoresSafeArea()
                         .opacity(1 - dismissProgress)
 
                     if let vm = viewModel {
@@ -204,33 +213,42 @@ struct FullScreenVideoPlayerView: View {
                             VStack(spacing: 10) {
                                 Image(systemName: "exclamationmark.triangle")
                                     .font(.system(size: 28))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(theme.textSecondary)
                                 Text("This video couldn't be loaded")
                                     .font(.subheadline)
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(theme.textSecondary)
                             }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .gesture(dismissDragGesture)
+                            .simultaneousGesture(SpatialTapGesture().onEnded { _ in toggleControls() })
                         } else {
                             // .resizeAspect (letterboxed): the whole generated frame stays visible,
-                            // nothing cropped — this is a review/inspect view, not a feed.
-                            FillingVideoPlayerView(player: vm.player, videoGravity: .resizeAspect)
-                                .ignoresSafeArea()
+                            // nothing cropped — this is a review/inspect view, not a feed. Sized to
+                            // the AVPlayerLayer's own PlayerView class (FillingVideoPlayerView.swift)
+                            // rather than duplicating an AVPlayerLayer-backed UIView here.
+                            ZoomPanScrollView(
+                                makeContentView: {
+                                    let view = FillingVideoPlayerView.PlayerView()
+                                    view.playerLayer.videoGravity = .resizeAspect
+                                    return view
+                                },
+                                updateContentView: { (view: FillingVideoPlayerView.PlayerView) in
+                                    view.playerLayer.player = vm.player
+                                },
+                                contentSize: rect.size,
+                                onUnzoomedPan: { translation, velocity, state in
+                                    handleUnzoomedPan(translation: translation, velocity: velocity, state: state)
+                                },
+                                onSingleTap: { toggleControls() },
+                                onZoomChanged: { zoomScale = $0 }
+                            )
+                            .ignoresSafeArea()
                         }
                     }
                 }
                 .scaleEffect(1 - dismissProgress * 0.15)
                 .offset(dragOffset)
-                .contentShape(Rectangle())
-                .gesture(dismissDragGesture)
-                .simultaneousGesture(
-                    SpatialTapGesture()
-                        .onEnded { value in
-                            if rect.contains(value.location) {
-                                toggleControls()
-                            } else {
-                                setControlsVisible(false)
-                            }
-                        }
-                )
 
                 if let vm = viewModel, !vm.failed, controlsVisible {
                     centerPlayPauseButton(vm: vm)
@@ -321,6 +339,8 @@ struct FullScreenVideoPlayerView: View {
 
     // Swipe down (or up) to dismiss, requiring a predominantly-vertical drag so it doesn't
     // fight the scrubber's horizontal drag or the tap-to-toggle-controls gesture.
+    // Legacy SwiftUI-gesture path — only reachable in the vm.failed branch above, where there's
+    // no video to zoom so ZoomPanScrollView (and its native pan) isn't in the view tree.
     private var dismissDragGesture: some Gesture {
         DragGesture(minimumDistance: 15)
             .onChanged { value in
@@ -333,13 +353,36 @@ struct FullScreenVideoPlayerView: View {
                     return
                 }
                 let velocity = abs(value.predictedEndTranslation.height - value.translation.height)
-                if abs(value.translation.height) > dismissDistanceThreshold || velocity > dismissVelocityThreshold {
-                    let exitHeight: CGFloat = value.translation.height > 0 ? 900 : -900
-                    performDismiss(exitOffset: CGSize(width: value.translation.width, height: exitHeight))
-                } else {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = .zero }
-                }
+                evaluateDismissDrag(translation: value.translation, velocityHeight: velocity, velocityThreshold: dismissVelocityThreshold)
             }
+    }
+
+    // Driven by ZoomPanScrollView's UIPanGestureRecognizer, which only forwards while unzoomed —
+    // zoomed-in panning is handled natively by the UIScrollView itself. Mirrors dismissDragGesture
+    // above but reads real gesture velocity instead of DragGesture's predictedEndTranslation.
+    private func handleUnzoomedPan(translation: CGSize, velocity: CGSize, state: UIGestureRecognizer.State) {
+        switch state {
+        case .began, .changed:
+            guard abs(translation.height) > abs(translation.width) else { return }
+            dragOffset = translation
+        case .ended, .cancelled:
+            guard abs(translation.height) > abs(translation.width) else {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = .zero }
+                return
+            }
+            evaluateDismissDrag(translation: translation, velocityHeight: velocity.height, velocityThreshold: nativeDismissVelocityThreshold)
+        default:
+            break
+        }
+    }
+
+    private func evaluateDismissDrag(translation: CGSize, velocityHeight: CGFloat, velocityThreshold: CGFloat) {
+        if abs(translation.height) > dismissDistanceThreshold || abs(velocityHeight) > velocityThreshold {
+            let exitHeight: CGFloat = translation.height > 0 ? 900 : -900
+            performDismiss(exitOffset: CGSize(width: translation.width, height: exitHeight))
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = .zero }
+        }
     }
 
     private func performDismiss(exitOffset: CGSize) {
@@ -359,7 +402,7 @@ struct FullScreenVideoPlayerView: View {
         } label: {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(theme.textPrimary.opacity(0.85))
                 .padding(20)
         }
     }
@@ -392,16 +435,16 @@ struct FullScreenVideoPlayerView: View {
             } label: {
                 Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
 
-            ScrubberView(vm: vm, onInteract: scheduleAutoHide)
+            ScrubberView(vm: vm, trackColor: theme.textPrimary, onInteract: scheduleAutoHide)
 
             Text("\(formatTime(vm.currentTime)) / \(formatTime(vm.duration))")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(theme.textPrimary.opacity(0.85))
                 .fixedSize()
         }
         .padding(.horizontal, 16)
