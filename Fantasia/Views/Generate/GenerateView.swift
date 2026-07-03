@@ -372,6 +372,10 @@ struct GenerateView: View {
                 attachReference(from: refItem)
                 generationManager.pendingReference = nil
             }
+            if let nameItem = generationManager.pendingNameAsReference {
+                handleNameAsReference(item: nameItem)
+                generationManager.pendingNameAsReference = nil
+            }
         }
         .onDisappear { generationManager.stopPolling() }
         .onReceive(NotificationCenter.default.publisher(for: .generationCompleted)) { _ in

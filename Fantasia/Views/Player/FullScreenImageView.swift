@@ -7,6 +7,7 @@ import SwiftUI
 struct FullScreenImageView: View {
     let item: GenerationItem
     @Environment(\.dismiss) private var dismiss
+    @Environment(GenerationManager.self) private var generationManager
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -46,6 +47,15 @@ struct FullScreenImageView: View {
                         .offset(offset)
                         .simultaneousGesture(pinchAndPanGesture(imageSize: img.size, containerSize: geo.size))
                         .onTapGesture(count: 2) { handleDoubleTap() }
+                        .contextMenu {
+                            if item.status == .completed {
+                                Button("Name as reference", systemImage: "tag") {
+                                    generationManager.pendingNameAsReference = item
+                                    NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
+                                    dismiss()
+                                }
+                            }
+                        }
                 }
                 .ignoresSafeArea()
             } else if isLoading {

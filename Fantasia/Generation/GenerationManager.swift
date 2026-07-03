@@ -52,6 +52,10 @@ final class GenerationManager {
     // generation's own output as a reference input for a new generation.
     var pendingReference: GenerationItem? = nil
 
+    // "Name as reference" state (Issue 9): set from any media surface (Library tile, detail
+    // sheet, fullscreen viewer) before switching to Generate tab, which owns the naming sheet.
+    var pendingNameAsReference: GenerationItem? = nil
+
     private var pollingTask: Task<Void, Never>?
 
     // CLAUDE.md: Swift Concurrency polling — no Timer

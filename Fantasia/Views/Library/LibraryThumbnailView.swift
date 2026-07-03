@@ -11,6 +11,7 @@ struct LibraryThumbnailView: View {
     let item: GenerationItem
     var onTap: () -> Void
 
+    @Environment(GenerationManager.self) private var generationManager
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
 
@@ -57,6 +58,14 @@ struct LibraryThumbnailView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if item.status == .completed {
+                Button("Name as reference", systemImage: "tag") {
+                    generationManager.pendingNameAsReference = item
+                    NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
+                }
+            }
+        }
         .onAppear {
             if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {
                 loadThumbnail(urlString: urlString)

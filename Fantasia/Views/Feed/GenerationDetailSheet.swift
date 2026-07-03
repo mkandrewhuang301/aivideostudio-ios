@@ -72,6 +72,7 @@ struct GenerationDetailSheet: View {
                         }
                         .buttonStyle(.plain)
                         .task { await loadCachedImage() }
+                        .contextMenu { nameAsReferenceMenuItem }
                     } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
                         Button { showPlayer = true } label: {
                             ZStack {
@@ -95,6 +96,7 @@ struct GenerationDetailSheet: View {
                         }
                         .buttonStyle(.plain)
                         .task { await generateThumbnail(from: videoUrl) }
+                        .contextMenu { nameAsReferenceMenuItem }
                     } else {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.white.opacity(0.05))
@@ -294,6 +296,17 @@ struct GenerationDetailSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(isDeleting)
+    }
+
+    @ViewBuilder
+    private var nameAsReferenceMenuItem: some View {
+        if item.status == .completed {
+            Button("Name as reference", systemImage: "tag") {
+                generationManager.pendingNameAsReference = item
+                NotificationCenter.default.post(name: .nameAsReferenceRequested, object: nil)
+                isPresented = false
+            }
+        }
     }
 
     // MARK: - Generation actions
