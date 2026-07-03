@@ -10,6 +10,8 @@ import AVFoundation
 struct LibraryThumbnailView: View {
     let item: GenerationItem
     var onTap: () -> Void
+    var onNameAsReference: () -> Void = {}
+    var onRequestDelete: () -> Void = {}
 
     @Environment(ThemeManager.self) private var theme
     @State private var thumbnail: UIImage? = nil
@@ -56,6 +58,10 @@ struct LibraryThumbnailView: View {
             .clipped()
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
+            .contextMenu {
+                Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
+                Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+            }
             .onAppear {
                 if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {
                     loadThumbnail(urlString: urlString)

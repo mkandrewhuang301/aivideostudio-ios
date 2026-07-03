@@ -33,6 +33,7 @@ struct GenerationCardView: View {
     var onReference: () -> Void      // use this generation's output as a reference input
     var onNameAsReference: () -> Void  // long-press → promote this output into the permanent reference library
     var onDelete: () -> Void         // D-37
+    var onRequestDelete: () -> Void = {}  // T12: long-press context menu Delete — routes to the caller's existing confirmationDialog (e.g. SwipeToDeleteRow's confirmDeleteItem), distinct from onDelete above
 
     @Environment(ThemeManager.self) private var theme
     @Environment(GenerationManager.self) private var generationManager
@@ -75,6 +76,12 @@ struct GenerationCardView: View {
                 .aspectRatio(cardAspectRatio, contentMode: .fit)
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                .contextMenu {
+                    if item.status == .completed {
+                        Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
+                        Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+                    }
+                }
                 .padding(.horizontal, 14)
 
 

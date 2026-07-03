@@ -243,7 +243,8 @@ struct GenerateView: View {
                                             onRegenerate: { Task { await handleRegenerate(item: item) } },
                                             onReference: { handleReference(item: item) },
                                             onNameAsReference: { handleNameAsReference(item: item) },
-                                            onDelete: { Task { await handleDelete(item: item) } }
+                                            onDelete: { Task { await handleDelete(item: item) } },
+                                            onRequestDelete: { confirmDeleteItem = item }
                                         )
                                     }
                                     .id(item.id)

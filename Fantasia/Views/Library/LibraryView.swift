@@ -13,6 +13,7 @@ struct LibraryView: View {
     @Environment(ThemeManager.self) private var theme
 
     @State private var selectedItem: GenerationItem? = nil
+    @State private var confirmDeleteItem: GenerationItem? = nil
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
     private let tileSpacing: CGFloat = 4
@@ -131,6 +132,37 @@ struct LibraryView: View {
                 )
             )
         }
+        // T12: long-press context menu Delete action — mirrors GenerateView's
+        // SwipeToDeleteRow confirmationDialog (same title/message/destructive pattern).
+        .confirmationDialog(
+            confirmDeleteItem.map { $0.isImage ? "Delete this image?" : "Delete this video?" } ?? "Delete this video?",
+            isPresented: Binding(
+                get: { confirmDeleteItem != nil },
+                set: { if !$0 { confirmDeleteItem = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let item = confirmDeleteItem {
+                    Task { await handleDelete(item: item) }
+                }
+                confirmDeleteItem = nil
+            }
+            Button("Cancel", role: .cancel) { confirmDeleteItem = nil }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    private func handleDelete(item: GenerationItem) async {
+        do {
+            try await APIClient.shared.deleteGeneration(id: item.id)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                generationManager.removeGeneration(id: item.id)
+            }
+        } catch {
+            print("[LibraryView] delete error: \(error)")
+        }
     }
 
     // MARK: - Day header: "June 29  Sunday ─────"
@@ -192,8 +224,13 @@ struct LibraryView: View {
     private func masonryColumn(_ items: [GenerationItem], colWidth: CGFloat) -> some View {
         VStack(spacing: tileSpacing) {
             ForEach(items) { item in
-                LibraryThumbnailView(item: item) { selectedItem = item }
-                    .frame(width: colWidth, height: tileHeight(item, colWidth: colWidth))
+                LibraryThumbnailView(
+                    item: item,
+                    onTap: { selectedItem = item },
+                    onNameAsReference: { generationManager.pendingNameAsReference = item },
+                    onRequestDelete: { confirmDeleteItem = item }
+                )
+                .frame(width: colWidth, height: tileHeight(item, colWidth: colWidth))
             }
         }
         // Fixed width so a short/empty column can't stretch or center its tiles.
