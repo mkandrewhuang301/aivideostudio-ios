@@ -7,7 +7,6 @@ import SwiftUI
 struct FullScreenImageView: View {
     let item: GenerationItem
     @Environment(\.dismiss) private var dismiss
-    @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
 
     @State private var loadedImage: UIImage? = nil
@@ -57,13 +56,6 @@ struct FullScreenImageView: View {
                 .ignoresSafeArea()
                 .scaleEffect(1 - dismissProgress * 0.15, anchor: .center)
                 .offset(dragOffset)
-                .contextMenu {
-                    if item.status == .completed {
-                        Button("Name as reference", systemImage: "tag") {
-                            generationManager.pendingNameAsReference = item
-                        }
-                    }
-                }
             } else if isLoading {
                 ProgressView().tint(.white)
             } else {
@@ -72,7 +64,7 @@ struct FullScreenImageView: View {
                     .font(.system(size: 40))
             }
 
-            // Dismiss button row with opaque black background so zoomed image can't bleed through
+            // Floating dismiss button — no bar background, so zoomed content can go full-bleed.
             VStack(spacing: 0) {
                 HStack {
                     Spacer()
@@ -87,7 +79,6 @@ struct FullScreenImageView: View {
                     .padding(.trailing, 20)
                     .padding(.vertical, 12)
                 }
-                .background(theme.background)
                 Spacer()
             }
             .opacity(1 - dismissProgress)

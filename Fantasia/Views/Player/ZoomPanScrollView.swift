@@ -62,6 +62,7 @@ struct ZoomPanScrollView<ContentView: UIView>: UIViewRepresentable {
         scrollView.contentSize = contentSize
         context.coordinator.contentView = contentView
         context.coordinator.scrollView = scrollView
+        context.coordinator.baseContentSize = contentSize
 
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
@@ -87,7 +88,8 @@ struct ZoomPanScrollView<ContentView: UIView>: UIViewRepresentable {
         context.coordinator.parent = self
         guard let contentView = context.coordinator.contentView else { return }
         updateContentView(contentView)
-        if contentView.frame.size != contentSize {
+        if context.coordinator.baseContentSize != contentSize {
+            context.coordinator.baseContentSize = contentSize
             scrollView.setZoomScale(minZoom, animated: false)
             contentView.frame = CGRect(origin: .zero, size: contentSize)
             scrollView.contentSize = contentSize
@@ -99,6 +101,7 @@ struct ZoomPanScrollView<ContentView: UIView>: UIViewRepresentable {
         var parent: ZoomPanScrollView
         weak var contentView: ContentView?
         weak var scrollView: UIScrollView?
+        var baseContentSize: CGSize = .zero
 
         init(_ parent: ZoomPanScrollView) {
             self.parent = parent
@@ -141,7 +144,11 @@ struct ZoomPanScrollView<ContentView: UIView>: UIViewRepresentable {
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard let scrollView, scrollView.zoomScale <= parent.minZoom + 0.01 else { return }
+            guard let scrollView else { return }
+            guard scrollView.zoomScale <= parent.minZoom + 0.01, gesture.numberOfTouches <= 1 else {
+                parent.onUnzoomedPan(.zero, .zero, .cancelled)
+                return
+            }
             let t = gesture.translation(in: scrollView)
             let v = gesture.velocity(in: scrollView)
             parent.onUnzoomedPan(CGSize(width: t.x, height: t.y), CGSize(width: v.x, height: v.y), gesture.state)
