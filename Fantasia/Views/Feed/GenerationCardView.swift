@@ -37,16 +37,22 @@ struct GenerationCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Truncated prompt (tap → detail popup, D-29)
+            // Truncated prompt (tap → detail popup, D-29). Chevron + primary text color signal
+            // tappability the platform-native way (Settings rows, Music lists).
             Button(action: onTapDetail) {
-                Text(item.prompt ?? "No prompt")
-                    .font(.callout)
-                    .foregroundStyle(theme.textSecondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Text(item.prompt ?? "No prompt")
+                        .font(.callout)
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
