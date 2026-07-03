@@ -4,6 +4,7 @@
 // Opened from Feed card prompt tap, Library thumbnail tap, or GenerateView card detail.
 
 import SwiftUI
+import UIKit
 import Photos
 import AVFoundation
 
@@ -161,23 +162,25 @@ struct GenerationDetailSheet: View {
 
                     // Actions
                     if item.status == .completed {
-                        VStack(spacing: 10) {
+                        VStack(spacing: 14) {
                             // Remix + Regenerate + Reference row
-                            HStack(spacing: 10) {
-                                actionButton("arrow.2.squarepath", "Remix", role: .normal) {
+                            HStack(spacing: 28) {
+                                circleActionButton("arrow.2.squarepath", "Remix") {
                                     handleRemix()
                                 }
-                                actionButton("arrow.clockwise", "Regen", role: .normal) {
+                                circleActionButton("arrow.clockwise", "Regen") {
                                     handleRegenerate()
                                 }
-                                actionButton("paperclip", "Reference", role: .normal) {
+                                circleActionButton("paperclip", "Reference") {
                                     handleReference()
                                 }
                             }
+                            .frame(maxWidth: .infinity)
 
-                            // Download (image or video)
+                            // Download (image or video) — primary CTA
                             if let urlString = item.isImage ? item.completedMediaUrl : item.videoUrl {
                                 Button {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     Task { await saveToPhotos(urlString: urlString) }
                                 } label: {
                                     HStack(spacing: 8) {
@@ -186,45 +189,67 @@ struct GenerationDetailSheet: View {
                                             .font(.body.weight(.semibold))
                                     }
                                     .frame(maxWidth: .infinity).frame(height: 52)
-                                    .background(accent, in: RoundedRectangle(cornerRadius: 12))
                                     .foregroundStyle(.white)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
+                                                     Color(red: 0.357, green: 0.561, blue: 0.851)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        in: RoundedRectangle(cornerRadius: 14)
+                                    )
+                                    .shadow(color: accent.opacity(0.35), radius: 10, y: 4)
                                 }
+                                .buttonStyle(PressableButtonStyle())
                                 .disabled(isSaving)
                             }
 
-                            // Share
+                            // Share — secondary
                             if let urlString = item.completedMediaUrl {
                                 Button {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     Task { await prepareAndShare(urlString: urlString) }
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: isPreparingShare ? "clock" : "square.and.arrow.up")
                                         Text(isPreparingShare ? "Preparing…" : "Share")
+                                            .font(.body.weight(.semibold))
                                     }
                                     .frame(maxWidth: .infinity).frame(height: 52)
-                                    .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
                                     .foregroundStyle(theme.textPrimary)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                                 }
+                                .buttonStyle(PressableButtonStyle())
                                 .disabled(isPreparingShare)
                             }
 
-                            // Delete
-                            actionButton("trash", "Delete", role: .destructive) {
+                            // Delete — quiet destructive text row
+                            Button {
                                 showDeleteAlert = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "trash").font(.system(size: 15, weight: .medium))
+                                    Text("Delete").font(.subheadline)
+                                }
+                                .foregroundStyle(Color.red.opacity(0.85))
+                                .frame(maxWidth: .infinity).frame(height: 44)
                             }
+                            .buttonStyle(PressableButtonStyle())
+                            .disabled(isDeleting)
 
-                            // Report
+                            // Report — quiet neutral text row
                             Button {
                                 Task { await reportGeneration() }
                             } label: {
                                 HStack(spacing: 8) {
-                                    Image(systemName: "flag")
-                                    Text(isReporting ? "Reported" : "Report")
+                                    Image(systemName: "flag").font(.system(size: 15, weight: .medium))
+                                    Text(isReporting ? "Reported" : "Report an issue").font(.subheadline)
                                 }
+                                .foregroundStyle(theme.textSecondary)
                                 .frame(maxWidth: .infinity).frame(height: 44)
-                                .foregroundStyle(isReporting ? .secondary : Color.red.opacity(0.8))
                             }
+                            .buttonStyle(PressableButtonStyle())
                             .disabled(isReporting)
                         }
                     }
@@ -277,27 +302,24 @@ struct GenerationDetailSheet: View {
 
     // MARK: - Action helpers
 
-    private enum ButtonRole { case normal, destructive }
-
     @ViewBuilder
-    private func actionButton(_ icon: String, _ label: String, role: ButtonRole, action: @escaping () -> Void) -> some View {
-        let fg: Color = role == .destructive ? .red.opacity(0.85) : theme.textPrimary.opacity(0.8)
-        let bg: Color = role == .destructive ? .red.opacity(0.08) : theme.surface
-        let border: Color = role == .destructive ? .red.opacity(0.2) : theme.surfaceBorder
-
+    private func circleActionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 13, weight: .medium))
-                Text(label).font(.system(size: 14, weight: .medium))
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(theme.textPrimary)
+                    .frame(width: 54, height: 54)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 0.5))
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(theme.textSecondary)
             }
-            .foregroundStyle(fg)
             .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(bg, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(border, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
-        .disabled(isDeleting)
+        .buttonStyle(PressableButtonStyle())
     }
 
     @ViewBuilder
@@ -455,5 +477,16 @@ struct GenerationDetailSheet: View {
         } catch {
             print("[GenerationDetailSheet] report error: \(error)")
         }
+    }
+}
+
+// MARK: - PressableButtonStyle
+
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
