@@ -31,6 +31,10 @@ struct GenerationDetailPagerView: View {
         // all tried to present at once and UIKit silently rejected the duplicates. One host here,
         // shared across all pages via generationManager.pendingNameAsReference.
         .nameAsReferenceAlert()
+        // T16: the sheet's own UIKit presentation background (pure black/white depending on
+        // system scheme) peeks through the bottom safe-area strip below content's
+        // .background(theme.background), which doesn't extend into the safe area itself.
+        .presentationBackground(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
     }

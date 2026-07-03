@@ -41,7 +41,12 @@ struct MainTabView: View {
                 customTabBar
                     .padding(.bottom, bottomLift)
 
-                theme.recessedBackground
+                // T16: was a plain recessedBackground fill, which reads as a darker band under
+                // the (lighter) tab bar — same fill recipe as customTabBar's own background
+                // Rectangle so the bar and this under-bar strip read as one continuous surface.
+                Rectangle()
+                    .fill(theme.recessedBackground.opacity(0.9))
+                    .background(.regularMaterial)
                     .frame(height: bottomLift)
                     .ignoresSafeArea(edges: .bottom)
             }
