@@ -18,7 +18,9 @@ struct GenerationDetailSheet: View {
     @State private var showDeleteAlert = false
     @State private var isSaving = false
     @State private var isDeleting = false
+    @State private var isPreparingShare = false
     @State private var saveError: String? = nil
+    @State private var shareError: String? = nil
     @State private var isReporting = false
     @State private var tmpShareUrl: URL? = nil
     @State private var thumbnail: UIImage? = nil
@@ -185,14 +187,15 @@ struct GenerationDetailSheet: View {
                                     Task { await prepareAndShare(urlString: urlString) }
                                 } label: {
                                     HStack(spacing: 8) {
-                                        Image(systemName: "square.and.arrow.up")
-                                        Text("Share")
+                                        Image(systemName: isPreparingShare ? "clock" : "square.and.arrow.up")
+                                        Text(isPreparingShare ? "Preparing…" : "Share")
                                     }
                                     .frame(maxWidth: .infinity).frame(height: 52)
                                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
                                     .foregroundStyle(.white)
                                 }
+                                .disabled(isPreparingShare)
                             }
 
                             // Delete
@@ -244,6 +247,14 @@ struct GenerationDetailSheet: View {
             Button("OK", role: .cancel) { saveError = nil }
         } message: {
             Text(saveError ?? "")
+        }
+        .alert("Share Failed", isPresented: Binding(
+            get: { shareError != nil },
+            set: { if !$0 { shareError = nil } }
+        )) {
+            Button("OK", role: .cancel) { shareError = nil }
+        } message: {
+            Text(shareError ?? "")
         }
         .background(Color(red: 0.09, green: 0.085, blue: 0.105))
         .presentationDetents([.large])
@@ -359,18 +370,31 @@ struct GenerationDetailSheet: View {
     }
 
     private func prepareAndShare(urlString: String) async {
-        guard let mediaUrl = URL(string: urlString) else { return }
+        guard !isPreparingShare, let mediaUrl = URL(string: urlString) else { return }
+        isPreparingShare = true
+        defer { isPreparingShare = false }
+        let ext = item.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
+        let destUrl = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fantasia-\(item.isImage ? "image" : "video").\(ext)")
         do {
-            let (tmpUrl, _) = try await URLSession.shared.download(from: mediaUrl)
-            let ext = item.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
-            let destUrl = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(item.id)-share.\(ext)")
             try? FileManager.default.removeItem(at: destUrl)
-            try FileManager.default.moveItem(at: tmpUrl, to: destUrl)
+            if item.isImage {
+                // No image cache today — download straight from the presigned URL, then move
+                // (not copy) the disposable temp download into the share path.
+                let (tmpUrl, _) = try await URLSession.shared.download(from: mediaUrl)
+                try FileManager.default.moveItem(at: tmpUrl, to: destUrl)
+            } else {
+                // VideoCache is usually already warm (player/thumbnail generation prefetch it) —
+                // this avoids re-downloading the whole video just to share it, and only hits the
+                // network on a genuine cache miss. Copy (not move) since the cache still owns it.
+                let cachedUrl = try await VideoCache.shared.ensureCached(id: item.id, remoteURL: mediaUrl)
+                try FileManager.default.copyItem(at: cachedUrl, to: destUrl)
+            }
             tmpShareUrl = destUrl
             showShare = true
         } catch {
-            print("[GenerationDetailSheet] share download error: \(error)")
+            print("[GenerationDetailSheet] share prepare error: \(error)")
+            shareError = "Could not prepare \(item.isImage ? "image" : "video") for sharing: \(error.localizedDescription)"
         }
     }
 
