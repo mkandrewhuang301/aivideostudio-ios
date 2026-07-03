@@ -357,21 +357,25 @@ struct GenerateView: View {
         .onAppear {
             generationManager.startPolling()
             if let remix = generationManager.pendingRemix {
-                promptText = remix.prompt ?? ""
-                selectedModel = remix.model
-                selectedMode = remix.isImage ? "AI Image" : "AI Video"
-                if remix.isImage {
-                    selectedImageResolution = ImageResolution.allCases.first {
-                        $0.rawValue == remix.params.aspectRatio
-                    } ?? .square
-                } else {
-                    selectedDuration = remix.params.duration ?? 6
-                    selectedResolution = remix.params.resolution ?? "720p"
-                    selectedAspectRatio = remix.params.aspectRatio ?? "9:16"
-                    audioEnabled = remix.params.audioEnabled ?? true
-                }
+                applyRemix(from: remix)
                 generationManager.pendingRemix = nil
             }
+            if let refItem = generationManager.pendingReference {
+                attachReference(from: refItem)
+                generationManager.pendingReference = nil
+            }
+        }
+        // Covers the case where GenerateView is already on-screen (detail sheet opened from
+        // history while already on this tab) — onAppear above doesn't re-fire on sheet dismiss,
+        // so the notification path is needed too. Nil-ing pendingRemix/pendingReference after
+        // consumption makes firing from both places harmless.
+        .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
+            if let remix = generationManager.pendingRemix {
+                applyRemix(from: remix)
+                generationManager.pendingRemix = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
             if let refItem = generationManager.pendingReference {
                 attachReference(from: refItem)
                 generationManager.pendingReference = nil
@@ -1511,6 +1515,14 @@ struct GenerateView: View {
     // MARK: - Card action handlers
 
     private func handleRemix(item: GenerationItem) {
+        applyRemix(from: item)
+    }
+
+    /// Restores a generation's prompt, model/mode/params, and attached references into the
+    /// composer. Shared by the card's Remix button and the detail-sheet Remix/Regen path (via
+    /// pendingRemix) — the latter used to hand-roll a partial restore that never touched
+    /// attachedReferences, silently dropping the generation's references.
+    private func applyRemix(from item: GenerationItem) {
         promptText = item.prompt ?? ""
         selectedModel = item.model
         selectedMode = item.isImage ? "AI Image" : "AI Video"
