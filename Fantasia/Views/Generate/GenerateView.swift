@@ -1786,8 +1786,16 @@ private struct SwipeToDeleteRow<Content: View>: View {
     // including being cancelled mid-drag when the ScrollView claims the touch instead (the
     // common case: a mostly-vertical scroll with a slight horizontal wobble). resetTransaction
     // animates that snap-back so the card springs home instead of teleporting.
+    //
+    // T9 fix: direction used to be re-evaluated on every .updating tick (abs(w) > abs(h) * 1.5),
+    // so mid-drag wobble flapped the guard — state updates stopped/resumed while the vertical
+    // ScrollView simultaneously scrolled, producing red-pane flicker and a gesture that often
+    // ended without cleanly crossing the threshold. Direction is now decided once, near the
+    // start of the drag, and locked for the rest of the gesture.
+    private enum DragDirection { case undetermined, horizontal, vertical }
+
     @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.35, dampingFraction: 0.8)))
-    private var dragWidth: CGFloat = 0
+    private var drag: (width: CGFloat, direction: DragDirection) = (0, .undetermined)
 
     private let deleteThreshold: CGFloat = 90   // release past this = ask to delete
     private let maxReveal: CGFloat = 130
@@ -1796,10 +1804,10 @@ private struct SwipeToDeleteRow<Content: View>: View {
     // While a confirmation is up for this row (isHeldOpen), stay parked at full reveal
     // instead of springing home (Messages pattern).
     private var offset: CGFloat {
-        if isHeldOpen && dragWidth == 0 { return -maxReveal }
-        guard dragWidth < 0 else { return 0 }
-        if dragWidth < -maxReveal { return -maxReveal + (dragWidth + maxReveal) * 0.25 }
-        return dragWidth
+        if isHeldOpen && drag.width == 0 { return -maxReveal }
+        guard drag.width < 0 else { return 0 }
+        if drag.width < -maxReveal { return -maxReveal + (drag.width + maxReveal) * 0.25 }
+        return drag.width
     }
 
     private var isPastThreshold: Bool { offset <= -deleteThreshold }
@@ -1829,15 +1837,22 @@ private struct SwipeToDeleteRow<Content: View>: View {
             .sensoryFeedback(.impact(weight: .medium), trigger: isPastThreshold) { _, crossed in crossed }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
-                    .updating($dragWidth) { value, state, _ in
-                        // Only claim a mostly-horizontal, leftward drag — otherwise let the
-                        // ScrollView handle vertical/diagonal scrolling untouched.
-                        guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                        state = min(value.translation.width, 0)
+                    .updating($drag) { value, state, _ in
+                        if state.direction == .undetermined {
+                            let t = value.translation
+                            guard abs(t.width) + abs(t.height) > 12 else { return }   // wait for a clear vector
+                            state.direction = abs(t.width) > abs(t.height) ? .horizontal : .vertical
+                        }
+                        guard state.direction == .horizontal else { return }
+                        state.width = min(value.translation.width, 0)
                     }
                     .onEnded { value in
-                        guard abs(value.translation.width) > abs(value.translation.height) * 1.5,
-                              value.translation.width <= -deleteThreshold else { return }
+                        // Same one-shot direction decision as .updating, recomputed from the
+                        // final translation (dominated by whichever direction the drag locked
+                        // into) — only a horizontal drag past the threshold triggers delete.
+                        let t = value.translation
+                        guard abs(t.width) > abs(t.height),
+                              t.width <= -deleteThreshold else { return }
                         onRequestDelete()
                     }
             )
