@@ -15,8 +15,14 @@ private final class URLLoopingPlayerViewModel {
     let player: AVQueuePlayer
     private var looper: AVPlayerLooper?
     private var statusObservation: NSKeyValueObservation?
+    private var durationObservation: NSKeyValueObservation?
+    private var timeObserverToken: Any?
+    private var isScrubbing = false
+    private var wasPlayingBeforeScrub = false
     var failed: Bool = false
     var isPlaying: Bool = true
+    var currentTime: Double = 0
+    var duration: Double = 0
 
     init(url: URL, generationId: String?) {
         player = AVQueuePlayer()
@@ -33,13 +39,37 @@ private final class URLLoopingPlayerViewModel {
             }
         }
         let item = AVPlayerItem(url: playbackURL)
-        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor in self?.failed = true }
-        }
         looper = AVPlayerLooper(player: player, templateItem: item)
         player.isMuted = false
+        // Silent-switch fix: the app's default .ambient audio session category mutes
+        // playback whenever the ringer switch is on silent, even with volume turned up.
+        // .playback ignores the switch — required for a video player with sound. Scoped
+        // here rather than app launch so the muted onboarding/feed surfaces never
+        // interrupt the user's background audio (e.g. Spotify); opening this full-screen
+        // player is the moment taking over audio is expected.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
+
+        // Observe the player's currentItem, not the templateItem passed to AVPlayerLooper —
+        // the looper manages its own item copies internally, so the templateItem's own
+        // status/duration KVO never reliably fires once looping is set up.
+        statusObservation = player.observe(\.currentItem?.status, options: [.new]) { [weak self] player, _ in
+            guard player.currentItem?.status == .failed else { return }
+            Task { @MainActor in self?.failed = true }
+        }
+        durationObservation = player.observe(\.currentItem?.duration, options: [.new, .initial]) { [weak self] player, _ in
+            guard let seconds = player.currentItem?.duration.seconds, seconds.isFinite else { return }
+            Task { @MainActor in self?.duration = seconds }
+        }
+
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            Task { @MainActor in
+                guard let self, !self.isScrubbing else { return }
+                self.currentTime = time.seconds
+            }
+        }
     }
 
     func togglePlayback() {
@@ -50,10 +80,81 @@ private final class URLLoopingPlayerViewModel {
         }
         isPlaying.toggle()
     }
+
+    // Pauses playback while the user drags the scrubber so it doesn't fight the periodic
+    // time observer, then resumes (if it was playing) once the drag ends.
+    func beginScrubbing() {
+        isScrubbing = true
+        wasPlayingBeforeScrub = isPlaying
+        player.pause()
+    }
+
+    func endScrubbing() {
+        // Seek the current item, not the queue player: AVPlayerLooper tracks item-boundary
+        // notifications to manage its loop queue, and a player-level seek desyncs that state
+        // (the visible frame drifts from the reported scrubber position). Item-level seeks
+        // don't touch the queue, so the looper stays consistent.
+        let time = CMTime(seconds: currentTime, preferredTimescale: 600)
+        player.currentItem?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
+        isScrubbing = false
+        if wasPlayingBeforeScrub { player.play() }
+    }
+
+    func detachTimeObserver() {
+        if let timeObserverToken { player.removeTimeObserver(timeObserverToken) }
+        timeObserverToken = nil
+        durationObservation = nil
+    }
 }
 
 // FillingVideoPlayerView is declared in OnboardingVideoView.swift (module-internal).
 // Reuse it here rather than redeclaring — same resizeAspectFill behaviour (D-13).
+
+// Custom scrubber, not the system Slider — SwiftUI's Slider thumb is a fixed system size
+// with no supported way to shrink it, so this draws its own small thumb + track for the
+// QuickTime-style bar's proportions.
+private struct ScrubberView: View {
+    var vm: URLLoopingPlayerViewModel
+    @State private var isDragging = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            let progress = vm.duration > 0 ? min(max(vm.currentTime / vm.duration, 0), 1) : 0
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(Color.white)
+                    .frame(width: width * progress, height: 3)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 10, height: 10)
+                    .offset(x: width * progress - 5)
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if !isDragging {
+                            isDragging = true
+                            vm.beginScrubbing()
+                        }
+                        let fraction = min(max(value.location.x / width, 0), 1)
+                        vm.currentTime = fraction * vm.duration
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        vm.endScrubbing()
+                    }
+            )
+        }
+        .frame(height: 24)
+    }
+}
 
 struct FullScreenVideoPlayerView: View {
     let videoUrl: URL
@@ -115,7 +216,11 @@ struct FullScreenVideoPlayerView: View {
                     }
                 }
                 Spacer()
+                if let vm = viewModel, !vm.failed, vm.duration > 0 {
+                    playbackControlBar(vm: vm)
+                }
             }
+            .ignoresSafeArea(edges: .bottom)
         }
         .opacity(contentOpacity)
         .background(TransparentFullScreenBackground())
@@ -125,10 +230,49 @@ struct FullScreenVideoPlayerView: View {
             UIViewController.attemptRotationToDeviceOrientation()
         }
         .onDisappear {
+            viewModel?.detachTimeObserver()
             viewModel?.player.pause()
+            // Hand audio focus back so any app we interrupted (e.g. Spotify) resumes.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             FantasiaAppDelegate.orientationLock = .portrait
             UIViewController.attemptRotationToDeviceOrientation()
         }
         .statusBar(hidden: true)
+    }
+
+    // QuickTime-style bar: play/pause on the left, scrubber in the middle, elapsed/total on
+    // the right. Dragging the scrubber pauses tracking of live playback time until release
+    // (see beginScrubbing/endScrubbing) so the thumb doesn't jump under the user's finger.
+    @ViewBuilder
+    private func playbackControlBar(vm: URLLoopingPlayerViewModel) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                vm.togglePlayback()
+            } label: {
+                Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+
+            ScrubberView(vm: vm)
+
+            Text("\(formatTime(vm.currentTime)) / \(formatTime(vm.duration))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.horizontal, 16)
+        .padding(.bottom, 40)
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
