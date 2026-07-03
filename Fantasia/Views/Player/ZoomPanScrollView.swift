@@ -55,6 +55,7 @@ struct ZoomPanScrollView<ContentView: UIView>: UIViewRepresentable {
         // insets here would offset the centering math against the actually-full-bleed bounds.
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.backgroundColor = .clear
+        scrollView.decelerationRate = .fast
 
         let contentView = makeContentView()
         contentView.frame = CGRect(origin: .zero, size: contentSize)
