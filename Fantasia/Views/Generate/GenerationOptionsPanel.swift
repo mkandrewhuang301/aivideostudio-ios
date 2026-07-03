@@ -83,7 +83,7 @@ struct GenerationOptionsPanel: View {
     @Binding var audioEnabled: Bool
     @Binding var selectedImageResolution: ImageResolution
 
-    @AppStorage("modelPickerEnabled") private var modelPickerEnabled = false
+    @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 

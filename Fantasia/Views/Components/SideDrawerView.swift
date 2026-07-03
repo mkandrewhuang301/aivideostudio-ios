@@ -6,7 +6,7 @@ struct SideDrawerView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
 
-    @AppStorage("modelPickerEnabled") private var modelPickerEnabled = false
+    @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
     @State private var showSignOutConfirm = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
