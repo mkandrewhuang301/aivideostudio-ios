@@ -84,6 +84,7 @@ struct GenerationOptionsPanel: View {
     @Binding var selectedImageResolution: ImageResolution
 
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
+    @Environment(ThemeManager.self) private var theme
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -176,7 +177,7 @@ struct GenerationOptionsPanel: View {
                     VStack(spacing: 4) {
                         Text("AUDIO")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(theme.textTertiary)
                             .kerning(0.4)
                         Button {
                             withAnimation(.easeInOut(duration: 0.15)) { audioEnabled.toggle() }
@@ -216,7 +217,7 @@ struct GenerationOptionsPanel: View {
         VStack(spacing: 4) {
             Text("MODEL")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(theme.textTertiary)
                 .kerning(0.4)
             Button {
                 showModelPicker = true
@@ -256,7 +257,7 @@ struct GenerationOptionsPanel: View {
         VStack(spacing: 4) {
             Text(label.uppercased())
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(theme.textTertiary)
                 .kerning(0.4)
             Menu {
                 Section(label) {
@@ -277,24 +278,24 @@ struct GenerationOptionsPanel: View {
         HStack(spacing: 5) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isActive ? accent : .white.opacity(0.55))
+                .foregroundStyle(isActive ? accent : theme.textSecondary)
                 .frame(width: 15, alignment: .center)
                 .contentTransition(.symbolEffect(.replace))
             Text(value)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(theme.textPrimary)
                 .contentTransition(.opacity)
             if showChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(theme.textTertiary)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isActive ? accent.opacity(0.16) : Color.white.opacity(0.07))
+        .background(isActive ? accent.opacity(0.16) : theme.surface)
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(isActive ? accent.opacity(0.45) : Color.white.opacity(0.18), lineWidth: 1))
+        .overlay(Capsule().stroke(isActive ? accent.opacity(0.45) : theme.surfaceBorder, lineWidth: 1))
     }
 }
 

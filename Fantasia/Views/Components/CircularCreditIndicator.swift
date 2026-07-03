@@ -39,7 +39,7 @@ struct CircularCreditIndicator: View {
         ZStack {
             // Track ring (background)
             Circle()
-                .stroke(Color.white.opacity(0.15), lineWidth: 3)
+                .stroke(theme.isLight ? Color.black.opacity(0.15) : Color.white.opacity(0.15), lineWidth: 3)
 
             // Progress arc — 0 credits shows red dot at start position
             Circle()

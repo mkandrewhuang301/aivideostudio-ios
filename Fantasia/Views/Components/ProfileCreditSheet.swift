@@ -8,6 +8,7 @@ import StoreKit
 struct ProfileCreditSheet: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(ThemeManager.self) private var theme
     @Binding var isPresented: Bool
 
     @State private var showCreditStore = false
@@ -103,7 +104,7 @@ struct ProfileCreditSheet: View {
             ) {
                 ForEach(0..<22, id: \.self) { index in
                     Circle()
-                        .fill(index < filledDots ? accent : Color.white.opacity(0.1))
+                        .fill(index < filledDots ? accent : theme.surfaceStrong)
                         .frame(height: 6)
                         .accessibilityHidden(true)
                 }
@@ -134,7 +135,7 @@ struct ProfileCreditSheet: View {
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Menu section
@@ -163,8 +164,8 @@ struct ProfileCreditSheet: View {
                 }
             }
             .padding(.horizontal, 12)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 0.5))
 
             // Dashed separator
             GeometryReader { geo in
@@ -172,7 +173,7 @@ struct ProfileCreditSheet: View {
                     path.move(to: CGPoint(x: 0, y: 0.5))
                     path.addLine(to: CGPoint(x: geo.size.width, y: 0.5))
                 }
-                .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .stroke(theme.divider, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
             .frame(height: 1)
             .padding(.horizontal, 4)
@@ -221,8 +222,8 @@ struct ProfileCreditSheet: View {
                 }
             }
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.3))
-            .tint(Color.white.opacity(0.3))
+            .foregroundStyle(theme.textTertiary)
+            .tint(theme.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, 4)
@@ -240,11 +241,11 @@ struct ProfileCreditSheet: View {
                 Spacer()
                 if isLoading {
                     ProgressView()
-                        .tint(Color.white.opacity(0.5))
+                        .tint(theme.textTertiary)
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(theme.textTertiary)
                 }
             }
             .padding(.horizontal, 4)
@@ -264,7 +265,7 @@ struct ProfileCreditSheet: View {
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.07))
+            .fill(theme.divider)
             .frame(height: 0.5)
             .padding(.leading, 42)
     }

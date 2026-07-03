@@ -26,17 +26,17 @@ final class ThemeManager {
 
     /// Page background (Feed, Library, Generate, Drawer).
     var background: Color {
-        isLight ? Color(red: 0.965, green: 0.965, blue: 0.975) : Color(red: 0.09, green: 0.085, blue: 0.105)
+        isLight ? Color(red: 0.925, green: 0.925, blue: 0.937) : Color(red: 0.09, green: 0.085, blue: 0.105)
     }
 
     /// Slightly lighter background used behind top bars, tab bar, and day-section headers.
     var elevatedBackground: Color {
-        isLight ? Color(red: 0.99, green: 0.99, blue: 0.995) : Color(red: 0.13, green: 0.125, blue: 0.15)
+        isLight ? Color(red: 0.955, green: 0.955, blue: 0.965) : Color(red: 0.13, green: 0.125, blue: 0.15)
     }
 
     /// Thin accent strip under the custom tab bar / hairline separators.
     var recessedBackground: Color {
-        isLight ? Color(red: 0.91, green: 0.91, blue: 0.925) : Color(red: 0.063, green: 0.059, blue: 0.075)
+        isLight ? Color(red: 0.885, green: 0.885, blue: 0.90) : Color(red: 0.063, green: 0.059, blue: 0.075)
     }
 
     /// Card/chip fill that sits on top of `background`.

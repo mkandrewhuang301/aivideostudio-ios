@@ -942,7 +942,7 @@ struct GenerateView: View {
                 // Name label
                 Text(label)
                     .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(theme.textSecondary)
                     .lineLimit(1)
                     .frame(width: 40)
             }
