@@ -79,6 +79,19 @@ struct LibraryView: View {
                         }
                         .padding(.top, 8)
                         .padding(.bottom, 100)
+                        // Overscroll seam cover: on rubber-band past the top, the content shifts
+                        // down and reveals the page background's radial-gradient tint above the
+                        // first pinned header, which reads as a seam against the header's flat
+                        // fill. This top-anchored rect extends 600pt above the content and rides
+                        // with it during the bounce, showing flat header color instead. As a
+                        // background of the whole LazyVStack it draws behind every row/header,
+                        // so it can never cover content (unlike the per-header variant — see
+                        // dayHeader's NOTE).
+                        .background(alignment: .top) {
+                            theme.elevatedBackground
+                                .frame(height: 600)
+                                .offset(y: -600)
+                        }
                     }
                     // Brackets touch-down -> touch-up with isInteracting so
                     // GenerationManager.mergeLatest() buffers new items instead of
@@ -133,6 +146,12 @@ struct LibraryView: View {
         .padding(.horizontal, sectionHPad)
         .padding(.vertical, 8)
         .background(theme.elevatedBackground)
+        // NOTE: do NOT hang an oversized overscroll-cover rect off this header. A previous fix
+        // did exactly that (600pt rect offset upward as each header's background) and, because
+        // later LazyVStack siblings draw on top of earlier ones, every day header painted over
+        // the entire section above it — hiding "Today"'s header and grid, and hiding grid cells
+        // until the next header pinned into the overlay layer. The overscroll cover now lives on
+        // the LazyVStack itself (see body), where a background can never occlude content.
     }
 
     // MARK: - 2-column masonry (fixed column width, native-ratio heights)
