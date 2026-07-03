@@ -141,7 +141,7 @@ struct GenerateView: View {
     }
 
     private var isSubmitDisabled: Bool {
-        isSubmitting || hasInsufficientCredits || isAnyUploading || missingRequiredImage
+        isSubmitting || isAnyUploading
     }
 
     private var generationCost: Int {
@@ -744,6 +744,17 @@ struct GenerateView: View {
                             showPaywall = true
                             return
                         }
+                        // Temporary tap-time errors — no placeholder card is created and the
+                        // composer (prompt/references) is left untouched because we return
+                        // before dispatchGeneration() ever runs.
+                        guard !hasInsufficientCredits else {
+                            showError("Insufficient credits")
+                            return
+                        }
+                        guard !missingRequiredImage else {
+                            showError("Attach an image to use this model")
+                            return
+                        }
                         // A ref whose upload/backfill failed leaves its [ImageN] token in the prompt
                         // with no URL to back it — block submit rather than silently dropping it
                         // (Issue 4b: previously dispatchGeneration filtered these out unannounced).
@@ -767,7 +778,7 @@ struct GenerateView: View {
                                 )
                             )
                             .clipShape(Circle())
-                            .opacity(isSubmitDisabled ? 0.5 : 1.0)
+                            .opacity((isSubmitDisabled || hasInsufficientCredits || missingRequiredImage) ? 0.5 : 1.0)
                     }
                     .buttonStyle(.plain)
                     .disabled(isSubmitDisabled)
@@ -1477,6 +1488,12 @@ struct GenerateView: View {
             attachedReferences = capturedReferences
             if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
                 showError("Prompt may not adhere to our community guidelines. Please try again.")
+            } else if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
+                // Balance went stale between the client-side pre-flight check and dispatch
+                // (e.g. a concurrent generation on another device) — resync so the composer's
+                // insufficient-credits check reflects the real server-confirmed balance.
+                showError("Insufficient credits")
+                await creditManager.fetchBalance()
             } else {
                 showError("An error has occurred. Please try again.")
             }
