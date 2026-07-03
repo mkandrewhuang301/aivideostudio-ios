@@ -17,6 +17,11 @@ struct ContentView: View {
     @Environment(MediaLibraryManager.self) private var mediaLibraryManager
     @Environment(ThemeManager.self) private var theme
     @State private var minSplashElapsed = false
+    // Issue 6: a cold/sleeping Railway backend can make the first GET /api/me take many
+    // seconds — without this, State 1b below blocks the splash on it indefinitely. After 3s
+    // with no cached balance to fall back on, give up waiting and let MainTabView render;
+    // fetchBalance() keeps running and corrects the UI whenever it actually lands.
+    @State private var creditsWaitTimedOut = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -40,7 +45,7 @@ struct ContentView: View {
             } else if authManager.isLoading || !minSplashElapsed {
                 // State 1: Loading — show splash until auth state resolves + 2s minimum
                 SplashView()
-            } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState {
+            } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState && !creditsWaitTimedOut {
                 // State 1b: Authenticated but profile/credits haven't loaded yet, and we have no
                 // locally-cached balance to show in the meantime — keep showing splash so
                 // MainTabView never renders the 0-credits/free-tier CreditManager defaults
@@ -84,6 +89,7 @@ struct ContentView: View {
             if new == nil {
                 // Signed out — clear stale credit state and reset RC to anonymous user
                 creditManager.reset()
+                creditsWaitTimedOut = false
                 if let uid = old?.uid {
                     generationManager.clearSnapshot(uid: uid)
                     mediaLibraryManager.clearSnapshot(uid: uid)
@@ -96,6 +102,14 @@ struct ContentView: View {
                 creditManager.hydrateFromCache()
                 generationManager.hydrateFromSnapshot()
                 mediaLibraryManager.hydrateFromSnapshot()
+
+                // Issue 6: cap the State 1b splash wait — a cold Railway instance shouldn't
+                // freeze the whole app on the first /api/me round trip.
+                creditsWaitTimedOut = false
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    if !creditManager.hasLoaded { creditsWaitTimedOut = true }
+                }
 
                 // Identify RC user with Firebase UID so the webhook app_user_id is resolvable
                 // to a DB user (otherwise credit grants are silently skipped). This is

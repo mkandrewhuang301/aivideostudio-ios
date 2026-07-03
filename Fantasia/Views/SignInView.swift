@@ -119,6 +119,11 @@ struct SignInView: View {
             .navigationDestination(isPresented: $showSignUp) {
                 SignUpView()
             }
+            .task {
+                // Issue 6: warm the backend while the user is still typing credentials so a
+                // cold Railway instance isn't adding seconds on top of Firebase auth latency.
+                await APIClient.shared.pingHealth()
+            }
         }
     }
 

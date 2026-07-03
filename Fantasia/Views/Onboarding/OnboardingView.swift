@@ -62,6 +62,11 @@ struct OnboardingView: View {
             .transition(pageTransition)
         }
         .ignoresSafeArea()
+        .task {
+            // Issue 6: warm the backend during onboarding so it's already awake by the time a
+            // first-launch user reaches sign-in.
+            await APIClient.shared.pingHealth()
+        }
     }
 
     private func advance() {

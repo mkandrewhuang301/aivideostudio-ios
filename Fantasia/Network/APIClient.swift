@@ -15,6 +15,12 @@ actor APIClient {
     }()
     private let baseURL = AppConfig.baseURL
 
+    // Issue 6: fire-and-forget warm-up ping so a sleeping Railway instance is already awake by
+    // the time the user submits sign-in credentials. No auth token, errors intentionally ignored.
+    func pingHealth() async {
+        _ = try? await session.data(from: baseURL.appendingPathComponent("health"))
+    }
+
     // GET /rates — public endpoint, no auth token needed
     func fetchRates() async throws -> RatesResponse {
         let url = baseURL.appendingPathComponent("rates")
