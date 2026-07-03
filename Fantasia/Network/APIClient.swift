@@ -364,6 +364,14 @@ struct GenerationRequestBody: Encodable {
     let referenceImages: [String]?
     let referenceVideos: [String]?
     let referenceUploadIds: [String]?   // reference_uploads UUIDs — stored server-side for remix/regen
+    // Parallel arrays aligned by index to referenceImages/referenceVideos (id-or-null per entry).
+    // Lets the backend re-sign each reference URL from its owning row right before dispatch,
+    // since client-sent presigned URLs (1hr upload TTL / 24hr generation-output TTL) can be
+    // stale by submit time. nil entries mean "no known id — keep the URL as sent."
+    let referenceImageUploadIds: [String?]?
+    let referenceVideoUploadIds: [String?]?
+    let referenceImageGenerationIds: [String?]?
+    let referenceVideoGenerationIds: [String?]?
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
@@ -376,5 +384,9 @@ struct GenerationRequestBody: Encodable {
         case referenceImages = "reference_images"
         case referenceVideos = "reference_videos"
         case referenceUploadIds = "reference_upload_ids"
+        case referenceImageUploadIds = "reference_image_upload_ids"
+        case referenceVideoUploadIds = "reference_video_upload_ids"
+        case referenceImageGenerationIds = "reference_image_generation_ids"
+        case referenceVideoGenerationIds = "reference_video_generation_ids"
     }
 }

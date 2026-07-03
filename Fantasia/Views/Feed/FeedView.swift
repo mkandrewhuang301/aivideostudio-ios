@@ -163,7 +163,11 @@ struct FeedView: View {
             imageQuality: nil,
             referenceImages: nil,
             referenceVideos: nil,
-            referenceUploadIds: nil
+            referenceUploadIds: nil,
+            referenceImageUploadIds: nil,
+            referenceVideoUploadIds: nil,
+            referenceImageGenerationIds: nil,
+            referenceVideoGenerationIds: nil
         )
         do {
             _ = try await APIClient.shared.submitGeneration(body: body)

@@ -740,6 +740,13 @@ struct GenerateView: View {
                         showPaywall = true
                         return
                     }
+                    // A ref whose upload/backfill failed leaves its [ImageN] token in the prompt
+                    // with no URL to back it — block submit rather than silently dropping it
+                    // (Issue 4b: previously dispatchGeneration filtered these out unannounced).
+                    guard !attachedReferences.contains(where: { !$0.isReady }) else {
+                        showError("A reference didn't finish uploading — remove it or wait and try again.")
+                        return
+                    }
                     guard !isSubmitDisabled else { return }
                     Task { await dispatchGeneration() }
                 } label: {
@@ -1365,9 +1372,17 @@ struct GenerateView: View {
         let capturedReferences = attachedReferences
         let isImageMode = selectedMode == "AI Image"
         let readyRefs = capturedReferences.filter { $0.isReady }
-        let refImages = readyRefs.filter { !$0.isVideo }.map { $0.url }
-        let refVideos = readyRefs.filter { $0.isVideo }.map { $0.url }
+        let readyImageRefs = readyRefs.filter { !$0.isVideo }
+        let readyVideoRefs = readyRefs.filter { $0.isVideo }
+        let refImages = readyImageRefs.map { $0.url }
+        let refVideos = readyVideoRefs.map { $0.url }
         let refUploadIds = readyRefs.compactMap { $0.uploadId }
+        // Aligned by index to refImages/refVideos — backend re-signs wherever an id is present,
+        // preferring the upload row (freshest) over the source generation's own R2 key.
+        let refImageUploadIds = readyImageRefs.map { $0.uploadId }
+        let refVideoUploadIds = readyVideoRefs.map { $0.uploadId }
+        let refImageGenerationIds = readyImageRefs.map { $0.uploadId == nil ? $0.sourceGenerationId : nil }
+        let refVideoGenerationIds = readyVideoRefs.map { $0.uploadId == nil ? $0.sourceGenerationId : nil }
         let submitPrompt = resolvedPromptForSubmit()
 
         let body: GenerationRequestBody
@@ -1384,7 +1399,11 @@ struct GenerateView: View {
                 imageQuality: nil,
                 referenceImages: refImages.isEmpty ? nil : refImages,
                 referenceVideos: refVideos.isEmpty ? nil : refVideos,
-                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
+                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds,
+                referenceImageUploadIds: refImageUploadIds.isEmpty ? nil : refImageUploadIds,
+                referenceVideoUploadIds: refVideoUploadIds.isEmpty ? nil : refVideoUploadIds,
+                referenceImageGenerationIds: refImageGenerationIds.isEmpty ? nil : refImageGenerationIds,
+                referenceVideoGenerationIds: refVideoGenerationIds.isEmpty ? nil : refVideoGenerationIds
             )
         } else {
             body = GenerationRequestBody(
@@ -1399,7 +1418,11 @@ struct GenerateView: View {
                 imageQuality: nil,
                 referenceImages: refImages.isEmpty ? nil : refImages,
                 referenceVideos: refVideos.isEmpty ? nil : refVideos,
-                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
+                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds,
+                referenceImageUploadIds: refImageUploadIds.isEmpty ? nil : refImageUploadIds,
+                referenceVideoUploadIds: refVideoUploadIds.isEmpty ? nil : refVideoUploadIds,
+                referenceImageGenerationIds: refImageGenerationIds.isEmpty ? nil : refImageGenerationIds,
+                referenceVideoGenerationIds: refVideoGenerationIds.isEmpty ? nil : refVideoGenerationIds
             )
         }
 
@@ -1580,7 +1603,11 @@ struct GenerateView: View {
             imageQuality: nil,
             referenceImages: refImages,
             referenceVideos: refVideos,
-            referenceUploadIds: nil
+            referenceUploadIds: nil,
+            referenceImageUploadIds: nil,
+            referenceVideoUploadIds: nil,
+            referenceImageGenerationIds: nil,
+            referenceVideoGenerationIds: nil
         )
         do {
             _ = try await APIClient.shared.submitGeneration(body: body)
