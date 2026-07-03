@@ -9,6 +9,7 @@ struct SideDrawerView: View {
 
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
     @State private var showSignOutConfirm = false
+    @State private var isOpeningManageSub = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -144,10 +145,14 @@ struct SideDrawerView: View {
 
     private var accountCard: some View {
         VStack(spacing: 0) {
-            actionRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription") {
-                if let scene = UIApplication.shared.connectedScenes
-                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
-                    Task { try? await AppStore.showManageSubscriptions(in: scene) }
+            actionRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription", isLoading: isOpeningManageSub) {
+                guard !isOpeningManageSub else { return }
+                guard let scene = UIApplication.shared.connectedScenes
+                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
+                isOpeningManageSub = true
+                Task {
+                    try? await AppStore.showManageSubscriptions(in: scene)
+                    isOpeningManageSub = false
                 }
             }
 
@@ -227,7 +232,7 @@ struct SideDrawerView: View {
         .frame(height: 48)
     }
 
-    private func actionRow(icon: String, iconColor: Color, label: String, action: @escaping () -> Void) -> some View {
+    private func actionRow(icon: String, iconColor: Color, label: String, isLoading: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 iconContainer(systemName: icon, color: iconColor)
@@ -236,14 +241,20 @@ struct SideDrawerView: View {
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.textTertiary)
+                if isLoading {
+                    ProgressView()
+                        .tint(theme.textTertiary)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.textTertiary)
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 48)
         }
         .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 
     private func iconContainer(systemName: String, color: Color) -> some View {

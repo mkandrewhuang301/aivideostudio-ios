@@ -12,6 +12,7 @@ struct ProfileCreditSheet: View {
 
     @State private var showCreditStore = false
     @State private var showSignOutConfirm = false
+    @State private var isOpeningManageSub = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -142,10 +143,14 @@ struct ProfileCreditSheet: View {
         VStack(spacing: 0) {
             // Primary actions card
             VStack(spacing: 0) {
-                menuRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription") {
-                    if let windowScene = UIApplication.shared.connectedScenes
-                        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
-                        Task { try? await AppStore.showManageSubscriptions(in: windowScene) }
+                menuRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription", isLoading: isOpeningManageSub) {
+                    guard !isOpeningManageSub else { return }
+                    guard let windowScene = UIApplication.shared.connectedScenes
+                        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
+                    isOpeningManageSub = true
+                    Task {
+                        try? await AppStore.showManageSubscriptions(in: windowScene)
+                        isOpeningManageSub = false
                     }
                 }
 
@@ -225,7 +230,7 @@ struct ProfileCreditSheet: View {
 
     // MARK: - Row helpers
 
-    private func menuRow(icon: String, iconColor: Color, label: String, action: @escaping () -> Void) -> some View {
+    private func menuRow(icon: String, iconColor: Color, label: String, isLoading: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 iconContainer(systemName: icon, color: iconColor)
@@ -233,14 +238,20 @@ struct ProfileCreditSheet: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color.white.opacity(0.25))
+                if isLoading {
+                    ProgressView()
+                        .tint(Color.white.opacity(0.5))
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.25))
+                }
             }
             .padding(.horizontal, 4)
             .frame(height: 52)
         }
         .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 
     private func iconContainer(systemName: String, color: Color) -> some View {
