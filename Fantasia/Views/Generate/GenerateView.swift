@@ -727,12 +727,12 @@ struct GenerateView: View {
                         tokenThumbnails: tokenThumbnails,
                         onTokenDeleted: { inner in dereferenceToken(inner) }
                     )
-                    .frame(height: max(22, promptTextHeight))
+                    .frame(height: max(44, promptTextHeight))
                 }
                 .padding(.leading, 4)
                 .padding(.trailing, 15)
-                .padding(.top, 14)
-                .padding(.bottom, 2)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
 
                 // Submit + credit cost, stacked so the cost sits directly under the arrow.
                 VStack(alignment: .trailing, spacing: 6) {
