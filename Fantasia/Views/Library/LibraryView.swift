@@ -92,6 +92,11 @@ struct LibraryView: View {
                                 .offset(y: -600)
                         }
                     }
+                    // Lazy-estimation jitter: sections have wildly different heights, so the
+                    // indicator's position/size (computed from unmaterialized-content estimates)
+                    // visibly jumps as sections materialize. Scrolling itself is unaffected —
+                    // only the indicator lies, so hide it (Photos does the same for its grid).
+                    .scrollIndicators(.hidden)
                     // Brackets touch-down -> touch-up with isInteracting so
                     // GenerationManager.mergeLatest() buffers new items instead of
                     // prepending mid-touch (ported from the old FeedView pattern).
