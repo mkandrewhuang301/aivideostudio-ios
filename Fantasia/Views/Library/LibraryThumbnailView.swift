@@ -15,39 +15,46 @@ struct LibraryThumbnailView: View {
     @State private var cachedImage: UIImage? = nil
 
     var body: some View {
+        // scaledToFill makes the thumbnail's LAYOUT FRAME larger than the cell (clipShape/
+        // clipped only fix drawing, not hit testing), leaving invisible tappable overflow
+        // over neighboring cells that opens the wrong item. Color.clear pins the label's
+        // frame to the cell, allowsHitTesting(false) removes the media from hit testing,
+        // and contentShape makes exactly the visible cell tappable.
         Button(action: onTap) {
-            ZStack {
-                Color.white.opacity(0.04)
-
-                if item.isImage {
-                    // Images: cached loader (presigned URLs change per-fetch, URLCache won't hit)
-                    Group {
-                        if let img = cachedImage {
-                            Image(uiImage: img).resizable().scaledToFill()
+            Color.white.opacity(0.04)
+                .overlay {
+                    ZStack {
+                        if item.isImage {
+                            // Images: cached loader (presigned URLs change per-fetch, URLCache won't hit)
+                            Group {
+                                if let img = cachedImage {
+                                    Image(uiImage: img).resizable().scaledToFill()
+                                } else {
+                                    Color(.systemGray5)
+                                }
+                            }
                         } else {
-                            Color(.systemGray5)
+                            if let thumb = thumbnail {
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                Color.white.opacity(0.04)
+                                Image(systemName: "film")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.system(size: 22))
+                            }
+
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.white.opacity(0.7))
                         }
                     }
-                    .clipped()
-                } else {
-                    if let thumb = thumbnail {
-                        Image(uiImage: thumb)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Color.white.opacity(0.04)
-                        Image(systemName: "film")
-                            .foregroundStyle(.tertiary)
-                            .font(.system(size: 22))
-                    }
-
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.white.opacity(0.7))
+                    .allowsHitTesting(false)
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipped()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onAppear {

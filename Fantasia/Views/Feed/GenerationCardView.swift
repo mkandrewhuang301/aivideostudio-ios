@@ -159,30 +159,48 @@ struct GenerationCardView: View {
         case .completed where revealCompleted:
             if item.isImage {
                 // Images: cached UIImage loader (AsyncImage skipped — presigned URLs change per-fetch)
+                // scaledToFill makes the image's LAYOUT FRAME larger than the proposed box
+                // (not just its drawing), and neither .clipped() nor the parent .clipShape()
+                // constrains hit testing — so the invisible overflow above/below the box stole
+                // taps from this card's prompt and the previous card's action buttons, opening
+                // the wrong generation fullscreen. Color.clear pins the label's frame to the
+                // box, allowsHitTesting(false) removes the oversized image from hit testing,
+                // and contentShape makes exactly the visible box tappable.
                 Button { showPlayer = true } label: {
-                    Group {
-                        if let img = cachedImage {
-                            Image(uiImage: img)
-                                .resizable().scaledToFill()
-                                .transition(.opacity.animation(.easeIn(duration: 0.3)))
-                        } else {
-                            shimmerView
+                    Color.clear
+                        .overlay {
+                            Group {
+                                if let img = cachedImage {
+                                    Image(uiImage: img)
+                                        .resizable().scaledToFill()
+                                        .transition(.opacity.animation(.easeIn(duration: 0.3)))
+                                } else {
+                                    shimmerView
+                                }
+                            }
+                            .allowsHitTesting(false)
                         }
-                    }
-                    .clipped()
+                        .clipped()
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else if let thumb = thumbnail {
                 // D-16: static thumbnail + play icon overlay
+                // Same hit-test containment as the image branch above.
                 Button { showPlayer = true } label: {
-                    ZStack {
-                        Image(uiImage: thumb)
-                            .resizable().scaledToFill()
-                            .clipped()
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
+                    Color.clear
+                        .overlay {
+                            ZStack {
+                                Image(uiImage: thumb)
+                                    .resizable().scaledToFill()
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                            .allowsHitTesting(false)
+                        }
+                        .clipped()
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {

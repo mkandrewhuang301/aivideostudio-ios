@@ -811,9 +811,18 @@ struct GenerateView: View {
                                 .scaleEffect(0.5)
                         }
                     } else if let thumb = ref.thumbnail {
-                        Image(uiImage: thumb)
-                            .resizable()
-                            .scaledToFill()
+                        // Pin frame to the chip and drop the scaledToFill overflow from hit
+                        // testing — otherwise the oversized layout frame steals taps meant for
+                        // neighboring chips (see GenerationCardView media buttons).
+                        Color.clear
+                            .overlay {
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .allowsHitTesting(false)
+                            }
+                            .clipped()
+                            .contentShape(Rectangle())
                     } else if let urlStr = ref.thumbnailURL ?? (ref.isVideo ? nil : ref.url),
                               let url = URL(string: urlStr) {
                         // Perf: uploadId (when present) is a stable server-side id, unlike the
@@ -1757,7 +1766,14 @@ private struct CachedThumbnailImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                // Same frame/hit-test containment as the reference chip thumbnails above.
+                Color.clear
+                    .overlay {
+                        Image(uiImage: image).resizable().scaledToFill()
+                            .allowsHitTesting(false)
+                    }
+                    .clipped()
+                    .contentShape(Rectangle())
             } else {
                 Color.white.opacity(0.08)
             }
