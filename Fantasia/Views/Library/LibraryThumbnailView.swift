@@ -11,7 +11,6 @@ struct LibraryThumbnailView: View {
     let item: GenerationItem
     var onTap: () -> Void
 
-    @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
@@ -22,58 +21,49 @@ struct LibraryThumbnailView: View {
         // over neighboring cells that opens the wrong item. Color.clear pins the label's
         // frame to the cell, allowsHitTesting(false) removes the media from hit testing,
         // and contentShape makes exactly the visible cell tappable.
-        Button(action: onTap) {
-            theme.surfaceStrong
-                .overlay {
-                    ZStack {
-                        if item.isImage {
-                            // Images: cached loader (presigned URLs change per-fetch, URLCache won't hit)
-                            Group {
-                                if let img = cachedImage {
-                                    Image(uiImage: img).resizable().scaledToFill()
-                                } else {
-                                    theme.surfaceStrong
-                                }
-                            }
-                        } else {
-                            if let thumb = thumbnail {
-                                Image(uiImage: thumb)
-                                    .resizable()
-                                    .scaledToFill()
+        theme.surfaceStrong
+            .overlay {
+                ZStack {
+                    if item.isImage {
+                        // Images: cached loader (presigned URLs change per-fetch, URLCache won't hit)
+                        Group {
+                            if let img = cachedImage {
+                                Image(uiImage: img).resizable().scaledToFill()
                             } else {
                                 theme.surfaceStrong
-                                Image(systemName: "film")
-                                    .foregroundStyle(.tertiary)
-                                    .font(.system(size: 22))
                             }
-
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundStyle(.white.opacity(0.7))
                         }
+                    } else {
+                        if let thumb = thumbnail {
+                            Image(uiImage: thumb)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            theme.surfaceStrong
+                            Image(systemName: "film")
+                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 22))
+                        }
+
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white.opacity(0.7))
                     }
-                    .allowsHitTesting(false)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .clipped()
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if item.status == .completed {
-                Button("Name as reference", systemImage: "tag") {
-                    generationManager.pendingNameAsReference = item
+                .allowsHitTesting(false)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipped()
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+            .onAppear {
+                if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {
+                    loadThumbnail(urlString: urlString)
+                }
+                if item.isImage, cachedImage == nil {
+                    loadCachedImage()
                 }
             }
-        }
-        .onAppear {
-            if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {
-                loadThumbnail(urlString: urlString)
-            }
-            if item.isImage, cachedImage == nil {
-                loadCachedImage()
-            }
-        }
     }
 
     private func loadThumbnail(urlString: String) {

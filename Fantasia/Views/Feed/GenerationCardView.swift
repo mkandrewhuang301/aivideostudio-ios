@@ -62,11 +62,6 @@ struct GenerationCardView: View {
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 14)
-                .contextMenu {
-                    if item.status == .completed {
-                        Button("Name as reference", systemImage: "tag") { onNameAsReference() }
-                    }
-                }
 
 
             // Action buttons (D-09: always visible; disabled/greyed while active)

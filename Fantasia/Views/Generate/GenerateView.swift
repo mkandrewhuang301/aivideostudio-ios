@@ -1722,7 +1722,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 }
             }
             .sensoryFeedback(.impact(weight: .medium), trigger: isPastThreshold) { _, crossed in crossed }
-            .gesture(
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
                     .updating($dragWidth) { value, state, _ in
                         // Only claim a mostly-horizontal, leftward drag — otherwise let the

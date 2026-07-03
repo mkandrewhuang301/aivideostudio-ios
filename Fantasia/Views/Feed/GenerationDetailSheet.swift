@@ -73,7 +73,6 @@ struct GenerationDetailSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
                         .task { await loadCachedImage() }
-                        .contextMenu { nameAsReferenceMenuItem }
                     } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
                         ZStack {
                             Group {
@@ -96,7 +95,6 @@ struct GenerationDetailSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
                         .task { await generateThumbnail(from: videoUrl) }
-                        .contextMenu { nameAsReferenceMenuItem }
                     } else {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(theme.surface)
