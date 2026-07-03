@@ -120,7 +120,10 @@ final class GenerationManager {
         guard generations.isEmpty, let uid = Auth.auth().currentUser?.uid,
               let snapshot = ListSnapshotStore.load([GenerationItem].self, name: Self.snapshotName, uid: uid),
               !snapshot.items.isEmpty else { return }
-        generations = snapshot.items
+        // Belt-and-braces: dedupe in case a bad snapshot (pre-dedupe-fix pagination) was
+        // already written to disk before this fix shipped.
+        var seen = Set<String>()
+        generations = snapshot.items.filter { seen.insert($0.id).inserted }
         hasLoadedOnce = true
     }
 
@@ -136,7 +139,8 @@ final class GenerationManager {
 
     private func persistSnapshot() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        ListSnapshotStore.save(generations, name: Self.snapshotName, uid: uid)
+        // Cap so a long paginated session doesn't grow the on-disk snapshot unbounded.
+        ListSnapshotStore.save(Array(generations.prefix(100)), name: Self.snapshotName, uid: uid)
     }
 
     /// Perf: the 3s polling loop wasn't stopped on backgrounding (onDisappear doesn't fire
@@ -226,7 +230,13 @@ final class GenerationManager {
         defer { isLoading = false }
         do {
             let response = try await APIClient.shared.fetchGenerations(cursor: cursor)
-            generations.append(contentsOf: response.items)
+            // The cold-start snapshot can already contain page-2+ items (it persists the whole
+            // in-memory list), so a plain append would introduce duplicate ids into the array.
+            // Duplicate ids break ForEach's identity system: cards render blank, disappear, or
+            // land at phantom offsets instead of just being redundant.
+            let existingIds = Set(generations.map(\.id))
+            let newItems = response.items.filter { !existingIds.contains($0.id) }
+            generations.append(contentsOf: newItems)
             nextCursor = response.nextCursor
         } catch {
             print("[GenerationManager] loadNextPage error: \(error)")
