@@ -101,6 +101,37 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         failureReason = try container.decodeIfPresent(String.self, forKey: .failureReason)
     }
 
+    /// Builds a client-only placeholder row for optimistic submit — shown instantly while the
+    /// real POST /api/generations round trip is still in flight, then replaced once the
+    /// authoritative row lands via the next fetch (see GenerationManager.mergeLatest).
+    init(
+        localPlaceholderId id: String,
+        model: String,
+        mediaType: MediaType,
+        prompt: String?,
+        params: GenerationParams,
+        costCredits: Int,
+        referenceUrls: [GenerationReference]?,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.model = model
+        self.status = .pending
+        self.mediaType = mediaType
+        self.prompt = prompt
+        self.params = params
+        self.costCredits = costCredits
+        self.videoUrl = nil
+        self.referenceUrls = referenceUrls
+        self.createdAt = createdAt
+        self.completedAt = nil
+        self.failureReason = nil
+    }
+
+    /// True when this item is an unconfirmed optimistic row inserted by dispatchGeneration(),
+    /// not yet backed by a real server row.
+    var isLocalPlaceholder: Bool { id.hasPrefix("local-") }
+
     /// True when this item is an image generation (not a video).
     var isImage: Bool { mediaType == .image }
 

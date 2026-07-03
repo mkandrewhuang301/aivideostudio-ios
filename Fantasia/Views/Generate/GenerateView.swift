@@ -1384,49 +1384,80 @@ struct GenerateView: View {
     private func dispatchGeneration() async {
         isSubmitting = true
         defer { isSubmitting = false }
-        do {
-            let readyRefs = attachedReferences.filter { $0.isReady }
-            let refImages = readyRefs.filter { !$0.isVideo }.map { $0.url }
-            let refVideos = readyRefs.filter { $0.isVideo }.map { $0.url }
-            let refUploadIds = readyRefs.compactMap { $0.uploadId }
 
-            let submitPrompt = resolvedPromptForSubmit()
-            let body: GenerationRequestBody
-            if selectedMode == "AI Image" {
-                body = GenerationRequestBody(
-                    prompt: submitPrompt,
-                    model: selectedModel,
-                    mediaType: "image",
-                    duration: nil,
-                    resolution: nil,
-                    aspectRatio: nil,
-                    audioEnabled: nil,
-                    imageAspectRatio: selectedImageResolution.rawValue,
-                    imageQuality: nil,
-                    referenceImages: refImages.isEmpty ? nil : refImages,
-                    referenceVideos: refVideos.isEmpty ? nil : refVideos,
-                    referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
-                )
-            } else {
-                body = GenerationRequestBody(
-                    prompt: submitPrompt,
-                    model: selectedModel,
-                    mediaType: "video",
-                    duration: selectedDuration,
-                    resolution: selectedResolution,
-                    aspectRatio: selectedAspectRatio,
-                    audioEnabled: audioEnabled,
-                    imageAspectRatio: nil,
-                    imageQuality: nil,
-                    referenceImages: refImages.isEmpty ? nil : refImages,
-                    referenceVideos: refVideos.isEmpty ? nil : refVideos,
-                    referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
-                )
-            }
+        // Captured before the composer is cleared, so a failed dispatch can restore them.
+        let capturedPrompt = promptText
+        let capturedReferences = attachedReferences
+        let isImageMode = selectedMode == "AI Image"
+        let readyRefs = capturedReferences.filter { $0.isReady }
+        let refImages = readyRefs.filter { !$0.isVideo }.map { $0.url }
+        let refVideos = readyRefs.filter { $0.isVideo }.map { $0.url }
+        let refUploadIds = readyRefs.compactMap { $0.uploadId }
+        let submitPrompt = resolvedPromptForSubmit()
+
+        let body: GenerationRequestBody
+        if isImageMode {
+            body = GenerationRequestBody(
+                prompt: submitPrompt,
+                model: selectedModel,
+                mediaType: "image",
+                duration: nil,
+                resolution: nil,
+                aspectRatio: nil,
+                audioEnabled: nil,
+                imageAspectRatio: selectedImageResolution.rawValue,
+                imageQuality: nil,
+                referenceImages: refImages.isEmpty ? nil : refImages,
+                referenceVideos: refVideos.isEmpty ? nil : refVideos,
+                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
+            )
+        } else {
+            body = GenerationRequestBody(
+                prompt: submitPrompt,
+                model: selectedModel,
+                mediaType: "video",
+                duration: selectedDuration,
+                resolution: selectedResolution,
+                aspectRatio: selectedAspectRatio,
+                audioEnabled: audioEnabled,
+                imageAspectRatio: nil,
+                imageQuality: nil,
+                referenceImages: refImages.isEmpty ? nil : refImages,
+                referenceVideos: refVideos.isEmpty ? nil : refVideos,
+                referenceUploadIds: refUploadIds.isEmpty ? nil : refUploadIds
+            )
+        }
+
+        // Optimistic UI: clear the composer and drop in a pending placeholder card before the
+        // network round trip (moderation + credit deduction + DB insert + enqueue) resolves —
+        // that trip used to leave the composer sitting untouched for ~3s with zero feedback.
+        let placeholderId = "local-" + UUID().uuidString
+        let placeholder = GenerationItem(
+            localPlaceholderId: placeholderId,
+            model: selectedModel,
+            mediaType: isImageMode ? .image : .video,
+            prompt: submitPrompt.isEmpty ? nil : submitPrompt,
+            params: GenerationParams(
+                resolution: isImageMode ? nil : selectedResolution,
+                duration: isImageMode ? nil : selectedDuration,
+                aspectRatio: isImageMode ? selectedImageResolution.rawValue : selectedAspectRatio,
+                audioEnabled: isImageMode ? nil : audioEnabled,
+                hasReference: readyRefs.isEmpty ? nil : true,
+                width: nil,
+                height: nil
+            ),
+            costCredits: 0,
+            referenceUrls: readyRefs.isEmpty ? nil : readyRefs.map { GenerationReference(url: $0.url, isVideo: $0.isVideo) },
+            createdAt: Date()
+        )
+        promptText = ""
+        attachedReferences = []
+        generationManager.insertLocalPlaceholder(placeholder)
+
+        do {
             _ = try await APIClient.shared.submitGeneration(body: body)
 
-            promptText = ""
-            attachedReferences = []
+            generationManager.removeLocalPlaceholder(id: placeholderId)
             // forceRefresh: the just-created item isn't in the cached array yet, so the
             // staleness guard in startPolling() must be bypassed here regardless of how
             // recently the list was last fetched (was a separate explicit refresh() call before).
@@ -1434,6 +1465,9 @@ struct GenerateView: View {
             await creditManager.fetchBalance()
 
         } catch let apiError as APIError {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            promptText = capturedPrompt
+            attachedReferences = capturedReferences
             if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
                 showError("Prompt may not adhere to our community guidelines. Please try again.")
             } else {
@@ -1442,6 +1476,9 @@ struct GenerateView: View {
             await generationManager.refresh()
         } catch {
             print("[GenerateView] dispatch error: \(error)")
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            promptText = capturedPrompt
+            attachedReferences = capturedReferences
             showError("An error has occurred. Please try again.")
             await generationManager.refresh()
         }

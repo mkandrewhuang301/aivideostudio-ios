@@ -212,6 +212,15 @@ final class GenerationManager {
         generations.removeAll { $0.id == id }
     }
 
+    // Optimistic-submit support (Issue 5) — see GenerateView.dispatchGeneration().
+    func insertLocalPlaceholder(_ item: GenerationItem) {
+        generations.insert(item, at: 0)
+    }
+
+    func removeLocalPlaceholder(id: String) {
+        generations.removeAll { $0.id == id }
+    }
+
     private var hasActiveJobs: Bool {
         generations.contains { $0.status == .pending || $0.status == .processing }
     }
