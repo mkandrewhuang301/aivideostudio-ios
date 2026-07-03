@@ -39,35 +39,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if shouldSkipToMain {
-                MainTabView()
-            } else if authManager.isLoading || !minSplashElapsed {
-                // State 1: Loading — show splash until auth state resolves + 2s minimum
-                SplashView()
-            } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState && !creditsWaitTimedOut {
-                // State 1b: Authenticated but profile/credits haven't loaded yet, and we have no
-                // locally-cached balance to show in the meantime — keep showing splash so
-                // MainTabView never renders the 0-credits/free-tier CreditManager defaults
-                // before the real GET /api/me response lands. Once hydrateFromCache() has
-                // populated state from a previous session (see onChange below), this is skipped
-                // and MainTabView renders immediately with the last-known balance; fetchBalance()
-                // silently corrects it moments later.
-                SplashView()
-            } else if let currentUser = authManager.currentUser, currentUser.isEmailVerified {
-                // State 2: Authenticated + verified — skip onboarding, go straight to app
-                MainTabView()
-            } else if let currentUser = authManager.currentUser, !currentUser.isEmailVerified {
-                // State 3: Email/password sign-up, not yet verified (Apple/Google always skip this)
-                CheckInboxView(email: currentUser.email ?? "")
-            } else if !hasCompletedOnboarding {
-                // State 4: Unauthenticated, first launch — show onboarding before sign-in
-                OnboardingView(onComplete: { hasCompletedOnboarding = true })
-            } else {
-                // State 5: Unauthenticated, onboarding already seen — sign in
-                SignInView()
-            }
-        }
+        productionRouting
         .preferredColorScheme(theme.colorScheme)
         .animation(.easeInOut(duration: 0.35), value: authManager.isLoading || !minSplashElapsed)
         .animation(.easeInOut(duration: 0.35), value: authManager.currentUser == nil)
@@ -123,6 +95,37 @@ struct ContentView: View {
                     await handleFirstSignIn()
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var productionRouting: some View {
+        if shouldSkipToMain {
+            MainTabView()
+        } else if authManager.isLoading || !minSplashElapsed {
+            // State 1: Loading — show splash until auth state resolves + 2s minimum
+            SplashView()
+        } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState && !creditsWaitTimedOut {
+            // State 1b: Authenticated but profile/credits haven't loaded yet, and we have no
+            // locally-cached balance to show in the meantime — keep showing splash so
+            // MainTabView never renders the 0-credits/free-tier CreditManager defaults
+            // before the real GET /api/me response lands. Once hydrateFromCache() has
+            // populated state from a previous session (see onChange below), this is skipped
+            // and MainTabView renders immediately with the last-known balance; fetchBalance()
+            // silently corrects it moments later.
+            SplashView()
+        } else if let currentUser = authManager.currentUser, currentUser.isEmailVerified {
+            // State 2: Authenticated + verified — skip onboarding, go straight to app
+            MainTabView()
+        } else if let currentUser = authManager.currentUser, !currentUser.isEmailVerified {
+            // State 3: Email/password sign-up, not yet verified (Apple/Google always skip this)
+            CheckInboxView(email: currentUser.email ?? "")
+        } else if !hasCompletedOnboarding {
+            // State 4: Unauthenticated, first launch — show onboarding before sign-in
+            OnboardingView(onComplete: { hasCompletedOnboarding = true })
+        } else {
+            // State 5: Unauthenticated, onboarding already seen — sign in
+            SignInView()
         }
     }
 
