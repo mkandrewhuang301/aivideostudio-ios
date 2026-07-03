@@ -48,6 +48,7 @@ struct HighlightingTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.parent = self
         // Compare against the Coordinator's own record of what we last applied, not
         // uiView.textColor read back from UIKit: applyHighlighting sets attributedText with a
         // per-character .foregroundColor attribute, and UITextView's textColor getter doesn't
