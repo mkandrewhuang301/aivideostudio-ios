@@ -243,6 +243,8 @@ struct GenerationDetailSheet: View {
         .sheet(isPresented: $showShare) {
             if let url = tmpShareUrl {
                 ActivityViewController(activityItems: [url])
+                    .presentationDetents([.medium])
+                    .ignoresSafeArea()
             }
         }
         .alert("Delete this \(item.isImage ? "image" : "video")?", isPresented: $showDeleteAlert) {
