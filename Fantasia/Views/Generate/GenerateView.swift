@@ -80,6 +80,8 @@ struct GenerateView: View {
     // Card actions
     @State private var selectedItem: GenerationItem? = nil
     @State private var isLoadingOlderHistory = false
+    @State private var openSwipeRowId: String? = nil
+    @State private var confirmDeleteItem: GenerationItem? = nil
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -232,15 +234,21 @@ struct GenerateView: View {
                                         )
                                 }
                                 ForEach(generationManager.generations.reversed()) { item in
-                                    GenerationCardView(
-                                        item: item,
-                                        onTapDetail: { selectedItem = item },
-                                        onRemix: { handleRemix(item: item) },
-                                        onRegenerate: { Task { await handleRegenerate(item: item) } },
-                                        onReference: { handleReference(item: item) },
-                                        onNameAsReference: { handleNameAsReference(item: item) },
-                                        onDelete: { Task { await handleDelete(item: item) } }
-                                    )
+                                    SwipeToDeleteRow(
+                                        id: item.id,
+                                        openRowId: $openSwipeRowId,
+                                        onRequestDelete: { confirmDeleteItem = item }
+                                    ) {
+                                        GenerationCardView(
+                                            item: item,
+                                            onTapDetail: { selectedItem = item },
+                                            onRemix: { handleRemix(item: item) },
+                                            onRegenerate: { Task { await handleRegenerate(item: item) } },
+                                            onReference: { handleReference(item: item) },
+                                            onNameAsReference: { handleNameAsReference(item: item) },
+                                            onDelete: { Task { await handleDelete(item: item) } }
+                                        )
+                                    }
                                     .id(item.id)
                                 }
                             }
@@ -440,6 +448,24 @@ struct GenerateView: View {
                 currentId: item.id,
                 isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
             )
+        }
+        // Swipe-to-delete confirmation (Issue 4) — shared by every SwipeToDeleteRow.
+        .alert(
+            confirmDeleteItem.map { $0.isImage ? "Delete this image?" : "Delete this video?" } ?? "Delete this video?",
+            isPresented: Binding(
+                get: { confirmDeleteItem != nil },
+                set: { if !$0 { confirmDeleteItem = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let item = confirmDeleteItem {
+                    Task { await handleDelete(item: item) }
+                }
+                confirmDeleteItem = nil
+            }
+            Button("Cancel", role: .cancel) { confirmDeleteItem = nil }
+        } message: {
+            Text("This cannot be undone.")
         }
     }
 
@@ -1673,6 +1699,80 @@ struct GenerateView: View {
         await generationManager.loadNextPage()
         if let anchorID {
             proxy.scrollTo(anchorID, anchor: .top)
+        }
+    }
+}
+
+// MARK: - SwipeToDeleteRow
+
+/// Wraps a generation card in a leading-drag-to-reveal delete action. The history list is a
+/// plain VStack in a ScrollView (not a List), so there's no free .swipeActions — this reproduces
+/// the standard pattern by hand: offset-driven reveal, snap open/closed, rubber-band past the
+/// open width, and a horizontal-vs-vertical angle gate so the drag doesn't fight scrolling.
+private struct SwipeToDeleteRow<Content: View>: View {
+    let id: String
+    @Binding var openRowId: String?
+    var onRequestDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var dragTranslation: CGFloat = 0
+    private let revealWidth: CGFloat = 72
+
+    private var isOpen: Bool { openRowId == id }
+    private var baseOffset: CGFloat { isOpen ? -revealWidth : 0 }
+
+    // Rubber-bands past fully-open or fully-closed instead of tracking the finger 1:1.
+    private var displayOffset: CGFloat {
+        let raw = baseOffset + dragTranslation
+        if raw < -revealWidth { return -revealWidth + (raw + revealWidth) * 0.3 }
+        if raw > 0 { return raw * 0.3 }
+        return raw
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(role: .destructive, action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { openRowId = nil }
+                onRequestDelete()
+            }) {
+                Image(systemName: "trash.fill")
+                    .foregroundStyle(.white)
+                    .frame(width: revealWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+            }
+            .buttonStyle(.plain)
+
+            content()
+                .offset(x: displayOffset)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .onChanged { value in
+                            // Only claim a mostly-horizontal, leftward-leaning drag — otherwise
+                            // let the ScrollView handle vertical/diagonal scrolling untouched.
+                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
+                            dragTranslation = value.translation.width
+                        }
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5 || isOpen else {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { dragTranslation = 0 }
+                                return
+                            }
+                            let candidate = baseOffset + value.translation.width
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                if candidate < -revealWidth / 2 {
+                                    openRowId = id
+                                } else if isOpen {
+                                    openRowId = nil
+                                }
+                                dragTranslation = 0
+                            }
+                        }
+                )
+                .onChange(of: openRowId) { _, newValue in
+                    if newValue != id { dragTranslation = 0 }
+                }
         }
     }
 }
