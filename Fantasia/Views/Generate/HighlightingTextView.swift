@@ -54,6 +54,7 @@ struct HighlightingTextView: UIViewRepresentable {
             let ns = uiView.text as NSString
             let clamped = NSRange(location: min(range.location, ns.length), length: 0)
             uiView.selectedRange = clamped
+            uiView.scrollRangeToVisible(clamped)
         }
         if let selectedRange, selectedRange != uiView.selectedRange {
             let ns = uiView.text as NSString
@@ -113,10 +114,16 @@ struct HighlightingTextView: UIViewRepresentable {
             parent.text = textView.text
             parent.selectedRange = textView.selectedRange
             parent.recalcHeight(textView)
+            // Once content exceeds maxHeight, re-applying attributedText on every keystroke
+            // destroys UITextView's built-in caret-tracking scroll — without this, typing on
+            // an early line leaves the view pinned to the last lines.
+            textView.scrollRangeToVisible(caret)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
+            let previous = parent.selectedRange
             parent.selectedRange = textView.selectedRange
+            scrollSelectionIntoView(textView, previousRange: previous)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -125,6 +132,26 @@ struct HighlightingTextView: UIViewRepresentable {
 
         func textViewDidEndEditing(_ textView: UITextView) {
             parent.isFocused = false
+        }
+
+        // Follows the moving end of a drag-selection: scrolls to whichever edge just
+        // extended so autoscroll tracks the finger both when the selection grows downward
+        // (dragging past the bottom of the visible text) and upward.
+        private func scrollSelectionIntoView(_ textView: UITextView, previousRange: NSRange?) {
+            let current = textView.selectedRange
+            guard let previous = previousRange, current.length > 0 else {
+                textView.scrollRangeToVisible(current)
+                return
+            }
+            let previousEnd = previous.location + previous.length
+            let currentEnd = current.location + current.length
+            if current.location < previous.location {
+                textView.scrollRangeToVisible(NSRange(location: current.location, length: 0))
+            } else if currentEnd > previousEnd {
+                textView.scrollRangeToVisible(NSRange(location: currentEnd, length: 0))
+            } else {
+                textView.scrollRangeToVisible(current)
+            }
         }
     }
 }
