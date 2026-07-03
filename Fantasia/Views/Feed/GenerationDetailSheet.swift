@@ -382,11 +382,21 @@ struct GenerationDetailSheet: View {
 
     private func loadCachedImage() async {
         guard item.isImage, let urlString = item.completedMediaUrl, let url = URL(string: urlString) else { return }
+        // T20: seed instantly from the already-downscaled grid thumbnail (LibraryThumbnailView's
+        // "-grid" cache key), if present, for an instant first paint while the full-res copy
+        // loads — instead of a blank/spinner state during sheet presentation.
+        if cachedImage == nil, let gridThumb = await ThumbnailCache.shared.image(for: item.id + "-grid") {
+            cachedImage = gridThumb
+        }
         if let cached = await ThumbnailCache.shared.image(for: item.id) { cachedImage = cached; return }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let image = UIImage(data: data) else { return }
-        ThumbnailCache.shared[item.id] = image
-        cachedImage = image
+        // Perf: UIImage(data:) only decodes lazily on first draw — that decode used to happen
+        // on the render path during sheet-presentation animation, which could stall the main
+        // thread long enough to eat the initial swipe-to-dismiss touch (T20).
+        let prepared = await image.byPreparingForDisplay() ?? image
+        ThumbnailCache.shared[item.id] = prepared
+        cachedImage = prepared
     }
 
     private func paramRow(_ label: String, value: String, showDivider: Bool = true) -> some View {

@@ -196,7 +196,11 @@ struct FullScreenImageView: View {
         defer { isLoading = false }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let image = UIImage(data: data) else { return }
-        ThumbnailCache.shared[item.id] = image
-        loadedImage = image
+        // T20: same decode-off-render-path fix as GenerationDetailSheet.loadCachedImage —
+        // UIImage(data:) decodes lazily on first draw, which could otherwise stall the main
+        // thread during presentation and eat the initial dismiss-swipe touch.
+        let prepared = await image.byPreparingForDisplay() ?? image
+        ThumbnailCache.shared[item.id] = prepared
+        loadedImage = prepared
     }
 }
