@@ -264,6 +264,7 @@ struct GenerateView: View {
                             Task { await loadOlderHistory(proxy: proxy) }
                         }
                         .defaultScrollAnchor(.bottom)
+                        .scrollDismissesKeyboard(.interactively)
                         .onChange(of: generationManager.generations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
@@ -280,14 +281,6 @@ struct GenerateView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    promptFocused = false
-                }
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 if showMentionSuggestions && !mentionSuggestions.isEmpty {

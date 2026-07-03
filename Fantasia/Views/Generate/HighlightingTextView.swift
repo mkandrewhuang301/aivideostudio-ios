@@ -40,6 +40,9 @@ struct HighlightingTextView: UIViewRepresentable {
         tv.autocorrectionType = .default
         tv.autocapitalizationType = .sentences
         tv.showsVerticalScrollIndicator = false
+        // Drags that begin inside a tall (scrolling) prompt also track the keyboard down,
+        // matching the surrounding history ScrollView's .scrollDismissesKeyboard(.interactively).
+        tv.keyboardDismissMode = .interactive
         applyHighlighting(to: tv, text: text)
         return tv
     }

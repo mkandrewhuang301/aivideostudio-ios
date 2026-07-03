@@ -55,7 +55,6 @@ struct GlassTextField: View {
             .font(.body)
             .foregroundStyle(Color.white.opacity(0.9))
             .focused(isFocused)
-            .keyboardDoneButton()
         } else {
             TextField(text: $text, prompt: promptText) {
                 EmptyView()
@@ -67,7 +66,6 @@ struct GlassTextField: View {
             .font(.body)
             .foregroundStyle(Color.white.opacity(0.9))
             .focused(isFocused)
-            .keyboardDoneButton()
         }
     }
 

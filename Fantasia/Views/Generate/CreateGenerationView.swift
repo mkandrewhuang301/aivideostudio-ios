@@ -181,7 +181,6 @@ struct CreateGenerationView: View {
                 .tint(accent)
                 .focused($promptFocused)
                 .opacity(promptText.isEmpty ? 1 : 1) // ensure text always white
-                .keyboardDoneButton()
 
             // Send — always purple gradient per spec
             Button {
