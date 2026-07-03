@@ -56,12 +56,25 @@ struct FullScreenImageView: View {
                 .ignoresSafeArea()
                 .scaleEffect(1 - dismissProgress * 0.15, anchor: .center)
                 .offset(dragOffset)
-            } else if isLoading {
-                ProgressView().tint(.white)
             } else {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 40))
+                // T21 fix: this branch (cache miss / still loading / error) previously had no
+                // dismiss gesture at all — only ZoomPanScrollView's UIPanGestureRecognizer in the
+                // loadedImage branch above handled swipe-to-dismiss, so the first swipe on a cold
+                // cache did nothing until the image finished loading. Mirrors
+                // FullScreenVideoPlayerView.dismissDragGesture, which exists for the same reason
+                // (its own no-content branch).
+                Group {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 40))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(placeholderDismissGesture)
             }
 
             // Floating dismiss button — no bar background, so zoomed content can go full-bleed.
@@ -118,6 +131,24 @@ struct FullScreenImageView: View {
         default:
             break
         }
+    }
+
+    /// Legacy SwiftUI-gesture path — only reachable while loadedImage is nil (cache miss/loading/
+    /// error), where ZoomPanScrollView (and its native, frame-by-frame pan) isn't in the tree yet.
+    private var placeholderDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 15)
+            .onChanged { value in
+                guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let velocity = abs(value.predictedEndTranslation.height - value.translation.height)
+                if abs(value.translation.height) > dismissDistanceThreshold || velocity > 800 {
+                    commitDismiss(from: value.translation)
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { dragOffset = .zero }
+                }
+            }
     }
 
     // MARK: - Geometry
