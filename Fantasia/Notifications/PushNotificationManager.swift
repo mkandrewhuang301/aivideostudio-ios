@@ -109,13 +109,21 @@ extension Notification.Name {
 
 // MARK: - UNUserNotificationCenterDelegate (GEN-10, D-03: push triggers immediate refresh)
 extension FantasiaAppDelegate: UNUserNotificationCenterDelegate {
+    // The backend's apnsService sends `payload = { generationId }` (camelCase — see
+    // aivideostudio-backend/src/services/apnsService.ts). The original snake_case-only check
+    // here never matched a real push, so the refresh trigger silently did nothing. Accept both
+    // spellings so a future backend rename can't reintroduce the same silent failure.
+    private static func isGenerationPush(_ userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo["generationId"] != nil || userInfo["generation_id"] != nil
+    }
+
     // Called when user taps a notification while the app is in background or killed state.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.notification.request.content.userInfo["generation_id"] != nil {
+        if Self.isGenerationPush(response.notification.request.content.userInfo) {
             NotificationCenter.default.post(name: .generationCompleted, object: nil)
         }
         completionHandler()
@@ -127,7 +135,7 @@ extension FantasiaAppDelegate: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if notification.request.content.userInfo["generation_id"] != nil {
+        if Self.isGenerationPush(notification.request.content.userInfo) {
             NotificationCenter.default.post(name: .generationCompleted, object: nil)
         }
         completionHandler([.banner, .sound])
