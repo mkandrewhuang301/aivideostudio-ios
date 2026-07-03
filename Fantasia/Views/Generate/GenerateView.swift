@@ -406,12 +406,11 @@ struct GenerateView: View {
             .presentationDragIndicator(.hidden)
         }
         .sheet(item: $selectedItem) { item in
-            GenerationDetailSheet(
-                item: item,
+            GenerationDetailPagerView(
+                items: generationManager.generations,
+                currentId: item.id,
                 isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
             )
-            .environment(authManager)
-            .environment(generationManager)
         }
     }
 

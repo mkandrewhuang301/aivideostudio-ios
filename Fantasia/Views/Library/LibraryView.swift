@@ -88,15 +88,14 @@ struct LibraryView: View {
             }
         }
         .sheet(item: $selectedItem) { item in
-            GenerationDetailSheet(
-                item: item,
+            GenerationDetailPagerView(
+                items: completedGenerations,
+                currentId: item.id,
                 isPresented: Binding(
                     get: { selectedItem != nil },
                     set: { if !$0 { selectedItem = nil } }
                 )
             )
-            .environment(authManager)
-            .environment(generationManager)
         }
     }
 
