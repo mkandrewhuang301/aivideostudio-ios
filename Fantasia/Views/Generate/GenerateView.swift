@@ -54,6 +54,9 @@ struct GenerateView: View {
     // Multi-reference attachment state
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var attachedReferences: [AttachedReference] = []
+    // Keys are a token's inner text (lowercased, no brackets) — feeds HighlightingTextView's
+    // inline pill rendering (Issue 6). Rebuilt whenever a reference is added/removed/renamed.
+    @State private var tokenThumbnails: [String: UIImage] = [:]
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
@@ -361,6 +364,11 @@ struct GenerateView: View {
         }
         .onChange(of: selectedPickerItem) { _, newItem in
             Task { await handlePickerSelection(newItem) }
+        }
+        // Keyed on id + displayName so both attach/remove and rename trigger a rebuild — the
+        // composer's inline pills (Issue 6) need to reflect either kind of change.
+        .onChange(of: attachedReferences.map { "\($0.id)|\($0.displayName ?? "")" }, initial: true) { _, _ in
+            rebuildTokenThumbnails()
         }
         .onAppear {
             generationManager.startPolling()
@@ -754,6 +762,7 @@ struct GenerateView: View {
                         contentHeight: $promptTextHeight,
                         accentColor: UIColor(accent),
                         textColor: UIColor(theme.textPrimary),
+                        tokenThumbnails: tokenThumbnails,
                         onTokenDeleted: { inner in dereferenceToken(inner) }
                     )
                     .frame(height: max(22, promptTextHeight))
@@ -1350,6 +1359,41 @@ struct GenerateView: View {
             if n - 1 < indices.count {
                 attachedReferences.remove(at: indices[n - 1])
                 rebuildPromptTokens()
+            }
+        }
+    }
+
+    /// Rebuilds the tokenThumbnails dict the composer's inline pills read from (Issue 6). Keys
+    /// mirror compositionToken's inner text (lowercased, no brackets) so a pill for "[Image1]"
+    /// looks up "image1" and one for "[bob]" looks up "bob". Thumbnails already in memory
+    /// populate synchronously; anything else is fetched async and merged in once ready.
+    private func rebuildTokenThumbnails() {
+        var result: [String: UIImage] = [:]
+        var pending: [(inner: String, cacheKey: String, url: URL)] = []
+        var imageCount = 0
+        var videoCount = 0
+        for ref in attachedReferences {
+            if ref.isVideo { videoCount += 1 } else { imageCount += 1 }
+            let token = ref.compositionToken(imageSlot: imageCount, videoSlot: videoCount)
+            let inner = String(token.dropFirst().dropLast()).lowercased()
+            if let thumb = ref.thumbnail {
+                result[inner] = thumb
+            } else if let urlStr = ref.thumbnailURL ?? (ref.isVideo ? nil : ref.url), let url = URL(string: urlStr) {
+                pending.append((inner, (ref.uploadId ?? ref.id) + "-tokenpill", url))
+            }
+        }
+        tokenThumbnails = result
+        for item in pending {
+            Task {
+                if let cached = await ThumbnailCache.shared.image(for: item.cacheKey) {
+                    tokenThumbnails[item.inner] = cached
+                    return
+                }
+                guard let (data, _) = try? await URLSession.shared.data(from: item.url),
+                      let downloaded = UIImage(data: data) else { return }
+                let thumb = downloaded.preparingThumbnail(of: CGSize(width: 80, height: 80)) ?? downloaded
+                ThumbnailCache.shared[item.cacheKey] = thumb
+                tokenThumbnails[item.inner] = thumb
             }
         }
     }
