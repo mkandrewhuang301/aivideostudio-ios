@@ -95,7 +95,8 @@ struct MainTabView: View {
                     Rectangle().frame(width: 22, height: 2)
                 }
                 .foregroundStyle(theme.textPrimary)
-                .frame(width: 34, height: 34)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
