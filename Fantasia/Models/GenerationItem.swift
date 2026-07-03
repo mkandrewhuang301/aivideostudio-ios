@@ -147,7 +147,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         case "content_policy":
             return "Your prompt may not adhere to our community guidelines. Your credits have been refunded."
         case "copyright":
-            return "Seedance blocked this prompt — it may reference copyrighted characters or a real person. Try describing an original character instead. Your credits have been refunded."
+            return "This prompt may reference copyrighted characters or real people. Credits refunded."
         case "provider_error":
             return "The video service hit a temporary problem. Your credits have been refunded — please try again."
         default:
