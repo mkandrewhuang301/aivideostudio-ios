@@ -31,18 +31,40 @@ final class GenerationManager {
         lastRefreshDate.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
     }
 
-    /// True while FeedView reports an active touch anywhere in the list. While true,
+    /// True while Feed/Library report an active touch anywhere in their list. While true,
     /// newly-discovered items from mergeLatest() are buffered instead of being prepended
     /// immediately — prepending mid-touch shifts every card down by a row and can route a
     /// button's touch-up onto whatever card slides into that screen position. Flushed via
     /// flushPendingInserts() the moment the touch lifts.
+    ///
+    /// Bug history: both call sites use DragGesture(minimumDistance: 0) so this also engages on
+    /// a plain tap (not just real drags) — tapping a thumbnail to open its detail sheet is
+    /// itself such a tap. SwiftUI only calls a DragGesture's .onEnded on a *successful*
+    /// recognition; presenting a sheet mid-touch routinely interrupts/cancels the recognizer
+    /// instead, so .onEnded silently never fires and this flag gets stuck true forever. Because
+    /// it's shared app-wide, one stray stuck tap on Feed silently poisons Library too: anything
+    /// that finishes generating afterward sits invisible in pendingNewItems until some other
+    /// drag elsewhere in the app happens to complete normally and flush it — which is why a
+    /// freshly-completed item (e.g. today's Library section) could go missing until an unrelated
+    /// scroll. The watchdog below self-heals a stuck flag without weakening the real protection:
+    /// every onChanged tick (fired continuously through a genuine drag) refreshes the deadline,
+    /// so only a truly abandoned/cancelled gesture — one that stops emitting updates — times out.
     var isInteracting = false {
         didSet {
-            if oldValue == true, isInteracting == false {
+            if isInteracting {
+                interactionWatchdogToken &+= 1
+                let token = interactionWatchdogToken
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    guard let self, self.interactionWatchdogToken == token, self.isInteracting else { return }
+                    self.isInteracting = false
+                }
+            } else if oldValue == true {
                 flushPendingInserts()
             }
         }
     }
+    private var interactionWatchdogToken = 0
     private var pendingNewItems: [GenerationItem] = []
 
     // Remix state: set before switching to Generate tab (D-35)
