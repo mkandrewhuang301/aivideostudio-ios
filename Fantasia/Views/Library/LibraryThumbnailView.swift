@@ -64,15 +64,20 @@ struct LibraryThumbnailView: View {
         guard let url = URL(string: urlString) else { return }
         Task {
             if let cached = await ThumbnailCache.shared.image(for: item.id) { thumbnail = cached; return }
-            let asset = AVURLAsset(url: url)
+            // Prefer the already-downloaded local file (GenerationCardView caches every
+            // completed video by id) so this never touches the network on a grid cell.
+            let localURL = VideoCache.shared.cachedURL(for: item.id) ?? url
+            let asset = AVURLAsset(url: localURL)
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
             gen.maximumSize = CGSize(width: 400, height: 400)
-            if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
-                let image = UIImage(cgImage: cgImg)
-                ThumbnailCache.shared[item.id] = image
-                thumbnail = image
-            }
+            // Async — never blocks the calling thread (unlike the old synchronous
+            // copyCGImage(at:actualTime:), which stalled every grid cell's onAppear on a
+            // main-thread network fetch + decode when many cells reset at once).
+            guard let (cgImg, _) = try? await gen.image(at: .zero) else { return }
+            let image = UIImage(cgImage: cgImg)
+            ThumbnailCache.shared[item.id] = image
+            thumbnail = image
         }
     }
 

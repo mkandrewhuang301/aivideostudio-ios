@@ -197,10 +197,17 @@ struct LibraryView: View {
     // Perf: warms the same "-grid" downscaled cache key that LibraryThumbnailView's grid cells
     // read (see that file) — must match its key/downscale exactly, or this prefetch silently
     // warms a cache entry nothing reads and grid cells still cold-load one at a time on scroll.
+    // Concurrency capped at 4 in-flight downloads — an uncapped group fires every item's
+    // download+decode at once, which spikes memory on large libraries right as a completion
+    // reflow is already stressing the main thread (see GenerationCardView/LibraryThumbnailView).
+    private static let prefetchConcurrency = 4
+
     private func prefetchImages() async {
         let items = completedGenerations.filter { $0.isImage }
         await withTaskGroup(of: Void.self) { group in
-            for item in items {
+            var iterator = items.makeIterator()
+            func addNext() {
+                guard let item = iterator.next() else { return }
                 let gridKey = item.id + "-grid"
                 group.addTask {
                     guard await ThumbnailCache.shared.image(for: gridKey) == nil,
@@ -212,6 +219,8 @@ struct LibraryView: View {
                     ThumbnailCache.shared[gridKey] = thumb
                 }
             }
+            for _ in 0..<Self.prefetchConcurrency { addNext() }
+            while await group.next() != nil { addNext() }
         }
     }
 

@@ -64,6 +64,7 @@
 		DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085B4D75DB663F0A8A93228C /* RatesManager.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 		E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68544EFABAD6EC84426B2794 /* GenerateView.swift */; };
+		6CD697CD5B204B3BA4305909 /* HighlightingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FC833DFED8492385521E5E /* HighlightingTextView.swift */; };
 		EBE3BD23343938B199C4054C /* GenerationItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
@@ -103,6 +104,7 @@
 		677EDD477B29B62723B6D417 /* DrawerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawerManager.swift; sourceTree = "<group>"; };
 		67E710D93903D4F18F9ED05D /* FullScreenImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenImageView.swift; sourceTree = "<group>"; };
 		68544EFABAD6EC84426B2794 /* GenerateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateView.swift; sourceTree = "<group>"; };
+		12FC833DFED8492385521E5E /* HighlightingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightingTextView.swift; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		71907E2C4814D307EE0AADF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		739201A04305B948BFA7474D /* Fantasia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fantasia.entitlements; sourceTree = "<group>"; };
@@ -402,6 +404,7 @@
 			children = (
 				97B964B9E5B6C4E86DE99F91 /* CreateGenerationView.swift */,
 				68544EFABAD6EC84426B2794 /* GenerateView.swift */,
+				12FC833DFED8492385521E5E /* HighlightingTextView.swift */,
 				F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */,
 			);
 			path = Generate;
@@ -525,6 +528,7 @@
 				7C6DCB2D7E143459E39D77B5 /* FullScreenImageView.swift in Sources */,
 				49D6A39D8DAD04C18910877C /* FullScreenVideoPlayerView.swift in Sources */,
 				E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */,
+				6CD697CD5B204B3BA4305909 /* HighlightingTextView.swift in Sources */,
 				17422C8DCDE8B4EAF6E6DADA /* GenerationCardView.swift in Sources */,
 				18F347EAB3D07C4ACAB89528 /* GenerationDetailSheet.swift in Sources */,
 				EBE3BD23343938B199C4054C /* GenerationItem.swift in Sources */,

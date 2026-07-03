@@ -25,7 +25,8 @@ struct GenerateView: View {
     // Cursor/selection in the prompt field — the @-mention trigger needs to know where the
     // caret actually is, since editing text earlier in the prompt leaves the caret short of
     // promptText's end (e.g. after a previously inserted [Image1] token).
-    @State private var promptSelection: TextSelection?
+    @State private var promptTextRange: NSRange?
+    @State private var promptTextHeight: CGFloat = 22
     @State private var showProfileSheet = false
     @FocusState private var promptFocused: Bool
 
@@ -119,24 +120,6 @@ struct GenerateView: View {
         }
         for item in mediaLibraryItems where !usedUploadIds.contains(item.id) {
             result.append(.upload(item))
-        }
-        return result
-    }
-
-    private var highlightedPrompt: AttributedString {
-        var result = AttributedString(promptText)
-        guard let re = Self.bracketTokenRegex else { return result }
-        let ns = promptText as NSString
-        for match in re.matches(in: promptText, range: NSRange(location: 0, length: ns.length)) {
-            guard let sr = Range(match.range, in: promptText) else { continue }
-            let startDist = promptText.distance(from: promptText.startIndex, to: sr.lowerBound)
-            let lenDist   = promptText.distance(from: sr.lowerBound, to: sr.upperBound)
-            var lo = result.characters.startIndex
-            result.characters.formIndex(&lo, offsetBy: startDist)
-            var hi = lo
-            result.characters.formIndex(&hi, offsetBy: lenDist)
-            result[lo..<hi].foregroundColor = accent
-            result[lo..<hi].backgroundColor = accent.opacity(0.18)
         }
         return result
     }
@@ -268,8 +251,13 @@ struct GenerateView: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 if showMentionSuggestions && !mentionSuggestions.isEmpty {
+                    // Opacity-only removal (not .move(edge: .bottom)) — the slide used to carry
+                    // this ~220pt panel down over the Options/Hide button while fading out,
+                    // swallowing taps on it mid-animation. allowsHitTesting keeps the outgoing
+                    // view from intercepting taps at all during its transition.
                     mentionSuggestionList
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .allowsHitTesting(showMentionSuggestions)
+                        .transition(.opacity)
                 }
                 if let msg = errorMessage {
                     Text(msg)
@@ -675,42 +663,28 @@ struct GenerateView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 2)
 
-                // Prompt text — ghost-text layer for token highlighting.
-                // Wrapped in a ScrollView (rather than relying on the TextField's own
-                // internal scrolling) so the highlight layer and the real text field
-                // scroll together in lockstep past 5 lines.
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        ZStack(alignment: .topLeading) {
-                            if promptText.isEmpty {
-                                Text("Describe a scene...")
-                                    .font(.body)
-                                    .foregroundStyle(.white.opacity(0.3))
-                                    .allowsHitTesting(false)
-                                    .padding(.top, 0.5)
-                            } else {
-                                Text(highlightedPrompt)
-                                    .font(.body)
-                                    .allowsHitTesting(false)
-                            }
-                            TextField("", text: $promptText, selection: $promptSelection, axis: .vertical)
-                                .font(.body)
-                                .foregroundStyle(.clear)
-                                .tint(accent)
-                                .focused($promptFocused)
-                                .submitLabel(.return)
-                        }
-                        .id("promptTextBottom")
+                // Prompt text — single UITextView layout applies [token] highlighting directly
+                // to its text storage, so the caret and the drawn glyphs share one layout engine
+                // and can never diverge (the old two-layer ghost-text ZStack let SwiftUI's Text
+                // and the TextField wrap long words at different points, landing the caret
+                // mid-word). UITextView handles its own internal scrolling past maxHeight.
+                ZStack(alignment: .topLeading) {
+                    if promptText.isEmpty {
+                        Text("Describe a scene...")
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.3))
+                            .allowsHitTesting(false)
+                            .padding(.top, 0.5)
                     }
-                    .onChange(of: promptText) { _, _ in
-                        proxy.scrollTo("promptTextBottom", anchor: .bottom)
-                    }
+                    HighlightingTextView(
+                        text: $promptText,
+                        selectedRange: $promptTextRange,
+                        isFocused: Binding(get: { promptFocused }, set: { promptFocused = $0 }),
+                        contentHeight: $promptTextHeight,
+                        accentColor: UIColor(accent)
+                    )
+                    .frame(height: max(22, promptTextHeight))
                 }
-                // Programmatic scrollTo above (fired on every keystroke once the prompt
-                // wraps past one line) otherwise gets misread as a user drag and resigns
-                // the TextField's first responder, dismissing the keyboard mid-type.
-                .scrollDismissesKeyboard(.never)
-                .frame(maxHeight: 112)
                 .padding(.leading, 4)
                 .padding(.trailing, 15)
                 .padding(.top, 14)
@@ -1268,15 +1242,13 @@ struct GenerateView: View {
     /// The caret's insertion-point index within `text`, or nil if there's a range selection
     /// or the field hasn't reported a selection yet (e.g. right after a programmatic edit).
     private func promptCursorIndex(in text: String) -> String.Index? {
-        guard let selection = promptSelection, selection.isInsertion,
-              case .selection(let range) = selection.indices else { return nil }
-        let idx = range.lowerBound
-        // promptSelection can be stale relative to `text` when promptText was just changed
+        guard let range = promptTextRange, range.length == 0 else { return nil }
+        // promptTextRange can be stale relative to `text` when promptText was just changed
         // programmatically (e.g. removing a reference rebuilds the prompt) rather than by a
-        // live keystroke — using an out-of-bounds index here crashes deep inside Foundation's
-        // NSRange conversion, so fall back to "unknown cursor" instead of trusting it blindly.
-        guard idx >= text.startIndex, idx <= text.endIndex else { return nil }
-        return idx
+        // live keystroke — using an out-of-bounds offset here crashes deep inside Foundation's
+        // UTF-16 index conversion, so fall back to "unknown cursor" instead of trusting it blindly.
+        guard range.location >= 0, range.location <= text.utf16.count else { return nil }
+        return String.Index(utf16Offset: range.location, in: text)
     }
 
     /// Detects a single-character deletion that landed inside a [token] and returns

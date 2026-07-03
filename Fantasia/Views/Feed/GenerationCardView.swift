@@ -328,24 +328,17 @@ struct GenerationCardView: View {
             cachedImage = thumb
         } else {
             guard let urlString = item.videoUrl, let url = URL(string: urlString) else { return }
+            // Download to disk first — extracting the thumbnail frame from the local file
+            // avoids a second network round-trip, and (critically) avoids running the frame
+            // decode against a remote URL, which is where it used to block.
+            let localURL = (try? await VideoCache.shared.ensureCached(id: item.id, remoteURL: url)) ?? url
             if thumbnail == nil {
                 if let cached = await ThumbnailCache.shared.image(for: item.id) {
                     thumbnail = cached
                 } else {
-                    let asset = AVURLAsset(url: url)
-                    let gen = AVAssetImageGenerator(asset: asset)
-                    gen.appliesPreferredTrackTransform = true
-                    gen.maximumSize = CGSize(width: 400, height: 400)
-                    if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
-                        let image = UIImage(cgImage: cgImg)
-                        ThumbnailCache.shared[item.id] = image
-                        thumbnail = image
-                    }
+                    thumbnail = await Self.extractThumbnail(from: localURL, cacheKey: item.id)
                 }
             }
-            // Fully download the video before revealing "tap to play" — so playback is
-            // instant with zero buffering the moment the card flips to its completed state.
-            _ = try? await VideoCache.shared.ensureCached(id: item.id, remoteURL: url)
         }
     }
 
@@ -355,16 +348,23 @@ struct GenerationCardView: View {
               thumbnail == nil else { return }
         Task {
             if let cached = await ThumbnailCache.shared.image(for: item.id) { thumbnail = cached; return }
-            let asset = AVURLAsset(url: url)
-            let gen = AVAssetImageGenerator(asset: asset)
-            gen.appliesPreferredTrackTransform = true
-            gen.maximumSize = CGSize(width: 400, height: 400)
-            if let cgImg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
-                let image = UIImage(cgImage: cgImg)
-                ThumbnailCache.shared[item.id] = image
-                thumbnail = image
-            }
+            let localURL = VideoCache.shared.cachedURL(for: item.id) ?? url
+            thumbnail = await Self.extractThumbnail(from: localURL, cacheKey: item.id)
         }
+    }
+
+    // Async frame extraction — never blocks the calling thread (unlike the old
+    // copyCGImage(at:actualTime:), which is synchronous and was being called on the main
+    // actor against a remote URL, stalling the UI until the network fetch + decode finished).
+    private static func extractThumbnail(from url: URL, cacheKey: String) async -> UIImage? {
+        let asset = AVURLAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 400, height: 400)
+        guard let (cgImg, _) = try? await gen.image(at: .zero) else { return nil }
+        let image = UIImage(cgImage: cgImg)
+        ThumbnailCache.shared[cacheKey] = image
+        return image
     }
 
     private func loadCachedImage() {
