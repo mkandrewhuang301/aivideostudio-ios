@@ -12,6 +12,7 @@ struct LibraryThumbnailView: View {
     var onTap: () -> Void
 
     @Environment(GenerationManager.self) private var generationManager
+    @Environment(ThemeManager.self) private var theme
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
 
@@ -22,7 +23,7 @@ struct LibraryThumbnailView: View {
         // frame to the cell, allowsHitTesting(false) removes the media from hit testing,
         // and contentShape makes exactly the visible cell tappable.
         Button(action: onTap) {
-            Color.white.opacity(0.04)
+            theme.surfaceStrong
                 .overlay {
                     ZStack {
                         if item.isImage {
@@ -31,7 +32,7 @@ struct LibraryThumbnailView: View {
                                 if let img = cachedImage {
                                     Image(uiImage: img).resizable().scaledToFill()
                                 } else {
-                                    Color(.systemGray5)
+                                    theme.surfaceStrong
                                 }
                             }
                         } else {
@@ -40,7 +41,7 @@ struct LibraryThumbnailView: View {
                                     .resizable()
                                     .scaledToFill()
                             } else {
-                                Color.white.opacity(0.04)
+                                theme.surfaceStrong
                                 Image(systemName: "film")
                                     .foregroundStyle(.tertiary)
                                     .font(.system(size: 22))

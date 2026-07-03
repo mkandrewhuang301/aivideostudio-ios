@@ -82,6 +82,7 @@ struct FeedView: View {
             GenerationDetailSheet(item: item, isPresented: $showDetailSheet)
                 .environment(authManager)
                 .environment(generationManager)
+                .environment(theme)
         }
         // D-36: Low-credits alert for Regenerate
         // Shown when creditsBalance < estimatedCost(for: item); user may still proceed

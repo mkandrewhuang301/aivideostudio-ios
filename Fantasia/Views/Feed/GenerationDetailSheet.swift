@@ -12,6 +12,7 @@ struct GenerationDetailSheet: View {
     @Binding var isPresented: Bool
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
+    @Environment(ThemeManager.self) private var theme
 
     @State private var showPlayer = false
     @State private var showShare = false
@@ -63,7 +64,7 @@ struct GenerationDetailSheet: View {
                                         .resizable()
                                         .scaledToFit()
                                 } else {
-                                    Color.white.opacity(0.05)
+                                    theme.surface
                                         .frame(height: 220)
                                 }
                             }
@@ -82,7 +83,7 @@ struct GenerationDetailSheet: View {
                                             .resizable()
                                             .scaledToFit()
                                     } else {
-                                        Color.white.opacity(0.05)
+                                        theme.surface
                                             .frame(height: 220)
                                     }
                                 }
@@ -99,7 +100,7 @@ struct GenerationDetailSheet: View {
                         .contextMenu { nameAsReferenceMenuItem }
                     } else {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.white.opacity(0.05))
+                            .fill(theme.surface)
                             .frame(minHeight: 120)
                             .overlay {
                                 VStack(spacing: 8) {
@@ -152,7 +153,7 @@ struct GenerationDetailSheet: View {
                         }
                     }
                     .padding(12)
-                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                    .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
 
                     if item.status == .completed {
                         Text("Generated \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
@@ -203,9 +204,9 @@ struct GenerationDetailSheet: View {
                                         Text(isPreparingShare ? "Preparing…" : "Share")
                                     }
                                     .frame(maxWidth: .infinity).frame(height: 52)
-                                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
-                                    .foregroundStyle(.white)
+                                    .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+                                    .foregroundStyle(theme.textPrimary)
                                 }
                                 .disabled(isPreparingShare)
                             }
@@ -268,7 +269,7 @@ struct GenerationDetailSheet: View {
         } message: {
             Text(shareError ?? "")
         }
-        .background(Color(red: 0.09, green: 0.085, blue: 0.105))
+        .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
     }
@@ -279,9 +280,9 @@ struct GenerationDetailSheet: View {
 
     @ViewBuilder
     private func actionButton(_ icon: String, _ label: String, role: ButtonRole, action: @escaping () -> Void) -> some View {
-        let fg: Color = role == .destructive ? .red.opacity(0.85) : .white.opacity(0.8)
-        let bg: Color = role == .destructive ? .red.opacity(0.08) : .white.opacity(0.08)
-        let border: Color = role == .destructive ? .red.opacity(0.2) : .white.opacity(0.13)
+        let fg: Color = role == .destructive ? .red.opacity(0.85) : theme.textPrimary.opacity(0.8)
+        let bg: Color = role == .destructive ? .red.opacity(0.08) : theme.surface
+        let border: Color = role == .destructive ? .red.opacity(0.2) : theme.surfaceBorder
 
         Button(action: action) {
             HStack(spacing: 6) {

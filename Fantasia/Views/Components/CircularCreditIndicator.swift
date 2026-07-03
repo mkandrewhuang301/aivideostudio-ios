@@ -33,6 +33,7 @@ struct CircularCreditIndicator: View {
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(ThemeManager.self) private var theme
 
     var body: some View {
         ZStack {
@@ -61,13 +62,14 @@ struct CircularCreditIndicator: View {
 
             // Profile picture placeholder (Phase 6: replace with AsyncImage)
             Circle()
-                .fill(Color(red: 0.15, green: 0.15, blue: 0.25))
+                .fill(theme.isLight ? Color.black.opacity(0.1) : Color(red: 0.15, green: 0.15, blue: 0.25))
                 .frame(width: size - 8, height: size - 8)
 
-            // Person icon placeholder
+            // Person icon placeholder — explicit theme color, not `.secondary`: that follows
+            // .preferredColorScheme and got dark-on-dark against this circle in light mode.
             Image(systemName: "person.fill")
                 .font(.system(size: size * 0.35))
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(theme.textSecondary)
         }
         .frame(width: size, height: size)
     }
@@ -82,4 +84,5 @@ struct CircularCreditIndicator: View {
     }
     .padding()
     .background(Color(red: 0.10, green: 0.10, blue: 0.18))
+    .environment(ThemeManager())
 }

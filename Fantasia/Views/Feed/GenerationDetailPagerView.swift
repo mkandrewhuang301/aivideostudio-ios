@@ -12,6 +12,7 @@ struct GenerationDetailPagerView: View {
     @Binding var isPresented: Bool
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
+    @Environment(ThemeManager.self) private var theme
 
     var body: some View {
         TabView(selection: $currentId) {
@@ -19,11 +20,12 @@ struct GenerationDetailPagerView: View {
                 GenerationDetailSheet(item: item, isPresented: $isPresented)
                     .environment(authManager)
                     .environment(generationManager)
+                    .environment(theme)
                     .tag(item.id)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .background(Color(red: 0.09, green: 0.085, blue: 0.105))
+        .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
     }
