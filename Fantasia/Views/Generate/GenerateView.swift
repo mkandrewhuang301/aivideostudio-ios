@@ -74,7 +74,7 @@ struct GenerateView: View {
 
     // Media library + @-mention state
     @State private var mentionQuery: String? = nil
-    @State private var showMentionSuggestions = false
+    @State private var showReferencePanel = false
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -297,15 +297,6 @@ struct GenerateView: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                if showMentionSuggestions && !mentionSuggestions.isEmpty {
-                    // Opacity-only removal (not .move(edge: .bottom)) — the slide used to carry
-                    // this ~220pt panel down over the Options/Hide button while fading out,
-                    // swallowing taps on it mid-animation. allowsHitTesting keeps the outgoing
-                    // view from intercepting taps at all during its transition.
-                    mentionSuggestionList
-                        .allowsHitTesting(showMentionSuggestions)
-                        .transition(.opacity)
-                }
                 if let msg = errorMessage {
                     Text(msg)
                         .font(.caption)
@@ -315,15 +306,22 @@ struct GenerateView: View {
                         .transition(.opacity)
                 }
                 promptBar
+                if showReferencePanel {
+                    referencePanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .frame(maxWidth: .infinity)
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showMentionSuggestions)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showReferencePanel)
             // T2: driven by KeyboardHeightReader instead of the old binary promptFocused switch —
             // tracks interactive scroll-to-dismiss frame-by-frame. The interactiveSpring smooths
             // the non-interactive show/hide jump (focus change); during an active drag the value
             // already changes continuously so the spring mostly rides along rather than lagging.
             .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.86), value: keyboardOverlap)
-            .padding(.bottom, max(65, effectiveKeyboardOverlap + 2))
+            // T8b: when the reference panel is open it sits flush above the bottom safe area
+            // (its own internal padding — see referencePanel — accounts for the home indicator);
+            // otherwise unchanged from T2's keyboard-tracking formula.
+            .padding(.bottom, showReferencePanel ? 0 : max(65, effectiveKeyboardOverlap + 2))
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
@@ -360,13 +358,21 @@ struct GenerateView: View {
                let r = Range(match.range, in: new) {
                 let q = String(new[r].dropFirst())
                 mentionQuery = q
-                if !showMentionSuggestions {
-                    showMentionSuggestions = true
+                if !showReferencePanel {
+                    // Dismiss the keyboard and slide up the reference panel below the composer,
+                    // mirroring the model-selector pill's presentation instead of an inline list
+                    // pinned above the composer (T8b). With the keyboard down the user can't type
+                    // further filter text, so mentionQuery stays "" and mentionSuggestions falls
+                    // back to defaultMentionSuggestions.
+                    promptFocused = false
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = true }
                     Task { await mediaLibrary.load() }
                 }
-            } else {
+            } else if !showReferencePanel {
+                // Panel hide is explicit now (select/cancel) — with the keyboard down while the
+                // panel is open, this trigger regex can't stop matching from user typing anymore,
+                // so this branch only clears mentionQuery when the panel was never opened.
                 mentionQuery = nil
-                showMentionSuggestions = false
             }
         }
         .onChange(of: selectedPickerItem) { _, newItem in
@@ -957,69 +963,113 @@ struct GenerateView: View {
         return ref.isVideo ? "Video" : "Image"
     }
 
-    // MARK: - @-mention inline suggestion list
+    // MARK: - @-reference panel (T8b: keyboard-height panel below the composer, replaces the
+    // old inline list pinned above it — same trigger, same commitMention/rename/delete actions,
+    // new presentation that mirrors the model-selector pill's keyboard-dismiss-and-slide-up feel)
 
-    private var mentionSuggestionList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if mediaLibrary.isLoading {
-                    HStack(spacing: 8) {
-                        ProgressView().tint(.white)
-                        Text("Loading…")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    .padding()
-                } else {
-                    ForEach(Array(mentionSuggestions.enumerated()), id: \.element.id) { idx, candidate in
-                        Button {
-                            commitMention(candidate)
-                        } label: {
-                            HStack(spacing: 10) {
-                                libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 40)
-                                Text(candidate.displayLabel(in: mediaLibrary.items))
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(candidate.hasCustomName ? .white : .white.opacity(0.55))
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            switch candidate {
-                            case .upload(let item):
-                                Button("Rename") {
-                                    renamingItem = item
-                                    renameText = item.displayName ?? ""
-                                    mentionQuery = nil
-                                    showMentionSuggestions = false
-                                }
-                                Button("Delete", role: .destructive) {
-                                    mentionQuery = nil
-                                    showMentionSuggestions = false
-                                    Task { await deleteLibraryItem(item) }
-                                }
-                            case .generation(let item):
-                                Button("Name as reference") {
-                                    mentionQuery = nil
-                                    showMentionSuggestions = false
-                                    handleNameAsReference(item: item)
+    private var referencePanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("References")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Button {
+                    cancelReferencePanel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .background(theme.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            if mediaLibrary.isLoading {
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    ProgressView().tint(theme.textSecondary)
+                    Text("Loading…")
+                        .font(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer(minLength: 0)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 14) {
+                        ForEach(mentionSuggestions, id: \.id) { candidate in
+                            Button {
+                                commitReferencePanelSelection(candidate)
+                            } label: {
+                                VStack(spacing: 6) {
+                                    libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 74)
+                                    Text(candidate.displayLabel(in: mediaLibrary.items))
+                                        .font(.caption2)
+                                        .foregroundStyle(candidate.hasCustomName ? theme.textPrimary : theme.textSecondary)
+                                        .lineLimit(1)
                                 }
                             }
-                        }
-                        if candidate.id != mentionSuggestions.last?.id {
-                            Divider().overlay(Color.white.opacity(0.08))
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                switch candidate {
+                                case .upload(let item):
+                                    Button("Rename") {
+                                        renamingItem = item
+                                        renameText = item.displayName ?? ""
+                                        mentionQuery = nil
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+                                    }
+                                    Button("Delete", role: .destructive) {
+                                        mentionQuery = nil
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+                                        Task { await deleteLibraryItem(item) }
+                                    }
+                                case .generation(let item):
+                                    Button("Name as reference") {
+                                        mentionQuery = nil
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+                                        handleNameAsReference(item: item)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
                 }
             }
         }
-        .frame(maxHeight: 220)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .padding(.horizontal, 14)
+        .padding(.bottom, max(24, bottomSafeAreaInset))
+        .frame(height: 300)
+        .frame(maxWidth: .infinity)
+        .background(theme.elevatedBackground)
+        .clipShape(.rect(topLeadingRadius: 20, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 20))
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.divider).frame(height: 0.5)
+        }
+    }
+
+    /// Cell tap: commits the token/reference (unchanged commitMention logic), closes the panel,
+    /// and refocuses the composer keyboard.
+    private func commitReferencePanelSelection(_ candidate: MentionCandidate) {
+        commitMention(candidate)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+        promptFocused = true
+    }
+
+    /// X button or drag-down cancel: removes the typed "@" (bare trigger, no filter text since
+    /// the keyboard was down), closes the panel, and refocuses the composer keyboard.
+    private func cancelReferencePanel() {
+        if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
+            promptText.replaceSubrange(range, with: "")
+        }
+        mentionQuery = nil
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+        promptFocused = true
     }
 
     @ViewBuilder
@@ -1128,7 +1178,7 @@ struct GenerateView: View {
         }
 
         mentionQuery = nil
-        showMentionSuggestions = false
+        showReferencePanel = false
     }
 
     private func applyRename(to item: ReferenceUploadItem, name: String) async {
