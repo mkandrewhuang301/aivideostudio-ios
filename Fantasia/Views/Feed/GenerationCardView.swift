@@ -59,6 +59,7 @@ struct GenerationCardView: View {
                         .foregroundStyle(theme.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 8)
+                    referenceThumbnailRow
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(theme.textSecondary)
@@ -134,6 +135,51 @@ struct GenerationCardView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Reference thumbnail row (Issue 4)
+    // Hints at what a reference-based generation actually used — ties into the remix flow
+    // (Issue 1), where the restored [ImageN]/[VideoN] tokens now visually match these thumbs.
+    @ViewBuilder
+    private var referenceThumbnailRow: some View {
+        if let refs = item.referenceUrls, !refs.isEmpty {
+            let visible = Array(refs.prefix(3))
+            let overflow = refs.count - visible.count
+            HStack(spacing: 3) {
+                ForEach(Array(visible.enumerated()), id: \.offset) { index, ref in
+                    referenceThumbnail(ref, index: index)
+                }
+                if overflow > 0 {
+                    Text("+\(overflow)")
+                        .font(.caption2)
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private func referenceThumbnail(_ ref: GenerationReference, index: Int) -> some View {
+        Group {
+            if ref.isVideo {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
+                                 Color(red: 0.416, green: 0.561, blue: 0.878)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            } else {
+                CachedThumbnailImage(cacheKey: item.id + "-refthumb-\(index)", url: URL(string: ref.url))
+            }
+        }
+        .frame(width: 18, height: 18)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Media Content

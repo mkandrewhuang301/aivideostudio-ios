@@ -1815,7 +1815,8 @@ private enum MentionCandidate: Identifiable {
 /// presigned URLs rotate on every fetch, which defeats AsyncImage's built-in (URL-keyed, and
 /// otherwise nonexistent beyond in-flight dedup) caching for the same underlying asset.
 /// Downscales to a small thumbnail size before caching (these are always shown at ≤64pt).
-private struct CachedThumbnailImage: View {
+/// Internal (not private) — also used by GenerationCardView's mini reference thumbnails.
+struct CachedThumbnailImage: View {
     let cacheKey: String
     let url: URL?
     @State private var image: UIImage?
