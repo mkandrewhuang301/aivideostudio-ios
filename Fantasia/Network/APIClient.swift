@@ -113,18 +113,28 @@ actor APIClient {
     // D-31: GET /api/generations with optional cursor parameter
     // Uses custom JSONDecoder with .iso8601 to decode createdAt/completedAt Date fields.
     func fetchGenerations(cursor: String? = nil, limit: Int = 50) async throws -> GenerationsResponse {
-        var path = "api/generations?limit=\(limit)"
-        if let cursor, let encoded = cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "&cursor=\(encoded)"
+        // Query params must go through URLComponents — appendingPathComponent percent-encodes
+        // "?" into the path (…/generations%3Flimit=50), which 404s on the backend. That 404
+        // was swallowed upstream and rendered as an empty library after login.
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("api/generations"),
+            resolvingAgainstBaseURL: false
+        )!
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
+        components.queryItems = queryItems
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let token = try await getIDToken()
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.unexpectedResponse(statusCode: -1, code: nil)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("[APIClient] GET api/generations → HTTP \(status): \(String(data: data, encoding: .utf8) ?? "no body")")
+            throw APIError.unexpectedResponse(statusCode: status, code: nil)
         }
         return try decoder.decode(GenerationsResponse.self, from: data)
     }
