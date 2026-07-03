@@ -57,10 +57,27 @@ struct GenerationDetailSheet: View {
 
                     // Full image/video preview
                     if item.isImage {
-                        Button { showPlayer = true } label: {
+                        Group {
+                            if let img = cachedImage {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFit()
+                            } else {
+                                theme.surface
+                                    .frame(height: 220)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
+                        .onTapGesture { showPlayer = true }
+                        .task { await loadCachedImage() }
+                        .contextMenu { nameAsReferenceMenuItem }
+                    } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
+                        ZStack {
                             Group {
-                                if let img = cachedImage {
-                                    Image(uiImage: img)
+                                if let thumb = thumbnail {
+                                    Image(uiImage: thumb)
                                         .resizable()
                                         .scaledToFit()
                                 } else {
@@ -70,32 +87,13 @@ struct GenerationDetailSheet: View {
                             }
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                        .task { await loadCachedImage() }
-                        .contextMenu { nameAsReferenceMenuItem }
-                    } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
-                        Button { showPlayer = true } label: {
-                            ZStack {
-                                Group {
-                                    if let thumb = thumbnail {
-                                        Image(uiImage: thumb)
-                                            .resizable()
-                                            .scaledToFit()
-                                    } else {
-                                        theme.surface
-                                            .frame(height: 220)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                                Image(systemName: "play.circle.fill")
-                                    .font(.system(size: 44))
-                                    .foregroundStyle(.white.opacity(0.9))
-                            }
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.white.opacity(0.9))
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .onTapGesture { showPlayer = true }
                         .task { await generateThumbnail(from: videoUrl) }
                         .contextMenu { nameAsReferenceMenuItem }
                     } else {

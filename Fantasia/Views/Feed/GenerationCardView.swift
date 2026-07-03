@@ -174,43 +174,39 @@ struct GenerationCardView: View {
                 // the wrong generation fullscreen. Color.clear pins the label's frame to the
                 // box, allowsHitTesting(false) removes the oversized image from hit testing,
                 // and contentShape makes exactly the visible box tappable.
-                Button { showPlayer = true } label: {
-                    Color.clear
-                        .overlay {
-                            Group {
-                                if let img = cachedImage {
-                                    Image(uiImage: img)
-                                        .resizable().scaledToFill()
-                                        .transition(.opacity.animation(.easeIn(duration: 0.3)))
-                                } else {
-                                    shimmerView
-                                }
+                Color.clear
+                    .overlay {
+                        Group {
+                            if let img = cachedImage {
+                                Image(uiImage: img)
+                                    .resizable().scaledToFill()
+                                    .transition(.opacity.animation(.easeIn(duration: 0.3)))
+                            } else {
+                                shimmerView
                             }
-                            .allowsHitTesting(false)
                         }
-                        .clipped()
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                        .allowsHitTesting(false)
+                    }
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showPlayer = true }
             } else if let thumb = thumbnail {
                 // D-16: static thumbnail + play icon overlay
                 // Same hit-test containment as the image branch above.
-                Button { showPlayer = true } label: {
-                    Color.clear
-                        .overlay {
-                            ZStack {
-                                Image(uiImage: thumb)
-                                    .resizable().scaledToFill()
-                                Image(systemName: "play.circle.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
-                            .allowsHitTesting(false)
+                Color.clear
+                    .overlay {
+                        ZStack {
+                            Image(uiImage: thumb)
+                                .resizable().scaledToFill()
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.85))
                         }
-                        .clipped()
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                        .allowsHitTesting(false)
+                    }
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showPlayer = true }
             } else {
                 // Thumbnail not loaded yet — shimmer placeholder
                 shimmerView
