@@ -77,7 +77,6 @@ struct LibraryView: View {
                                     .onAppear { Task { await generationManager.loadNextPage() } }
                             }
                         }
-                        .padding(.top, 8)
                         .padding(.bottom, 100)
                         // Overscroll seam cover: on rubber-band past the top, the content shifts
                         // down and reveals the page background's radial-gradient tint above the
@@ -159,11 +158,30 @@ struct LibraryView: View {
     private func masonryGrid(items: [GenerationItem], width: CGFloat) -> some View {
         let colWidth = (width - tileSpacing) / 2
         let (left, right) = distributeToColumns(items, colWidth: colWidth)
+        let gridHeight = max(columnHeight(left, colWidth: colWidth),
+                             columnHeight(right, colWidth: colWidth))
         return HStack(alignment: .top, spacing: tileSpacing) {
             masonryColumn(left, colWidth: colWidth)
             masonryColumn(right, colWidth: colWidth)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Pin an explicit, precomputed height so each LazyVStack section is a fixed-height row.
+        // Without this the grid's height is content-derived, so LazyVStack reserves an ESTIMATED
+        // height for not-yet-realized sections and corrects it to the true height on realization.
+        // That correction changes the ScrollView's contentSize, which makes the scroll indicator
+        // visibly jump. The jump is worst for a lone tall tile (a singleton 9:16 section is one
+        // ~330pt row whose realized height deviates most from the estimate). All inputs are known
+        // synchronously (aspect ratios + colWidth), so the height below exactly matches the tiles
+        // masonryColumn lays out — no clipping, no gap.
+        .frame(height: gridHeight, alignment: .top)
+    }
+
+    // Rendered height of one column: stacked tile heights plus the inter-tile spacing between
+    // them (n tiles => n-1 gaps). Mirrors masonryColumn's VStack(spacing: tileSpacing) exactly.
+    private func columnHeight(_ items: [GenerationItem], colWidth: CGFloat) -> CGFloat {
+        guard !items.isEmpty else { return 0 }
+        let tiles = items.reduce(CGFloat(0)) { $0 + tileHeight($1, colWidth: colWidth) }
+        return tiles + tileSpacing * CGFloat(items.count - 1)
     }
 
     private func masonryColumn(_ items: [GenerationItem], colWidth: CGFloat) -> some View {
