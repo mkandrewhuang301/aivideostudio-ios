@@ -22,6 +22,7 @@ struct GenerationDetailSheet: View {
     @State private var isDeleting = false
     @State private var isPreparingShare = false
     @State private var saveError: String? = nil
+    @State private var showSavedToast = false
     @State private var shareError: String? = nil
     @State private var isReporting = false
     @State private var tmpShareUrl: URL? = nil
@@ -259,6 +260,19 @@ struct GenerationDetailSheet: View {
                 .padding(.bottom, 32)
             }
         }
+        .overlay(alignment: .bottom) {
+            if showSavedToast {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("Saved to Photos").font(.subheadline.weight(.medium)).foregroundStyle(theme.textPrimary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 0.5))
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .fullScreenCover(isPresented: $showPlayer) {
             if item.isImage {
                 FullScreenImageView(item: item)
@@ -399,6 +413,12 @@ struct GenerationDetailSheet: View {
                 } else {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destUrl)
                 }
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation(.spring(response: 0.3)) { showSavedToast = true }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { showSavedToast = false }
             }
         } catch {
             saveError = "Could not save \(item.isImage ? "image" : "video"): \(error.localizedDescription)"
