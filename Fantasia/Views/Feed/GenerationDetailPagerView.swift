@@ -26,6 +26,11 @@ struct GenerationDetailPagerView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .background(theme.background)
+        // T10 fix: was applied per-page inside GenerationDetailSheet — the pager pre-instantiates
+        // neighboring pages, so 3+ .nameAsReferenceAlert() modifiers on the same presented sheet
+        // all tried to present at once and UIKit silently rejected the duplicates. One host here,
+        // shared across all pages via generationManager.pendingNameAsReference.
+        .nameAsReferenceAlert()
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
     }

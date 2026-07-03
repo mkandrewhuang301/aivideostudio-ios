@@ -295,7 +295,6 @@ struct GenerationDetailSheet: View {
         } message: {
             Text(shareError ?? "")
         }
-        .nameAsReferenceAlert()
         .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
