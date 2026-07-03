@@ -77,6 +77,7 @@ struct GenerateView: View {
     @State private var selectedItem: GenerationItem? = nil
     @State private var isLoadingOlderHistory = false
     @State private var confirmDeleteItem: GenerationItem? = nil
+    @State private var deletingItemIds: Set<String> = []
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -230,7 +231,8 @@ struct GenerateView: View {
                                 }
                                 ForEach(generationManager.generations.reversed()) { item in
                                     SwipeToDeleteRow(
-                                        onRequestDelete: { confirmDeleteItem = item }
+                                        onRequestDelete: { confirmDeleteItem = item },
+                                        isHeldOpen: confirmDeleteItem?.id == item.id || deletingItemIds.contains(item.id)
                                     ) {
                                         GenerationCardView(
                                             item: item,
@@ -444,16 +446,19 @@ struct GenerateView: View {
                 isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
             )
         }
-        // Swipe-to-delete confirmation (Issue 4) — shared by every SwipeToDeleteRow.
-        .alert(
+        // Swipe-to-delete confirmation (Issue 4) — shared by every SwipeToDeleteRow. The row
+        // stays revealed (isHeldOpen) while this is up — Messages pattern.
+        .confirmationDialog(
             confirmDeleteItem.map { $0.isImage ? "Delete this image?" : "Delete this video?" } ?? "Delete this video?",
             isPresented: Binding(
                 get: { confirmDeleteItem != nil },
                 set: { if !$0 { confirmDeleteItem = nil } }
-            )
+            ),
+            titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
                 if let item = confirmDeleteItem {
+                    deletingItemIds.insert(item.id)
                     Task { await handleDelete(item: item) }
                 }
                 confirmDeleteItem = nil
@@ -1639,6 +1644,7 @@ struct GenerateView: View {
         } catch {
             print("[GenerateView] delete error: \(error)")
         }
+        deletingItemIds.remove(item.id)
     }
 
     private func scrollToNewest(proxy: ScrollViewProxy) {
@@ -1672,6 +1678,7 @@ struct GenerateView: View {
 /// reveal is impossible.
 private struct SwipeToDeleteRow<Content: View>: View {
     var onRequestDelete: () -> Void
+    var isHeldOpen: Bool = false
     @ViewBuilder var content: () -> Content
 
     // @GestureState (not @State) auto-resets to 0 whenever the gesture ends for ANY reason,
@@ -1685,7 +1692,10 @@ private struct SwipeToDeleteRow<Content: View>: View {
     private let maxReveal: CGFloat = 130
 
     // Leftward only, rubber-banding past maxReveal instead of tracking the finger 1:1.
+    // While a confirmation is up for this row (isHeldOpen), stay parked at full reveal
+    // instead of springing home (Messages pattern).
     private var offset: CGFloat {
+        if isHeldOpen && dragWidth == 0 { return -maxReveal }
         guard dragWidth < 0 else { return 0 }
         if dragWidth < -maxReveal { return -maxReveal + (dragWidth + maxReveal) * 0.25 }
         return dragWidth
@@ -1696,6 +1706,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
     var body: some View {
         content()
             .offset(x: offset)
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isHeldOpen)
             .background(alignment: .trailing) {
                 if offset < 0 {
                     RoundedRectangle(cornerRadius: 16)
