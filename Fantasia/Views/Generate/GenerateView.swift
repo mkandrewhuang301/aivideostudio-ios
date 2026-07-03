@@ -676,6 +676,10 @@ struct GenerateView: View {
                             .foregroundStyle(theme.textSecondary)
                             .frame(width: 36, height: 36)
                     }
+                    // The menu pops upward from this bottom-anchored button, and iOS renders
+                    // upward-popping menus bottom-to-top by default — .fixed keeps declared
+                    // order (Photos / Camera / Files) rendering top-to-bottom regardless.
+                    .menuOrder(.fixed)
                     .buttonStyle(.plain)
                     .photosPicker(
                         isPresented: $showPhotosPicker,
