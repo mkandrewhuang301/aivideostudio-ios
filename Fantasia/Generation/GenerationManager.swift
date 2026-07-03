@@ -29,6 +29,20 @@ final class GenerationManager {
         lastRefreshDate.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
     }
 
+    /// True while FeedView reports an active touch anywhere in the list. While true,
+    /// newly-discovered items from mergeLatest() are buffered instead of being prepended
+    /// immediately — prepending mid-touch shifts every card down by a row and can route a
+    /// button's touch-up onto whatever card slides into that screen position. Flushed via
+    /// flushPendingInserts() the moment the touch lifts.
+    var isInteracting = false {
+        didSet {
+            if oldValue == true, isInteracting == false {
+                flushPendingInserts()
+            }
+        }
+    }
+    private var pendingNewItems: [GenerationItem] = []
+
     // Remix state: set before switching to Generate tab (D-35)
     var pendingRemix: GenerationItem? = nil
 
@@ -131,9 +145,21 @@ final class GenerationManager {
                 newItems.append(item)
             }
         }
-        if !newItems.isEmpty {
+        guard !newItems.isEmpty else { return }
+        if isInteracting {
+            // Buffer instead of prepending now — see isInteracting doc comment above.
+            pendingNewItems.append(contentsOf: newItems)
+        } else {
             generations.insert(contentsOf: newItems, at: 0)
         }
+    }
+
+    // Prepends items buffered by mergeLatest() while isInteracting was true.
+    // Called the moment the touch lifts (isInteracting didSet above).
+    private func flushPendingInserts() {
+        guard !pendingNewItems.isEmpty else { return }
+        generations.insert(contentsOf: pendingNewItems, at: 0)
+        pendingNewItems.removeAll()
     }
 
     // Load next page (pagination, cursor-based)

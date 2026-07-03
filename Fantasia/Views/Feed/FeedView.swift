@@ -53,6 +53,16 @@ struct FeedView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 100)  // tab bar clearance
             }
+            // Brackets the touch-down → touch-up window with isInteracting so
+            // GenerationManager.mergeLatest() buffers new items instead of
+            // prepending mid-touch (see GenerationManager.isInteracting doc comment).
+            // minimumDistance: 0 + simultaneousGesture fires alongside card buttons
+            // rather than stealing their taps.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in generationManager.isInteracting = true }
+                    .onEnded { _ in generationManager.isInteracting = false }
+            )
         }
         .navigationTitle("Feed")
         .navigationBarTitleDisplayMode(.inline)
