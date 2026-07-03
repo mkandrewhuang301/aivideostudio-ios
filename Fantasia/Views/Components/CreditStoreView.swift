@@ -56,12 +56,7 @@ struct CreditStoreView: View {
 
     // Fixed display order (ascending price) — avoids depending on live price data to sort,
     // so cached-only (offline) packs render in the same order as live ones.
-    private let packOrder = [
-        "com.fantasiaai.topup_9_99",
-        "com.fantasiaai.topup_24_99",
-        "com.fantasiaai.topup_49_99",
-        "com.fantasiaai.topup_99_99",
-    ]
+    private let packOrder = OfferingsManager.topUpProductIds
 
     private var displayPacks: [DisplayPack] {
         packOrder.compactMap { id in

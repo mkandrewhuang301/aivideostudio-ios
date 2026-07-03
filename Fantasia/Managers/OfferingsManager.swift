@@ -25,6 +25,15 @@ final class OfferingsManager {
     private static let lastFetchKey = "offerings.lastFetchDate"
     private static let priceCacheKey = "offerings.cachedPrices"
 
+    // Mirrors CreditStoreView.packOrder — shared so the app-launch prefetch can ensure these
+    // specific consumables are purchasable without CreditStoreView existing yet.
+    static let topUpProductIds = [
+        "com.fantasiaai.topup_9_99",
+        "com.fantasiaai.topup_24_99",
+        "com.fantasiaai.topup_49_99",
+        "com.fantasiaai.topup_99_99",
+    ]
+
     private var lastFetchDate: Date? {
         get { UserDefaults.standard.object(forKey: Self.lastFetchKey) as? Date }
         set { UserDefaults.standard.set(newValue, forKey: Self.lastFetchKey) }
@@ -70,7 +79,12 @@ final class OfferingsManager {
 
         let isStale = lastFetchDate.map { Date().timeIntervalSince($0) > Self.refreshInterval } ?? true
         let missingRequired = requiredIds.contains { !hasProduct(for: $0) }
-        guard force || isStale || missingRequired else { return }
+        // lastFetchDate persists across relaunch (UserDefaults) but packages doesn't (memory
+        // only) — without this, a relaunch within the 6h window sees isStale == false and
+        // returns immediately with an empty package list, so the real network fetch only starts
+        // when a screen's .task runs with `ensuring:`, i.e. exactly when the user is staring at
+        // the skeleton.
+        guard force || packages.isEmpty || isStale || missingRequired else { return }
         guard !isRefreshing else { return }
 
         isRefreshing = true

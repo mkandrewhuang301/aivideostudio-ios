@@ -59,7 +59,9 @@ struct FantasiaApp: App {
                         withAPIKey: AppConfig.revenueCatApiKey,
                         appUserID: nil // Set to Firebase UID in AuthManager after auth state restores
                     )
-                    Task { await offeringsManager.refreshIfNeeded() } // throttled — see OfferingsManager
+                    // ensuring: top-up ids so the launch prefetch (not just the stale-cache check)
+                    // covers the consumable packs — they live in a separate offering from `current`.
+                    Task { await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) } // throttled — see OfferingsManager
 
                     // Listen for RevenueCat entitlement updates in real time (RESEARCH.md Pattern 5)
                     let purchaseManager = PurchaseManager(creditManager: creditManager)
@@ -72,7 +74,7 @@ struct FantasiaApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         Task { await ratesManager.loadIfNeeded() } // no-op unless stale (>1h)
-                        Task { await offeringsManager.refreshIfNeeded() } // no-op unless stale
+                        Task { await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) } // no-op unless stale
                         generationManager.resumePollingIfNeeded() // no-op unless a job is active
                     } else if phase == .background {
                         generationManager.stopPolling()
