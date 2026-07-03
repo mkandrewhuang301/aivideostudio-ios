@@ -92,7 +92,9 @@ struct ProfileCreditSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("\(creditManager.creditsBalance) remaining")
+                Text(creditManager.totalCreditsPossible > 0
+                     ? "\(creditManager.creditsBalance) / \(creditManager.totalCreditsPossible) remaining"
+                     : "\(creditManager.creditsBalance) remaining")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                     .contentTransition(.numericText())

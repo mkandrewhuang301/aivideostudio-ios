@@ -61,6 +61,9 @@ final class CreditManager {
         UserDefaults.standard.set(data, forKey: Self.cacheKey(for: uid))
     }
 
+    /// Plan allotment + active top-ups — the "denominator" for balance display. 0 = no plan/top-ups.
+    var totalCreditsPossible: Int { entitlementLevel.monthlyCredits + activeTopupBalance }
+
     /// Fill ratio for CircularCreditIndicator (D-16).
     /// max = plan's monthly credit allotment + any active top-up balance.
     /// Falls back to full/empty when there is no plan and no top-ups (free users with seeded credits).

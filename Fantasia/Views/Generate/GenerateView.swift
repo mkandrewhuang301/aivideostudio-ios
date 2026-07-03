@@ -518,7 +518,9 @@ struct GenerateView: View {
                 showProfileSheet = true
             } label: {
                 HStack(spacing: 12) {
-                    Text("\(creditManager.creditsBalance)")
+                    Text(creditManager.totalCreditsPossible > 0
+                         ? "\(creditManager.creditsBalance)/\(creditManager.totalCreditsPossible)"
+                         : "\(creditManager.creditsBalance)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(theme.textSecondary)
                         .contentTransition(.numericText())
