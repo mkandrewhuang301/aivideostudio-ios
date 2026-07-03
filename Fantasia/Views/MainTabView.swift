@@ -79,7 +79,7 @@ struct MainTabView: View {
             ProfileCreditSheet(isPresented: $showProfileSheet)
                 .environment(creditManager)
                 .environment(authManager)
-                .presentationDetents([.medium])
+                .presentationDetents([.fraction(0.62)])
                 .presentationDragIndicator(.hidden)
         }
     }
