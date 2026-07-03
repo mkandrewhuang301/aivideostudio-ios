@@ -127,15 +127,23 @@ struct SideDrawerView: View {
 
             rowDivider
 
-            toggleRow(
-                icon: theme.isLight ? "sun.max.fill" : "moon.fill",
-                iconColor: accent,
-                label: "Light Mode",
-                value: Binding(
-                    get: { theme.isLight },
-                    set: { theme.theme = $0 ? .light : .dark }
-                )
-            )
+            HStack {
+                Text("Appearance")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { theme.theme },
+                    set: { theme.theme = $0 }
+                )) {
+                    Text("Dark").tag(AppTheme.dark)
+                    Text("Light").tag(AppTheme.light)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
