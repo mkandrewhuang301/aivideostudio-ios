@@ -161,8 +161,8 @@ struct GenerationDetailSheet: View {
                     // Actions
                     if item.status == .completed {
                         VStack(spacing: 14) {
-                            // Remix + Regenerate + Reference row
-                            HStack(spacing: 28) {
+                            // Remix + Regenerate + Reference + Name row
+                            HStack(spacing: 20) {
                                 circleActionButton("arrow.2.squarepath", "Remix") {
                                     handleRemix()
                                 }
@@ -171,6 +171,9 @@ struct GenerationDetailSheet: View {
                                 }
                                 circleActionButton("paperclip", "Reference") {
                                     handleReference()
+                                }
+                                circleActionButton("tag", "Name") {
+                                    generationManager.pendingNameAsReference = item
                                 }
                             }
                             .frame(maxWidth: .infinity)
@@ -318,15 +321,6 @@ struct GenerationDetailSheet: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(PressableButtonStyle())
-    }
-
-    @ViewBuilder
-    private var nameAsReferenceMenuItem: some View {
-        if item.status == .completed {
-            Button("Name as reference", systemImage: "tag") {
-                generationManager.pendingNameAsReference = item
-            }
-        }
     }
 
     // MARK: - Generation actions
