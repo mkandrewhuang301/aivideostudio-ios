@@ -6,11 +6,13 @@
 // D-03: push notification triggers an immediate refresh via refreshOnNotification().
 
 import Foundation
+import FirebaseAuth
 
 // CLAUDE.md: all new iOS managers use @Observable @MainActor final class pattern
 @Observable
 @MainActor
 final class GenerationManager {
+    private static let snapshotName = "generationsSnapshot"
     // Published state — read by FeedView and LibraryView
     var generations: [GenerationItem] = []
     var isLoading: Bool = false
@@ -83,6 +85,34 @@ final class GenerationManager {
         pollingTask = nil
     }
 
+    /// Loads the last-persisted list for the current user so Generate/Library render instantly
+    /// on cold start instead of showing a spinner until GET /api/generations responds. Call once
+    /// after auth restores (ContentView, alongside creditManager.hydrateFromCache()) — this only
+    /// fills the gap; lastRefreshDate stays nil so the next startPolling()/refreshIfStale() still
+    /// fetches and silently reconciles via mergeLatest.
+    func hydrateFromSnapshot() {
+        guard generations.isEmpty, let uid = Auth.auth().currentUser?.uid,
+              let snapshot = ListSnapshotStore.load([GenerationItem].self, name: Self.snapshotName, uid: uid),
+              !snapshot.items.isEmpty else { return }
+        generations = snapshot.items
+        hasLoadedOnce = true
+    }
+
+    /// Clears in-memory state and the persisted snapshot for a signed-out user, so their history
+    /// never flashes for the next account that signs in. Pass the uid of the user who just
+    /// signed out (Auth.auth().currentUser is already nil by the time this fires).
+    func clearSnapshot(uid: String) {
+        ListSnapshotStore.clear(name: Self.snapshotName, uid: uid)
+        generations = []
+        hasLoadedOnce = false
+        lastRefreshDate = nil
+    }
+
+    private func persistSnapshot() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        ListSnapshotStore.save(generations, name: Self.snapshotName, uid: uid)
+    }
+
     /// Perf: the 3s polling loop wasn't stopped on backgrounding (onDisappear doesn't fire
     /// then), so it kept ticking and hitting the network while the app was backgrounded. Call
     /// stopPolling() on scenePhase == .background and this on .active — resumes only if a job
@@ -118,6 +148,7 @@ final class GenerationManager {
             mergeLatest(response.items)
             nextCursor = response.nextCursor
             lastRefreshDate = Date() // only on success — a failed fetch shouldn't count as "fresh"
+            persistSnapshot()
         } catch {
             print("[GenerationManager] refresh error: \(error)")
         }

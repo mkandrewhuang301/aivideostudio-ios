@@ -13,6 +13,7 @@ struct FeedView: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(AuthManager.self) private var authManager
     @Environment(CreditManager.self) private var creditManager   // D-36: credit pre-flight check
+    @Environment(ThemeManager.self) private var theme
 
     @State private var selectedItem: GenerationItem? = nil
     @State private var showDetailSheet = false
@@ -100,7 +101,7 @@ struct FeedView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.09, green: 0.085, blue: 0.105).ignoresSafeArea()
+            theme.background.ignoresSafeArea()
             RadialGradient(colors: [accent.opacity(0.13), .clear],
                            center: .init(x: 0.1, y: 0.0),
                            startRadius: 0, endRadius: 340)

@@ -7,7 +7,7 @@
 import Foundation
 
 // Maps to backend generation_status enum values (including 'deleted' added in Plan 01)
-enum GenerationStatus: String, Decodable, Equatable {
+enum GenerationStatus: String, Codable, Equatable {
     case pending
     case processing
     case completed
@@ -19,13 +19,13 @@ enum GenerationStatus: String, Decodable, Equatable {
 
 // Distinguishes image generations from video generations.
 // Encoded as "video" | "image" in backend JSON field `media_type`.
-enum MediaType: String, Decodable, Equatable {
+enum MediaType: String, Codable, Equatable {
     case video
     case image
 }
 
 // A reference media item attached to a generation (image or video)
-struct GenerationReference: Decodable, Equatable {
+struct GenerationReference: Codable, Equatable {
     let url: String
     let isVideo: Bool
 }
@@ -33,7 +33,7 @@ struct GenerationReference: Decodable, Equatable {
 // Maps to backend params JSONB column — camelCase Swift, snake_case CodingKeys
 // All video-specific fields are optional so image generation rows (which have no
 // duration/resolution/aspectRatio/audio) decode without error.
-struct GenerationParams: Decodable, Equatable {
+struct GenerationParams: Codable, Equatable {
     let resolution: String?     // "480p" | "720p"; nil for image generations
     let duration: Int?          // seconds; nil for image generations
     let aspectRatio: String?    // "16:9" | "9:16" | "1:1" | "4:3"; nil for image generations
@@ -54,7 +54,7 @@ struct GenerationParams: Decodable, Equatable {
 }
 
 // Primary model — one generation row from GET /api/generations or GET /api/generations/:id
-struct GenerationItem: Decodable, Identifiable, Equatable {
+struct GenerationItem: Codable, Identifiable, Equatable {
     let id: String
     let model: String            // "bytedance/seedance-2.0-fast" | "bytedance/seedance-2.0-mini"
     let status: GenerationStatus

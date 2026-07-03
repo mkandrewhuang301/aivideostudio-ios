@@ -313,7 +313,7 @@ struct UploadResponse: Decodable {
 }
 
 // A previously-uploaded reference file returned by GET /api/uploads
-struct ReferenceUploadItem: Identifiable, Decodable {
+struct ReferenceUploadItem: Identifiable, Codable {
     let id: String
     let url: String
     let mimeType: String

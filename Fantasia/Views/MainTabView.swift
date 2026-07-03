@@ -8,6 +8,7 @@ struct MainTabView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
+    @Environment(ThemeManager.self) private var theme
     @State private var selectedTab = 1   // open on Generate by default
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
@@ -40,7 +41,7 @@ struct MainTabView: View {
                 customTabBar
                     .padding(.bottom, bottomLift)
 
-                Color(red: 0.063, green: 0.059, blue: 0.075)
+                theme.recessedBackground
                     .frame(height: bottomLift)
                     .ignoresSafeArea(edges: .bottom)
             }
@@ -58,6 +59,7 @@ struct MainTabView: View {
                     .environment(drawer)
                     .environment(creditManager)
                     .environment(authManager)
+                    .environment(theme)
                     .frame(width: drawerWidth)
                     .ignoresSafeArea()
                     .offset(x: drawer.isOpen ? 0 : -drawerWidth)
@@ -91,7 +93,7 @@ struct MainTabView: View {
                     Rectangle().frame(width: 22, height: 2)
                     Rectangle().frame(width: 22, height: 2)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.textPrimary)
                 .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
@@ -103,7 +105,7 @@ struct MainTabView: View {
                     .frame(width: 26, height: 26)
                 Text("Fantasia")
                     .font(.system(size: 16.5, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .kerning(-0.16)
             }
 
@@ -113,7 +115,7 @@ struct MainTabView: View {
                 HStack(spacing: 12) {
                     Text("\(creditManager.creditsBalance)")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.textSecondary)
                         .contentTransition(.numericText())
                     CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
                 }
@@ -125,7 +127,7 @@ struct MainTabView: View {
         .padding(.horizontal, 18)
         .padding(.top, 2)
         .padding(.bottom, 10)
-        .background(Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea(edges: .top))
+        .background(theme.elevatedBackground.ignoresSafeArea(edges: .top))
     }
 
     // MARK: - Custom tab bar
@@ -135,7 +137,7 @@ struct MainTabView: View {
             let third = geo.size.width / 3
             ZStack(alignment: .top) {
                 Rectangle()
-                    .fill(Color(red: 0.063, green: 0.059, blue: 0.075).opacity(0.9))
+                    .fill(theme.recessedBackground.opacity(0.9))
                     .background(.regularMaterial)
                     .frame(height: tabBarHeight)
 
@@ -150,11 +152,11 @@ struct MainTabView: View {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: third)
                     Rectangle()
-                        .fill(Color.white.opacity(0.38))
+                        .fill(theme.textTertiary)
                         .frame(width: 0.5, height: 36)
                     Spacer()
                     Rectangle()
-                        .fill(Color.white.opacity(0.38))
+                        .fill(theme.textTertiary)
                         .frame(width: 0.5, height: 36)
                     Color.clear.frame(width: third)
                 }
@@ -164,7 +166,7 @@ struct MainTabView: View {
                     Spacer()
                     Text("Generate")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(selectedTab == 1 ? .white : Color.white.opacity(0.38))
+                        .foregroundStyle(selectedTab == 1 ? theme.textPrimary : theme.textTertiary)
                         .padding(.bottom, 7)
                 }
                 .frame(height: tabBarHeight)
@@ -209,7 +211,7 @@ struct MainTabView: View {
                 Text(label)
                     .font(.caption2.weight(.semibold))
             }
-            .foregroundStyle(selectedTab == index ? .white : Color.white.opacity(0.38))
+            .foregroundStyle(selectedTab == index ? theme.textPrimary : theme.textTertiary)
             .frame(maxWidth: .infinity)
             .frame(height: tabBarHeight)
         }
@@ -222,4 +224,6 @@ struct MainTabView: View {
         .environment(CreditManager())
         .environment(AuthManager())
         .environment(GenerationManager())
+        .environment(MediaLibraryManager())
+        .environment(ThemeManager())
 }

@@ -10,6 +10,7 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(ThemeManager.self) private var theme
 
     @State private var selectedItem: GenerationItem? = nil
 
@@ -105,17 +106,17 @@ struct LibraryView: View {
         HStack(spacing: 8) {
             Text(dateString(for: date))
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.textPrimary)
             Text(weekdayString(for: date))
                 .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.textSecondary)
             Rectangle()
-                .fill(Color.white.opacity(0.12))
+                .fill(theme.divider)
                 .frame(height: 1)
         }
         .padding(.horizontal, sectionHPad)
         .padding(.vertical, 8)
-        .background(Color(red: 0.13, green: 0.125, blue: 0.15))
+        .background(theme.elevatedBackground)
     }
 
     // MARK: - 2-column masonry (fixed column width, native-ratio heights)
@@ -225,7 +226,7 @@ struct LibraryView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea()
+            theme.elevatedBackground.ignoresSafeArea()
             RadialGradient(colors: [accent.opacity(0.13), .clear],
                            center: .init(x: 0.1, y: 0.0),
                            startRadius: 0, endRadius: 340)

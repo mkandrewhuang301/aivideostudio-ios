@@ -21,6 +21,8 @@ struct GenerationCardView: View {
     var onNameAsReference: () -> Void  // long-press → promote this output into the permanent reference library
     var onDelete: () -> Void         // D-37
 
+    @Environment(ThemeManager.self) private var theme
+
     @State private var animatedProgress: Double = 0
     @State private var jitterTask: Task<Void, Never>? = nil
     @State private var showDelayMessage = false   // D-12: "Taking a bit longer..."
@@ -39,7 +41,7 @@ struct GenerationCardView: View {
             Button(action: onTapDetail) {
                 Text(item.prompt ?? "No prompt")
                     .font(.callout)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.textSecondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
@@ -71,8 +73,8 @@ struct GenerationCardView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 1))
         .padding(.horizontal, 16)
 
         // Full-screen player (D-16: tap thumbnail → full-screen)
@@ -262,14 +264,14 @@ struct GenerationCardView: View {
     // MARK: - Action Button Helper
     private func actionButton(_ icon: String, _ label: String, isDestructive: Bool, action: @escaping () -> Void) -> some View {
         let fg: Color = isActive
-            ? Color.white.opacity(0.2)
-            : isDestructive ? Color.red.opacity(0.85) : Color.white.opacity(0.8)
+            ? theme.textTertiary
+            : isDestructive ? Color.red.opacity(0.85) : theme.textPrimary.opacity(0.8)
         let bg: Color = isActive
-            ? Color.white.opacity(0.04)
-            : isDestructive ? Color.red.opacity(0.1) : Color.white.opacity(0.08)
+            ? theme.surface.opacity(0.6)
+            : isDestructive ? Color.red.opacity(0.1) : theme.surface
         let border: Color = isActive
-            ? Color.white.opacity(0.06)
-            : isDestructive ? Color.red.opacity(0.25) : Color.white.opacity(0.13)
+            ? theme.divider
+            : isDestructive ? Color.red.opacity(0.25) : theme.surfaceBorder
 
         return Button(action: action) {
             HStack(spacing: 5) {

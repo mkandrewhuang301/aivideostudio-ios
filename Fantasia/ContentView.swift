@@ -13,6 +13,9 @@ import RevenueCat
 struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(CreditManager.self) private var creditManager
+    @Environment(GenerationManager.self) private var generationManager
+    @Environment(MediaLibraryManager.self) private var mediaLibraryManager
+    @Environment(ThemeManager.self) private var theme
     @State private var minSplashElapsed = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
@@ -60,7 +63,7 @@ struct ContentView: View {
                 SignInView()
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.colorScheme)
         .animation(.easeInOut(duration: 0.35), value: authManager.isLoading || !minSplashElapsed)
         .animation(.easeInOut(duration: 0.35), value: authManager.currentUser == nil)
         .animation(.easeInOut(duration: 0.35), value: authManager.currentUser?.isEmailVerified)
@@ -81,12 +84,18 @@ struct ContentView: View {
             if new == nil {
                 // Signed out — clear stale credit state and reset RC to anonymous user
                 creditManager.reset()
+                if let uid = old?.uid {
+                    generationManager.clearSnapshot(uid: uid)
+                    mediaLibraryManager.clearSnapshot(uid: uid)
+                }
                 Task { try? await Purchases.shared.logOut() }
             } else if old == nil && new != nil {
                 // Signed in (or cold-launch restore from Keychain — this fires for both).
                 // Hydrate from the last-known cached balance synchronously so State 1b above
                 // can skip the splash immediately; the real fetchBalance() below corrects it.
                 creditManager.hydrateFromCache()
+                generationManager.hydrateFromSnapshot()
+                mediaLibraryManager.hydrateFromSnapshot()
 
                 // Identify RC user with Firebase UID so the webhook app_user_id is resolvable
                 // to a DB user (otherwise credit grants are silently skipped). This is
@@ -125,4 +134,5 @@ struct ContentView: View {
     ContentView()
         .environment(AuthManager())
         .environment(CreditManager())
+        .environment(ThemeManager())
 }

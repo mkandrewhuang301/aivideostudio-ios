@@ -5,12 +5,12 @@ struct SideDrawerView: View {
     @Environment(DrawerManager.self) private var drawer
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(ThemeManager.self) private var theme
 
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
     @State private var showSignOutConfirm = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
-    private let bg = Color(red: 0.09, green: 0.085, blue: 0.105)
 
     private var displayName: String {
         authManager.currentUser?.displayName
@@ -33,7 +33,7 @@ struct SideDrawerView: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            bg.ignoresSafeArea()
+            theme.background.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 header
@@ -90,7 +90,7 @@ struct SideDrawerView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayName)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                 Text(tierLabel)
                     .font(.system(size: 11, weight: .medium))
@@ -107,7 +107,7 @@ struct SideDrawerView: View {
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.3))
+            .foregroundStyle(theme.textTertiary)
             .kerning(0.8)
             .padding(.horizontal, 4)
             .padding(.bottom, 4)
@@ -123,9 +123,21 @@ struct SideDrawerView: View {
                 label: "Model Selector",
                 value: $modelPickerEnabled
             )
+
+            rowDivider
+
+            toggleRow(
+                icon: theme.isLight ? "sun.max.fill" : "moon.fill",
+                iconColor: accent,
+                label: "Light Mode",
+                value: Binding(
+                    get: { theme.isLight },
+                    set: { theme.theme = $0 ? .light : .dark }
+                )
+            )
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Account card
@@ -152,8 +164,8 @@ struct SideDrawerView: View {
                 }
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Sign out
@@ -181,14 +193,14 @@ struct SideDrawerView: View {
         VStack(spacing: 8) {
             Text("Fantasia · v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.2))
+                .foregroundStyle(theme.textTertiary)
             HStack(spacing: 16) {
                 Link("Privacy", destination: URL(string: "https://fantasiaai.app/privacy")!)
                 Link("Terms", destination: URL(string: "https://fantasiaai.app/terms")!)
             }
             .font(.caption2)
-            .foregroundStyle(.white.opacity(0.2))
-            .tint(.white.opacity(0.2))
+            .foregroundStyle(theme.textTertiary)
+            .tint(theme.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -204,7 +216,7 @@ struct SideDrawerView: View {
         HStack {
             Text(label)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
             Spacer()
             Toggle("", isOn: value)
@@ -221,12 +233,12 @@ struct SideDrawerView: View {
                 iconContainer(systemName: icon, color: iconColor)
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.2))
+                    .foregroundStyle(theme.textTertiary)
             }
             .padding(.horizontal, 12)
             .frame(height: 48)
@@ -244,7 +256,7 @@ struct SideDrawerView: View {
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.07))
+            .fill(theme.divider)
             .frame(height: 0.5)
             .padding(.leading, 58)
     }

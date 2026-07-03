@@ -13,6 +13,7 @@ struct CreateGenerationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(ThemeManager.self) private var theme
 
     @State private var promptText = ""
     @FocusState private var promptFocused: Bool
@@ -51,7 +52,7 @@ struct CreateGenerationView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.051, green: 0.047, blue: 0.067)
+            theme.background
                 .ignoresSafeArea()
             RadialGradient(
                 colors: [accent.opacity(0.13), .clear],
@@ -71,11 +72,11 @@ struct CreateGenerationView: View {
             Button { dismiss() } label: {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .frame(width: 34, height: 34)
-                    .background(Color.white.opacity(0.06))
+                    .background(theme.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
 
@@ -87,7 +88,7 @@ struct CreateGenerationView: View {
                     .frame(width: 26, height: 26)
                 Text("Fantasia")
                     .font(.system(size: 16.5, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .kerning(-0.16)
             }
 
@@ -116,7 +117,7 @@ struct CreateGenerationView: View {
             // Headline — gray, framed as an offer not an instruction
             Text("Not sure where to start?")
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.textSecondary)
 
             // Chips — one per row, tap fills the prompt bar only
             chipGrid
@@ -138,13 +139,13 @@ struct CreateGenerationView: View {
         } label: {
             Text(item.label)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(theme.textSecondary)
                 .lineLimit(1)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(Color.white.opacity(0.05))
+                .background(theme.surface)
                 .clipShape(Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+                .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
     }
@@ -176,7 +177,7 @@ struct CreateGenerationView: View {
             TextField("Describe what you want...", text: $promptText, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.body)
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.textPrimary)
                 .tint(accent)
                 .focused($promptFocused)
                 .opacity(promptText.isEmpty ? 1 : 1) // ensure text always white
@@ -206,7 +207,7 @@ struct CreateGenerationView: View {
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(theme.surfaceBorder, lineWidth: 0.5))
         .padding(.horizontal, 16)
         .padding(.bottom, 84) // 74pt tab bar + 10pt above diamond top
     }
@@ -216,5 +217,6 @@ struct CreateGenerationView: View {
     CreateGenerationView()
         .environment(CreditManager())
         .environment(AuthManager())
+        .environment(ThemeManager())
         .preferredColorScheme(.dark)
 }

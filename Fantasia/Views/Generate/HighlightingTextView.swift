@@ -17,6 +17,7 @@ struct HighlightingTextView: UIViewRepresentable {
     @Binding var contentHeight: CGFloat
 
     var accentColor: UIColor
+    var textColor: UIColor = .white
     var maxHeight: CGFloat = 112
     var font: UIFont = .preferredFont(forTextStyle: .body)
 
@@ -27,7 +28,7 @@ struct HighlightingTextView: UIViewRepresentable {
         tv.delegate = context.coordinator
         tv.backgroundColor = .clear
         tv.font = font
-        tv.textColor = .white
+        tv.textColor = textColor
         tv.tintColor = accentColor
         tv.isScrollEnabled = false
         tv.textContainerInset = .zero
@@ -41,6 +42,10 @@ struct HighlightingTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.textColor != textColor {
+            uiView.textColor = textColor
+            applyHighlighting(to: uiView, text: text)
+        }
         if uiView.text != text {
             let range = uiView.selectedRange
             applyHighlighting(to: uiView, text: text)
@@ -69,7 +74,7 @@ struct HighlightingTextView: UIViewRepresentable {
     private func applyHighlighting(to tv: UITextView, text: String) {
         let attributed = NSMutableAttributedString(
             string: text,
-            attributes: [.font: font, .foregroundColor: UIColor.white]
+            attributes: [.font: font, .foregroundColor: textColor]
         )
         if let re = Self.bracketTokenRegex {
             let ns = text as NSString

@@ -13,6 +13,8 @@ struct GenerateView: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(RatesManager.self) private var ratesManager
     @Environment(DrawerManager.self) private var drawer
+    @Environment(ThemeManager.self) private var theme
+    @Environment(MediaLibraryManager.self) private var mediaLibrary
 
     // Perf: these were previously compiled fresh inside highlightedPrompt (recomputed on every
     // body render, i.e. every keystroke), atomicTokenDeletion, and rebuildPromptTokens. Hoisted
@@ -59,17 +61,6 @@ struct GenerateView: View {
     // Media library + @-mention state
     @State private var mentionQuery: String? = nil
     @State private var showMentionSuggestions = false
-    @State private var mediaLibraryItems: [ReferenceUploadItem] = []
-    @State private var isLoadingLibrary = false
-    @State private var libraryLoadFailed = false
-    // Perf: reopening the @-mention popup used to refetch GET /api/uploads from scratch every
-    // single time (each open/close cycle reset showMentionSuggestions, re-arming the fetch
-    // guard below). New/renamed/deleted items are already applied to mediaLibraryItems in place
-    // elsewhere (attach, rename, delete), so a real refetch is only needed once per session or
-    // after a longer idle gap — not on every reopen.
-    @State private var hasLoadedMediaLibraryOnce = false
-    @State private var mediaLibraryLastLoadDate: Date? = nil
-    private static let mediaLibraryStaleAfter: TimeInterval = 300
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -90,7 +81,7 @@ struct GenerateView: View {
         // When filtering, unnamed uploads are hidden (nothing to match against); the synthetic
         // "latest generation" entry has no name either, so it only ever appears in the
         // unfiltered (just-typed-@) list below.
-        return mediaLibraryItems
+        return mediaLibrary.items
             .filter { ($0.displayName ?? "").localizedCaseInsensitiveContains(q) }
             .map { .upload($0) }
     }
@@ -104,11 +95,11 @@ struct GenerateView: View {
         var result: [MentionCandidate] = []
         var usedUploadIds = Set<String>()
 
-        if let mostRecent = mediaLibraryItems.first {
+        if let mostRecent = mediaLibrary.items.first {
             result.append(.upload(mostRecent))
             usedUploadIds.insert(mostRecent.id)
         }
-        if let mostRecentImage = mediaLibraryItems.first(where: { !$0.isVideo }),
+        if let mostRecentImage = mediaLibrary.items.first(where: { !$0.isVideo }),
            !usedUploadIds.contains(mostRecentImage.id) {
             result.append(.upload(mostRecentImage))
             usedUploadIds.insert(mostRecentImage.id)
@@ -118,7 +109,7 @@ struct GenerateView: View {
         }) {
             result.append(.generation(latestGeneration))
         }
-        for item in mediaLibraryItems where !usedUploadIds.contains(item.id) {
+        for item in mediaLibrary.items where !usedUploadIds.contains(item.id) {
             result.append(.upload(item))
         }
         return result
@@ -275,7 +266,7 @@ struct GenerateView: View {
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
-                    Color(red: 0.13, green: 0.125, blue: 0.15)
+                    theme.elevatedBackground
                 }
                 .ignoresSafeArea(edges: .bottom)
             )
@@ -303,7 +294,7 @@ struct GenerateView: View {
                 mentionQuery = q
                 if !showMentionSuggestions {
                     showMentionSuggestions = true
-                    Task { await loadMediaLibrary() }
+                    Task { await mediaLibrary.load() }
                 }
             } else {
                 mentionQuery = nil
@@ -418,7 +409,7 @@ struct GenerateView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.13, green: 0.125, blue: 0.15)
+            theme.elevatedBackground
                 .ignoresSafeArea()
 
             RadialGradient(
@@ -441,7 +432,7 @@ struct GenerateView: View {
                     Rectangle().frame(width: 22, height: 2)
                     Rectangle().frame(width: 22, height: 2)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.textPrimary)
                 .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
@@ -453,7 +444,7 @@ struct GenerateView: View {
                     .frame(width: 26, height: 26)
                 Text("Fantasia")
                     .font(.system(size: 16.5, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                     .kerning(-0.16)
             }
 
@@ -465,7 +456,7 @@ struct GenerateView: View {
                 HStack(spacing: 12) {
                     Text("\(creditManager.creditsBalance)")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.textSecondary)
                         .contentTransition(.numericText())
                     CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
                 }
@@ -477,7 +468,7 @@ struct GenerateView: View {
         .padding(.horizontal, 18)
         .padding(.top, 2)
         .padding(.bottom, 10)
-        .background(Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea(edges: .top))
+        .background(theme.elevatedBackground.ignoresSafeArea(edges: .top))
     }
 
     // MARK: - Center inspiration content
@@ -487,10 +478,10 @@ struct GenerateView: View {
             VStack(spacing: 6) {
                 Text("What will you create?")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.textPrimary)
                 Text("Tap an idea or describe your own")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.textSecondary)
             }
 
             chipRow
@@ -508,16 +499,16 @@ struct GenerateView: View {
                         HStack(spacing: 9) {
                             Image(systemName: item.icon)
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(theme.textSecondary)
                             Text(item.label)
                                 .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(theme.textPrimary.opacity(0.92))
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.07))
+                        .background(theme.surface)
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1))
+                        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                 }
@@ -553,7 +544,7 @@ struct GenerateView: View {
                     Text("Attach an image to use this model")
                         .font(.caption.weight(.bold))
                 }
-                .foregroundStyle(Color.white.opacity(0.6))
+                .foregroundStyle(theme.textSecondary)
             } else if isAnyUploading {
                 HStack(spacing: 4) {
                     ProgressView()
@@ -561,7 +552,7 @@ struct GenerateView: View {
                         .scaleEffect(0.6)
                     Text("Uploading…")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.textSecondary)
                 }
             } else {
                 HStack(spacing: 4) {
@@ -570,12 +561,12 @@ struct GenerateView: View {
                         .foregroundStyle(accent)
                     Text("\(generationCost)")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
                         .contentTransition(.numericText())
                         .animation(.snappy, value: generationCost)
                     Text("credits")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.textSecondary)
                 }
             }
         }
@@ -610,10 +601,10 @@ struct GenerateView: View {
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(theme.textPrimary.opacity(0.85))
                 .frame(width: 20, height: 20)
-                .background(Color(red: 0.24, green: 0.22, blue: 0.28), in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.5))
+                .background(theme.surface, in: Circle())
+                .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
     }
@@ -644,7 +635,7 @@ struct GenerateView: View {
                     } label: {
                         Image(systemName: "paperclip")
                             .font(.system(size: 19, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(theme.textSecondary)
                             .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.plain)
@@ -671,7 +662,7 @@ struct GenerateView: View {
                     if promptText.isEmpty {
                         Text("Describe a scene...")
                             .font(.body)
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(theme.textTertiary)
                             .allowsHitTesting(false)
                             .padding(.top, 0.5)
                     }
@@ -680,7 +671,8 @@ struct GenerateView: View {
                         selectedRange: $promptTextRange,
                         isFocused: Binding(get: { promptFocused }, set: { promptFocused = $0 }),
                         contentHeight: $promptTextHeight,
-                        accentColor: UIColor(accent)
+                        accentColor: UIColor(accent),
+                        textColor: UIColor(theme.textPrimary)
                     )
                     .frame(height: max(22, promptTextHeight))
                 }
@@ -722,7 +714,7 @@ struct GenerateView: View {
             }
 
             Rectangle()
-                .fill(Color.white.opacity(0.15))
+                .fill(theme.divider)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
@@ -745,12 +737,12 @@ struct GenerateView: View {
                         }
                         .font(.caption.weight(.medium))
                     }
-                    .foregroundStyle(hasNonDefaultSettings ? .white : .white.opacity(0.4))
+                    .foregroundStyle(hasNonDefaultSettings ? theme.textPrimary : theme.textTertiary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(hasNonDefaultSettings ? 0.12 : 0.06))
+                    .background(hasNonDefaultSettings ? theme.surfaceStrong : theme.surface)
                     .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(hasNonDefaultSettings ? 0.25 : 0.1), lineWidth: 0.5))
+                    .overlay(Capsule().stroke(hasNonDefaultSettings ? theme.surfaceStrongBorder : theme.surfaceBorder, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -774,9 +766,9 @@ struct GenerateView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color(red: 0.13, green: 0.125, blue: 0.15))
+        .background(theme.elevatedBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(theme.surfaceStrongBorder, lineWidth: 1))
     }
 
     // MARK: - Reference card stack (below paperclip)
@@ -860,7 +852,7 @@ struct GenerateView: View {
         .contextMenu(menuItems: {
             if !ref.isUploading,
                let uploadId = ref.uploadId,
-               let libItem = mediaLibraryItems.first(where: { $0.id == uploadId }) {
+               let libItem = mediaLibrary.items.first(where: { $0.id == uploadId }) {
                 Button("Rename") {
                     renamingItem = libItem
                     renameText = libItem.displayName ?? ""
@@ -898,7 +890,7 @@ struct GenerateView: View {
     private var mentionSuggestionList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if isLoadingLibrary {
+                if mediaLibrary.isLoading {
                     HStack(spacing: 8) {
                         ProgressView().tint(.white)
                         Text("Loading…")
@@ -913,7 +905,7 @@ struct GenerateView: View {
                         } label: {
                             HStack(spacing: 10) {
                                 libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 40)
-                                Text(candidate.displayLabel(in: mediaLibraryItems))
+                                Text(candidate.displayLabel(in: mediaLibrary.items))
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(candidate.hasCustomName ? .white : .white.opacity(0.55))
                                 Spacer()
@@ -986,7 +978,7 @@ struct GenerateView: View {
     /// shown as the sheet's placeholder so the user knows the default before they type anything.
     private func defaultSlotPlaceholder(for item: ReferenceUploadItem) -> String {
         var count = 0
-        for lib in mediaLibraryItems {
+        for lib in mediaLibrary.items {
             if lib.isVideo == item.isVideo { count += 1 }
             if lib.id == item.id { return item.isVideo ? "Video \(count)" : "Image \(count)" }
         }
@@ -994,24 +986,6 @@ struct GenerateView: View {
     }
 
     // MARK: - Library actions
-
-    private func loadMediaLibrary() async {
-        // Cache hit: show the existing list instantly, no network call, no spinner.
-        let isStale = mediaLibraryLastLoadDate.map { Date().timeIntervalSince($0) > Self.mediaLibraryStaleAfter } ?? true
-        guard !hasLoadedMediaLibraryOnce || isStale else { return }
-        guard !isLoadingLibrary else { return }
-        isLoadingLibrary = true
-        libraryLoadFailed = false
-        defer { isLoadingLibrary = false }
-        do {
-            mediaLibraryItems = try await APIClient.shared.fetchMyUploads()
-            hasLoadedMediaLibraryOnce = true
-            mediaLibraryLastLoadDate = Date()
-        } catch {
-            print("[GenerateView] fetchMyUploads failed: \(error)")
-            libraryLoadFailed = true
-        }
-    }
 
     /// Finds the "@query" the user just typed, searching only up to the caret so a stray
     /// identical "@query" substring elsewhere in the prompt (after the caret) can't be
@@ -1088,9 +1062,7 @@ struct GenerateView: View {
     private func applyRename(to item: ReferenceUploadItem, name: String) async {
         try? await APIClient.shared.renameUpload(id: item.id, displayName: name)
         let resolved = name.isEmpty ? nil : name
-        if let idx = mediaLibraryItems.firstIndex(where: { $0.id == item.id }) {
-            mediaLibraryItems[idx].displayName = resolved
-        }
+        mediaLibrary.rename(id: item.id, to: resolved)
         if let idx = attachedReferences.firstIndex(where: { $0.uploadId == item.id }) {
             attachedReferences[idx].displayName = resolved
             rebuildPromptTokens()
@@ -1100,7 +1072,7 @@ struct GenerateView: View {
     private func deleteLibraryItem(_ item: ReferenceUploadItem) async {
         try? await APIClient.shared.deleteUpload(id: item.id)
         withAnimation(.spring(response: 0.3)) {
-            mediaLibraryItems.removeAll { $0.id == item.id }
+            mediaLibrary.remove(id: item.id)
             attachedReferences.removeAll { $0.uploadId == item.id }
             rebuildPromptTokens()
         }
@@ -1178,9 +1150,8 @@ struct GenerateView: View {
                     attachedReferences[idx].isUploading = false
                     // Add to library picker list
                     if let id = response.id {
-                        mediaLibraryItems.insert(
-                            ReferenceUploadItem(id: id, url: response.url, mimeType: "video/mp4"),
-                            at: 0
+                        mediaLibrary.insert(
+                            ReferenceUploadItem(id: id, url: response.url, mimeType: "video/mp4")
                         )
                     }
                 }
@@ -1206,9 +1177,8 @@ struct GenerateView: View {
                     attachedReferences[idx].url = response.url
                     attachedReferences[idx].isUploading = false
                     if let id = response.id {
-                        mediaLibraryItems.insert(
-                            ReferenceUploadItem(id: id, url: response.url, mimeType: "image/jpeg"),
-                            at: 0
+                        mediaLibrary.insert(
+                            ReferenceUploadItem(id: id, url: response.url, mimeType: "image/jpeg")
                         )
                     }
                 }
@@ -1533,14 +1503,13 @@ struct GenerateView: View {
         }
         let resolvedName = response.displayName ?? (name.isEmpty ? nil : name)
         withAnimation(.spring(response: 0.3)) {
-            mediaLibraryItems.insert(
+            mediaLibrary.insert(
                 ReferenceUploadItem(
                     id: id,
                     url: response.url,
                     mimeType: response.mimeType ?? (item.isImage ? "image/jpeg" : "video/mp4"),
                     displayName: resolvedName
-                ),
-                at: 0
+                )
             )
         }
         // If this generation's output is already attached to the current draft (e.g. via the
@@ -1838,5 +1807,7 @@ private struct AttachedReference: Identifiable {
         .environment(CreditManager())
         .environment(AuthManager())
         .environment(GenerationManager())
+        .environment(MediaLibraryManager())
+        .environment(ThemeManager())
         .preferredColorScheme(.dark)
 }

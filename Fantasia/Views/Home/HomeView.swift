@@ -8,6 +8,7 @@ import AVFoundation
 
 struct HomeView: View {
     @Environment(CreditManager.self) private var creditManager
+    @Environment(ThemeManager.self) private var theme
 
     var onNavigateToGenerate: () -> Void
 
@@ -40,7 +41,7 @@ struct HomeView: View {
 
     private var background: some View {
         ZStack {
-            Color(red: 0.13, green: 0.125, blue: 0.15).ignoresSafeArea()
+            theme.elevatedBackground.ignoresSafeArea()
             RadialGradient(
                 colors: [accent.opacity(0.13), .clear],
                 center: .init(x: 0.1, y: 0.0),
@@ -329,7 +330,7 @@ struct HomeView: View {
         HStack {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(theme.textTertiary)
                 .tracking(1.6)
             Spacer()
             if let action {
@@ -351,5 +352,6 @@ struct HomeView: View {
         HomeView(onNavigateToGenerate: {})
             .environment(GenerationManager())
             .environment(CreditManager())
+            .environment(ThemeManager())
     }
 }

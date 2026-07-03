@@ -11,12 +11,12 @@
 		09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */; };
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
 		0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F17BD017E319CD6B181876C /* PurchaseManager.swift */; };
+		0FD40BEE54B275ECC1C8D7C5 /* ListSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E511C53EAA75EE4091903A /* ListSnapshotStore.swift */; };
 		14C33C25B4E446F40F55E0F3 /* SocialSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB17EB669A20752389935966 /* SocialSignInButton.swift */; };
 		1562160C4DBB10894DE25FB1 /* OnboardingQuestionBankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */; };
 		1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6313B0A55581090BEA6B4A13 /* PlanCardView.swift */; };
 		17422C8DCDE8B4EAF6E6DADA /* GenerationCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF98D41F7BDC89D993199016 /* GenerationCardView.swift */; };
 		18F347EAB3D07C4ACAB89528 /* GenerationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */; };
-		605CADF81BF0059ADACB2D0C /* GenerationDetailPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5B781D58A670D4C38FD331 /* GenerationDetailPagerView.swift */; };
 		1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9325B3ED5B04712AB19C26 /* FeedView.swift */; };
 		1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226A3C8D078EB4BB18B608E /* HomeView.swift */; };
 		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
@@ -26,6 +26,7 @@
 		32104E944D1A0E14E9D90D02 /* CircularCreditIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */; };
 		3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */; };
 		34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27960EB90112C73C94A802EC /* FantasiaApp.swift */; };
+		356735E3B9A0F1E9300C0418 /* MediaLibraryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A43D9FE413F54CB40D8385B /* MediaLibraryManager.swift */; };
 		35FD5AAB7D6E926B27883A1A /* MediaPrepService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20DDB7630607116A21D7693 /* MediaPrepService.swift */; };
 		3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D880315248963AAE05C9C2 /* CreditManager.swift */; };
 		382D5A0AAEB4E7CF7B87CD65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 134AEB4B90258A717279F950 /* GoogleSignIn */; };
@@ -37,9 +38,11 @@
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
+		605CADF81BF0059ADACB2D0C /* GenerationDetailPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5B781D58A670D4C38FD331 /* GenerationDetailPagerView.swift */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
 		668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F87E75370CA3504E80E2E52 /* SignUpView.swift */; };
 		6B7B16C6F9B231A89B52A6F8 /* onboarding-sample.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */; };
+		6CD697CD5B204B3BA4305909 /* HighlightingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FC833DFED8492385521E5E /* HighlightingTextView.swift */; };
 		6F591961CA61AAD504DD53CF /* CheckInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36EC4AF5B53AC10A99D47267 /* CheckInboxView.swift */; };
 		7483F05BDD201D54BF3DA243 /* View+KeyboardDone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2048F0331FD9A3E68559DF06 /* View+KeyboardDone.swift */; };
 		7C6DCB2D7E143459E39D77B5 /* FullScreenImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E710D93903D4F18F9ED05D /* FullScreenImageView.swift */; };
@@ -65,8 +68,8 @@
 		DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085B4D75DB663F0A8A93228C /* RatesManager.swift */; };
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 		E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68544EFABAD6EC84426B2794 /* GenerateView.swift */; };
-		6CD697CD5B204B3BA4305909 /* HighlightingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FC833DFED8492385521E5E /* HighlightingTextView.swift */; };
 		EBE3BD23343938B199C4054C /* GenerationItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */; };
+		EC009F026EC24766A6426F9B /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7670718C7A43CD9180EBF1 /* ThemeManager.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
 /* End PBXBuildFile section */
@@ -84,7 +87,9 @@
 /* Begin PBXFileReference section */
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
-		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
+		0A43D9FE413F54CB40D8385B /* MediaLibraryManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MediaLibraryManager.swift; path = MediaLibraryManager.swift; sourceTree = "<group>"; };
+		12FC833DFED8492385521E5E /* HighlightingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightingTextView.swift; sourceTree = "<group>"; };
+		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		2048F0331FD9A3E68559DF06 /* View+KeyboardDone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+KeyboardDone.swift"; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -93,9 +98,9 @@
 		36EC4AF5B53AC10A99D47267 /* CheckInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckInboxView.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCache.swift; sourceTree = "<group>"; };
+		49E511C53EAA75EE4091903A /* ListSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ListSnapshotStore.swift; path = ListSnapshotStore.swift; sourceTree = "<group>"; };
 		4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfferingsManager.swift; sourceTree = "<group>"; };
 		54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailSheet.swift; sourceTree = "<group>"; };
-		CE5B781D58A670D4C38FD331 /* GenerationDetailPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailPagerView.swift; sourceTree = "<group>"; };
 		59E4FE5DF35EF32FE7883309 /* FantasiaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FantasiaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryThumbnailView.swift; sourceTree = "<group>"; };
@@ -106,11 +111,10 @@
 		677EDD477B29B62723B6D417 /* DrawerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawerManager.swift; sourceTree = "<group>"; };
 		67E710D93903D4F18F9ED05D /* FullScreenImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenImageView.swift; sourceTree = "<group>"; };
 		68544EFABAD6EC84426B2794 /* GenerateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateView.swift; sourceTree = "<group>"; };
-		12FC833DFED8492385521E5E /* HighlightingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightingTextView.swift; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		71907E2C4814D307EE0AADF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		739201A04305B948BFA7474D /* Fantasia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fantasia.entitlements; sourceTree = "<group>"; };
-		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
 		8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
@@ -120,6 +124,7 @@
 		9853E4B33F245F5961DC8563 /* EntitlementLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementLevel.swift; sourceTree = "<group>"; };
 		98728630D43E57BFF19C909E /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCreditIndicator.swift; sourceTree = "<group>"; };
+		9F7670718C7A43CD9180EBF1 /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationItem.swift; sourceTree = "<group>"; };
 		AA9325B3ED5B04712AB19C26 /* FeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedView.swift; sourceTree = "<group>"; };
 		ACCB6A3EF8F44442A1657016 /* SideDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideDrawerView.swift; sourceTree = "<group>"; };
@@ -132,6 +137,7 @@
 		C297099F54ADF39EB8703661 /* GenerationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationManager.swift; sourceTree = "<group>"; };
 		CDCEBE956B3FB9187BF83EE4 /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
 		CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestion.swift; sourceTree = "<group>"; };
+		CE5B781D58A670D4C38FD331 /* GenerationDetailPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailPagerView.swift; sourceTree = "<group>"; };
 		CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeatureSlideView.swift; sourceTree = "<group>"; };
 		D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestionBankTests.swift; sourceTree = "<group>"; };
 		D20DDB7630607116A21D7693 /* MediaPrepService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPrepService.swift; sourceTree = "<group>"; };
@@ -290,6 +296,7 @@
 			children = (
 				4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */,
 				6F17BD017E319CD6B181876C /* PurchaseManager.swift */,
+				0A43D9FE413F54CB40D8385B /* MediaLibraryManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -318,10 +325,12 @@
 			isa = PBXGroup;
 			children = (
 				677EDD477B29B62723B6D417 /* DrawerManager.swift */,
+				9F7670718C7A43CD9180EBF1 /* ThemeManager.swift */,
 				D20DDB7630607116A21D7693 /* MediaPrepService.swift */,
 				CDCEBE956B3FB9187BF83EE4 /* ThumbnailCache.swift */,
 				45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */,
 				2048F0331FD9A3E68559DF06 /* View+KeyboardDone.swift */,
+				49E511C53EAA75EE4091903A /* ListSnapshotStore.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -451,8 +460,6 @@
 				C7C6D5F0AC335188E9225203 /* PBXTargetDependency */,
 			);
 			name = FantasiaTests;
-			packageProductDependencies = (
-			);
 			productName = FantasiaTests;
 			productReference = 59E4FE5DF35EF32FE7883309 /* FantasiaTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -465,8 +472,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -525,6 +530,7 @@
 				3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */,
 				ABB54C63E460F8B91648880B /* CreditStoreView.swift in Sources */,
 				F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */,
+				EC009F026EC24766A6426F9B /* ThemeManager.swift in Sources */,
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */,
@@ -565,6 +571,8 @@
 				404B057D9B2E3C1CFCBB9B4A /* TransparentFullScreenBackground.swift in Sources */,
 				2DBDB72DBEFE96C2A467E888 /* VideoCache.swift in Sources */,
 				7483F05BDD201D54BF3DA243 /* View+KeyboardDone.swift in Sources */,
+				0FD40BEE54B275ECC1C8D7C5 /* ListSnapshotStore.swift in Sources */,
+				356735E3B9A0F1E9300C0418 /* MediaLibraryManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -650,6 +658,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -773,6 +782,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
