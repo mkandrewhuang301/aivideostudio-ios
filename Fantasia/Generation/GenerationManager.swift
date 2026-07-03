@@ -7,12 +7,32 @@
 
 import Foundation
 import FirebaseAuth
+import Network
 
 // CLAUDE.md: all new iOS managers use @Observable @MainActor final class pattern
 @Observable
 @MainActor
 final class GenerationManager {
     private static let snapshotName = "generationsSnapshot"
+
+    // Drives the "Waiting for connection…" card message in place of the elapsed-time tier
+    // messages (Issue 2) — cosmetic only, does not pause the progress curve.
+    var isOnline: Bool = true
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "GenerationManager.pathMonitor")
+
+    init() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.isOnline = path.status == .satisfied
+            }
+        }
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    deinit {
+        pathMonitor.cancel()
+    }
     // Published state — read by FeedView and LibraryView
     var generations: [GenerationItem] = []
     var isLoading: Bool = false

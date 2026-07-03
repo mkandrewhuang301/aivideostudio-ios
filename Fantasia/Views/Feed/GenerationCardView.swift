@@ -12,6 +12,19 @@
 import SwiftUI
 import AVFoundation
 
+/// Rough wall-clock expectation for a generation's duration, seconds. Constants are best-effort
+/// seeds — tune later against real Replicate timings; keep them in this one place.
+enum ProgressEstimator {
+    static func expectedSeconds(for item: GenerationItem) -> Double {
+        if item.isImage { return item.model.contains("grok") ? 20 : 30 }
+        let base: Double = item.model.contains("mini") ? 40 : 25
+        let perSecond: Double = item.model.contains("mini") ? 6 : 4
+        let duration = Double(item.params.duration ?? 6)
+        let resMultiplier: Double = (item.params.resolution == "1080p") ? 1.6 : 1.0
+        return (base + perSecond * duration) * resMultiplier
+    }
+}
+
 struct GenerationCardView: View {
     let item: GenerationItem
     var onTapDetail: () -> Void      // tap prompt text → detail sheet (D-29)
@@ -22,10 +35,11 @@ struct GenerationCardView: View {
     var onDelete: () -> Void         // D-37
 
     @Environment(ThemeManager.self) private var theme
+    @Environment(GenerationManager.self) private var generationManager
 
     @State private var animatedProgress: Double = 0
     @State private var jitterTask: Task<Void, Never>? = nil
-    @State private var showDelayMessage = false   // D-12: "Taking a bit longer..."
+    @State private var progressMessage: String? = nil   // elapsed-time-tiered "taking a while" copy
     @State private var showDeleteAlert = false
     @State private var thumbnail: UIImage? = nil
     @State private var showPlayer = false
@@ -100,7 +114,7 @@ struct GenerationCardView: View {
             loadThumbnail()
             loadCachedImage()
             if isActive {
-                startProgressJitter()
+                startProgressTicking()
             } else if item.status == .completed {
                 revealCompleted = true   // already done — skip animation
             }
@@ -151,8 +165,12 @@ struct GenerationCardView: View {
                     Text("\(Int(animatedProgress * 100))%")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
-                    if showDelayMessage {
-                        Text("Taking a bit longer...")
+                    if !generationManager.isOnline {
+                        Text("Waiting for connection…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if let progressMessage {
+                        Text(progressMessage)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -275,37 +293,38 @@ struct GenerationCardView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Progress Jitter (D-10, D-11, D-12)
-    // CLAUDE.md: Swift Concurrency — NO Timer allowed
-    private func startProgressJitter() {
-        // Seed from elapsed time, capped at 0.80 so the jitter has room to breathe
-        let expectedDuration: Double = item.model.contains("grok") ? 20 : (item.model.contains("mini") ? 75 : 45)
-        let elapsed = Date().timeIntervalSince(item.createdAt)
-        animatedProgress = min(elapsed / expectedDuration * 0.85, 0.80)
+    // MARK: - Progress Curve (D-10, D-11, D-12)
+    // CLAUDE.md: Swift Concurrency — NO Timer allowed.
+    // Deterministic, elapsed-time-driven curve replaces the old random-jitter loop: progress is
+    // a pure function of wall-clock time since item.createdAt, so it never freezes, never jumps,
+    // and self-corrects across backgrounding/foregrounding for free.
+    private func startProgressTicking() {
+        let expected = ProgressEstimator.expectedSeconds(for: item)
+        let tau = expected * 0.55
 
-        var timeStuckHigh: Date? = nil
+        func curveValue(at t: TimeInterval) -> Double {
+            0.95 * (1 - exp(-t / tau))
+        }
+
+        // Seed immediately so the ring doesn't sit at 0 for the first tick.
+        animatedProgress = curveValue(at: Date().timeIntervalSince(item.createdAt))
 
         jitterTask = Task {
             while !Task.isCancelled && isActive {
-                // D-11: random sleep interval 1.5–2.5s
-                let sleepSecs = Double.random(in: 1.5...2.5)
-                try? await Task.sleep(for: .seconds(sleepSecs))
-
+                try? await Task.sleep(for: .seconds(0.2))
                 guard !Task.isCancelled else { break }
 
-                // Asymptotic decay: each tick advances a fraction of the remaining gap to 0.99.
-                // Near 0% the increment is large; near 99% it becomes imperceptibly small —
-                // so the bar keeps moving without ever visually freezing at the ceiling.
-                let gap = 0.99 - animatedProgress
-                let increment = gap * Double.random(in: 0.04...0.09)
-                animatedProgress = min(animatedProgress + increment, 0.99)
+                let t = Date().timeIntervalSince(item.createdAt)
+                withAnimation(.linear(duration: 0.2)) {
+                    animatedProgress = curveValue(at: t)
+                }
 
-                // D-12: show delay message after 20s looking "stuck" near the ceiling
-                if animatedProgress >= 0.95 {
-                    if timeStuckHigh == nil { timeStuckHigh = Date() }
-                    if let since = timeStuckHigh, Date().timeIntervalSince(since) > 20 {
-                        showDelayMessage = true
-                    }
+                if t > max(3 * expected, 240) {
+                    progressMessage = "Hang tight — this one might take a while. We'll notify you when it's ready."
+                } else if t > 1.5 * expected {
+                    progressMessage = "Taking a bit longer than usual…"
+                } else {
+                    progressMessage = nil
                 }
             }
         }
