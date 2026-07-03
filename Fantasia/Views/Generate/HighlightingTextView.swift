@@ -42,7 +42,15 @@ struct HighlightingTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        if uiView.textColor != textColor {
+        // Compare against the Coordinator's own record of what we last applied, not
+        // uiView.textColor read back from UIKit: applyHighlighting sets attributedText with a
+        // per-character .foregroundColor attribute, and UITextView's textColor getter doesn't
+        // reliably echo back a value that's `==` the concrete UIColor we set once attributedText
+        // is in play. Comparing against the live getter made this condition true on literally
+        // every SwiftUI re-render, re-running full CoreText layout each time — the main thread
+        // hang report ("screen froze") traced directly back to this loop.
+        if context.coordinator.lastAppliedTextColor != textColor {
+            context.coordinator.lastAppliedTextColor = textColor
             uiView.textColor = textColor
             applyHighlighting(to: uiView, text: text)
         }
@@ -100,6 +108,7 @@ struct HighlightingTextView: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: HighlightingTextView
+        var lastAppliedTextColor: UIColor?
 
         init(_ parent: HighlightingTextView) {
             self.parent = parent
