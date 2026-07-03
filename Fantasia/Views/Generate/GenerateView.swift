@@ -61,6 +61,7 @@ struct GenerateView: View {
     // Keys are a token's inner text (lowercased, no brackets) — feeds HighlightingTextView's
     // inline pill rendering (Issue 6). Rebuilt whenever a reference is added/removed/renamed.
     @State private var tokenThumbnails: [String: UIImage] = [:]
+    @State private var tokenThumbnailsGeneration = 0
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
@@ -1348,9 +1349,15 @@ struct GenerateView: View {
             }
         }
         tokenThumbnails = result
+        // Generation guard: a slow fetch from a previous rebuild can land after a newer rebuild
+        // and insert a stale image under a reused inner-text key (e.g. remix restores "bob" then
+        // a different image is attached under the same token before the old fetch resolves).
+        tokenThumbnailsGeneration += 1
+        let gen = tokenThumbnailsGeneration
         for item in pending {
             Task {
                 if let cached = await ThumbnailCache.shared.image(for: item.cacheKey) {
+                    guard gen == tokenThumbnailsGeneration else { return }
                     tokenThumbnails[item.inner] = cached
                     return
                 }
@@ -1358,6 +1365,7 @@ struct GenerateView: View {
                       let downloaded = UIImage(data: data) else { return }
                 let thumb = downloaded.preparingThumbnail(of: CGSize(width: 80, height: 80)) ?? downloaded
                 ThumbnailCache.shared[item.cacheKey] = thumb
+                guard gen == tokenThumbnailsGeneration else { return }
                 tokenThumbnails[item.inner] = thumb
             }
         }

@@ -240,7 +240,13 @@ struct HighlightingTextView: UIViewRepresentable {
 
     private static func pillImage(inner: String, thumbnail: UIImage?, accent: UIColor, font: UIFont) -> UIImage {
         let hasThumb = thumbnail != nil
-        let cacheKey = "\(inner)|\(hasThumb)|\(hexString(accent))" as NSString
+        // Bug fix: the cache key must identify *which* thumbnail, not just whether one is
+        // present — otherwise removing a reference and attaching a different image under the
+        // same token inner text (e.g. "Image1") returns the stale cached pill. ObjectIdentifier
+        // is stable per UIImage instance, and thumbnails come from ThumbnailCache, which returns
+        // stable instances per key.
+        let thumbId = thumbnail.map { String(UInt(bitPattern: ObjectIdentifier($0))) } ?? "none"
+        let cacheKey = "\(inner)|\(thumbId)|\(hexString(accent))" as NSString
         if let cached = pillCache.object(forKey: cacheKey) { return cached }
 
         let textFont = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
