@@ -49,7 +49,6 @@ struct GenerateView: View {
     @State private var selectedAspectRatio = "9:16"
     @State private var audioEnabled = true
     @State private var selectedImageResolution: ImageResolution = .square
-    @State private var showOptions = false
 
     // Multi-reference attachment state
     @State private var selectedPickerItem: PhotosPickerItem?
@@ -161,26 +160,6 @@ struct GenerateView: View {
         creditManager.entitlementLevel != .none && creditManager.creditsBalance < generationCost
     }
 
-    private var hasNonDefaultSettings: Bool {
-        if selectedMode == "AI Image" {
-            return selectedImageResolution != .square ||
-                selectedModel != ModelCatalog.image[0].id
-        }
-        return selectedMode != "AI Video" ||
-        selectedModel != "bytedance/seedance-2.0-mini" ||
-        selectedDuration != 6 ||
-        selectedResolution != "720p" ||
-        selectedAspectRatio != "9:16" ||
-        !audioEnabled
-    }
-
-    /// Compact "current settings at a glance" label shown on the closed Options pill.
-    private var optionsSummary: String {
-        if selectedMode == "AI Image" {
-            return "Options · \(selectedImageResolution.rawValue)"
-        }
-        return "Options · \(selectedResolution) · \(selectedDuration)s · \(selectedAspectRatio)"
-    }
 
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
         ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
@@ -614,23 +593,7 @@ struct GenerateView: View {
 
     private var creditCostLabel: some View {
         Group {
-            if hasInsufficientCredits {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 9, weight: .bold))
-                    Text("Insufficient credits")
-                        .font(.caption.weight(.bold))
-                }
-                .foregroundStyle(Color.red)
-            } else if missingRequiredImage {
-                HStack(spacing: 4) {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 9, weight: .bold))
-                    Text("Attach an image to use this model")
-                        .font(.caption.weight(.bold))
-                }
-                .foregroundStyle(theme.textSecondary)
-            } else if isAnyUploading {
+            if isAnyUploading {
                 HStack(spacing: 4) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: accent))
@@ -640,6 +603,9 @@ struct GenerateView: View {
                         .foregroundStyle(theme.textSecondary)
                 }
             } else {
+                // Always shows the cost, even with insufficient credits or a missing required
+                // image — those become temporary tap-time errors (see showError in the submit
+                // action) rather than a persistent label state.
                 HStack(spacing: 4) {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 9, weight: .bold))
@@ -656,11 +622,7 @@ struct GenerateView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            hasInsufficientCredits ? "Insufficient credits" :
-            missingRequiredImage ? "Attach an image to use this model" :
-            "Estimated cost \(generationCost) credits"
-        )
+        .accessibilityLabel("Estimated cost \(generationCost) credits")
     }
 
     // MARK: - Prompt bar
@@ -772,40 +734,44 @@ struct GenerateView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 2)
 
-                // Submit
-                Button {
-                    promptFocused = false
-                    guard creditManager.entitlementLevel != .none else {
-                        showPaywall = true
-                        return
-                    }
-                    // A ref whose upload/backfill failed leaves its [ImageN] token in the prompt
-                    // with no URL to back it — block submit rather than silently dropping it
-                    // (Issue 4b: previously dispatchGeneration filtered these out unannounced).
-                    guard !attachedReferences.contains(where: { !$0.isReady }) else {
-                        showError("A reference didn't finish uploading — remove it or wait and try again.")
-                        return
-                    }
-                    guard !isSubmitDisabled else { return }
-                    Task { await dispatchGeneration() }
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            LinearGradient(
-                                colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
-                                         Color(red: 0.357, green: 0.561, blue: 0.851)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                // Submit + credit cost, stacked so the cost sits directly under the arrow.
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button {
+                        promptFocused = false
+                        guard creditManager.entitlementLevel != .none else {
+                            showPaywall = true
+                            return
+                        }
+                        // A ref whose upload/backfill failed leaves its [ImageN] token in the prompt
+                        // with no URL to back it — block submit rather than silently dropping it
+                        // (Issue 4b: previously dispatchGeneration filtered these out unannounced).
+                        guard !attachedReferences.contains(where: { !$0.isReady }) else {
+                            showError("A reference didn't finish uploading — remove it or wait and try again.")
+                            return
+                        }
+                        guard !isSubmitDisabled else { return }
+                        Task { await dispatchGeneration() }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
+                                             Color(red: 0.357, green: 0.561, blue: 0.851)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .clipShape(Circle())
-                        .opacity(isSubmitDisabled ? 0.5 : 1.0)
+                            .clipShape(Circle())
+                            .opacity(isSubmitDisabled ? 0.5 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitDisabled)
+
+                    creditCostLabel
                 }
-                .buttonStyle(.plain)
-                .disabled(isSubmitDisabled)
                 .padding(.trailing, 10)
                 .padding(.top, 10)
                 .padding(.bottom, 2)
@@ -817,59 +783,18 @@ struct GenerateView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
 
-            // Options row
-            HStack(spacing: 6) {
-                Button {
-                    withAnimation(.spring(duration: 0.3, bounce: 0.1)) { showOptions.toggle() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11, weight: .medium))
-                        ZStack(alignment: .leading) {
-                            // Sized against the longest realistic summary (not literal "Options")
-                            // so the pill doesn't reflow width as settings change.
-                            Text("Options · 1080p · 12s · 16:9").opacity(0).lineLimit(1)
-                            if showOptions {
-                                Text("Hide").transition(.opacity)
-                            } else {
-                                Text(optionsSummary).transition(.opacity).lineLimit(1)
-                            }
-                        }
-                        .font(.caption.weight(.medium))
-                        if !showOptions, selectedMode != "AI Image", !audioEnabled {
-                            Image(systemName: "speaker.slash.fill")
-                                .font(.system(size: 9, weight: .medium))
-                        }
-                    }
-                    .foregroundStyle(hasNonDefaultSettings ? theme.textPrimary : theme.textTertiary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(hasNonDefaultSettings ? theme.surfaceStrong : theme.surface)
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(hasNonDefaultSettings ? theme.surfaceStrongBorder : theme.surfaceBorder, lineWidth: 0.5))
-                }
-                .buttonStyle(PressableButtonStyle())
-                .layoutPriority(0)
-                Spacer(minLength: 4)
-                creditCostLabel
-                    .layoutPriority(1)
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 6)
-
-            if showOptions {
-                GenerationOptionsPanel(
-                    selectedMode: $selectedMode,
-                    selectedModel: $selectedModel,
-                    selectedDuration: $selectedDuration,
-                    selectedResolution: $selectedResolution,
-                    selectedAspectRatio: $selectedAspectRatio,
-                    audioEnabled: $audioEnabled,
-                    selectedImageResolution: $selectedImageResolution
-                )
-                .padding(.bottom, 8)
-                .transition(.opacity)
-            }
+            // Always-visible settings pill row — Options/Hide toggle removed (D-decision:
+            // one always-visible horizontally-scrollable row, no collapse state).
+            GenerationOptionsPanel(
+                selectedMode: $selectedMode,
+                selectedModel: $selectedModel,
+                selectedDuration: $selectedDuration,
+                selectedResolution: $selectedResolution,
+                selectedAspectRatio: $selectedAspectRatio,
+                audioEnabled: $audioEnabled,
+                selectedImageResolution: $selectedImageResolution
+            )
+            .padding(.vertical, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .background(theme.elevatedBackground)
