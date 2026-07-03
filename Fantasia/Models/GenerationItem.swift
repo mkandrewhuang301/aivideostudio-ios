@@ -138,6 +138,22 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     /// The presigned R2 URL for the completed media (video or image).
     /// Backend returns image URLs under the `video_url` key to avoid a breaking API change.
     var completedMediaUrl: String? { videoUrl }
+
+    /// Shared failure copy — used by both GenerationCardView (card) and GenerationDetailSheet
+    /// (detail sheet) so the two surfaces never drift out of sync with each other.
+    var failureMessage: String? {
+        guard status == .failed else { return nil }
+        switch failureReason {
+        case "content_policy":
+            return "Your prompt may not adhere to our community guidelines. Your credits have been refunded."
+        case "copyright":
+            return "Seedance blocked this prompt — it may reference copyrighted characters or a real person. Try describing an original character instead. Your credits have been refunded."
+        case "provider_error":
+            return "The video service hit a temporary problem. Your credits have been refunded — please try again."
+        default:
+            return "An error has occurred. Your credits have been refunded."
+        }
+    }
 }
 
 // Paginated list response from GET /api/generations

@@ -215,7 +215,7 @@ struct GenerationCardView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28))
                     .foregroundStyle(.orange)
-                Text(failureMessage(for: item.failureReason))
+                Text(item.failureMessage ?? "An error has occurred. Your credits have been refunded.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -244,20 +244,6 @@ struct GenerationCardView: View {
             withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                 shimmerOffset = 1.5
             }
-        }
-    }
-
-    // MARK: - Failure Message Helper
-    private func failureMessage(for reason: String?) -> String {
-        switch reason {
-        case "content_policy":
-            return "Your prompt may not adhere to our community guidelines. Your credits have been refunded."
-        case "copyright":
-            return "This generation couldn't be completed due to potential copyright reasons. Your credits have been refunded."
-        case "provider_error":
-            return "The video service hit a temporary problem. Your credits have been refunded — please try again."
-        default:
-            return "An error has occurred. Your credits have been refunded."
         }
     }
 

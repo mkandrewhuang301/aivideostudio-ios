@@ -98,11 +98,21 @@ struct GenerationDetailSheet: View {
                     } else {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.white.opacity(0.05))
-                            .frame(height: 120)
+                            .frame(minHeight: 120)
                             .overlay {
-                                Image(systemName: item.status == .failed ? "exclamationmark.triangle" : "clock")
-                                    .font(.system(size: 28))
-                                    .foregroundStyle(.secondary)
+                                VStack(spacing: 8) {
+                                    Image(systemName: item.status == .failed ? "exclamationmark.triangle" : "clock")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(item.status == .failed ? .orange : .secondary)
+                                    if let message = item.failureMessage {
+                                        Text(message)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 20)
+                                    }
+                                }
+                                .padding(.vertical, 12)
                             }
                     }
 
