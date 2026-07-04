@@ -58,6 +58,16 @@ struct LibraryThumbnailView: View {
             .clipped()
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
+            .overlay(alignment: .bottomLeading) {
+                if item.isFavorite {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
             .contextMenu {
                 Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
                 Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }

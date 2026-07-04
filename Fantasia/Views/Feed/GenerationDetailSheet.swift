@@ -28,6 +28,7 @@ struct GenerationDetailSheet: View {
     @State private var tmpShareUrl: URL? = nil
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
+    @State private var isFavorite: Bool = false
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -182,6 +183,17 @@ struct GenerationDetailSheet: View {
                                 circleActionButton("tag", "Name") {
                                     generationManager.pendingNameAsReference = item
                                 }
+                                circleActionButton(isFavorite ? "heart.fill" : "heart", isFavorite ? "Favorited" : "Favorite") {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    isFavorite.toggle()                      // optimistic local icon flip
+                                    let target = isFavorite
+                                    Task {
+                                        await generationManager.setFavorite(id: item.id, isFavorite: target)
+                                        if let updated = generationManager.generations.first(where: { $0.id == item.id }) {
+                                            isFavorite = updated.isFavorite
+                                        }
+                                    }
+                                }
                             }
                             .frame(maxWidth: .infinity)
 
@@ -322,6 +334,7 @@ struct GenerationDetailSheet: View {
         .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .onAppear { isFavorite = item.isFavorite }
     }
 
     // MARK: - Action helpers
