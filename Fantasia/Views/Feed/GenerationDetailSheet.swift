@@ -288,9 +288,13 @@ struct GenerationDetailSheet: View {
         }
         .sheet(isPresented: $showShare) {
             if let url = tmpShareUrl {
-                ActivityViewController(activityItems: [url])
-                    .presentationDetents([.medium])
-                    .ignoresSafeArea()
+                // T19: full-height (system default, no .presentationDetents) instead of .medium,
+                // and a typed ShareableMedia item instead of the bare URL — gives extensions an
+                // unambiguous file type + a proper preview header instead of an empty/generic one.
+                ActivityViewController(activityItems: [
+                    ShareableMedia(url: url, isVideo: !item.isImage, thumbnail: thumbnail ?? cachedImage)
+                ])
+                .ignoresSafeArea()
             }
         }
         .alert("Delete this \(item.isImage ? "image" : "video")?", isPresented: $showDeleteAlert) {
