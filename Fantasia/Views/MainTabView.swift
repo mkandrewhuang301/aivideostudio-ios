@@ -23,14 +23,14 @@ struct MainTabView: View {
             ZStack(alignment: .bottom) {
                 TabView(selection: $selectedTab) {
                     HomeView(onNavigateToGenerate: { selectedTab = 1 })
-                        .safeAreaInset(edge: .top, spacing: 0) { sharedTopBar }
+                        .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(0)
                     NavigationStack { GenerateView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(1)
                     LibraryView()
-                        .safeAreaInset(edge: .top, spacing: 0) { sharedTopBar }
+                        .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(2)
                 }
@@ -91,8 +91,18 @@ struct MainTabView: View {
 
     // MARK: - Shared top bar (used by all non-Generate tabs)
 
-    private var sharedTopBar: some View {
-        HStack(alignment: .center, spacing: 11) {
+    // `compact` shrinks the bar for Library only (Home keeps the full-size bar) — Library's
+    // date-header grid sits directly under this bar, and at full height it read as an
+    // oversized gap above the first date row.
+    private func topBar(compact: Bool = false) -> some View {
+        let tapSize: CGFloat = compact ? 38 : 44
+        let logoSize: CGFloat = compact ? 21 : 26
+        let titleFont: CGFloat = compact ? 14 : 16.5
+        let creditIndicatorSize: CGFloat = compact ? 26 : 32
+        let topPad: CGFloat = compact ? 0 : 2
+        let bottomPad: CGFloat = compact ? 4 : 10
+
+        return HStack(alignment: .center, spacing: 11) {
             Button { drawer.open() } label: {
                 VStack(spacing: 5) {
                     Rectangle().frame(width: 22, height: 2)
@@ -100,7 +110,7 @@ struct MainTabView: View {
                     Rectangle().frame(width: 22, height: 2)
                 }
                 .foregroundStyle(theme.textPrimary)
-                .frame(width: 44, height: 44)
+                .frame(width: tapSize, height: tapSize)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -109,9 +119,9 @@ struct MainTabView: View {
                 Image("LogoMark")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 26, height: 26)
+                    .frame(width: logoSize, height: logoSize)
                 Text("Fantasia")
-                    .font(.system(size: 16.5, weight: .semibold))
+                    .font(.system(size: titleFont, weight: .semibold))
                     .foregroundStyle(theme.textPrimary)
                     .kerning(-0.16)
             }
@@ -126,16 +136,16 @@ struct MainTabView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(theme.textSecondary)
                         .contentTransition(.numericText())
-                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: creditIndicatorSize)
                 }
-                .frame(height: 44)
+                .frame(height: tapSize)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
         }
         .padding(.horizontal, 18)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
+        .padding(.top, topPad)
+        .padding(.bottom, bottomPad)
         .background(theme.elevatedBackground.ignoresSafeArea(edges: .top))
     }
 
