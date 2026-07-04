@@ -74,7 +74,7 @@ struct LibraryView: View {
                             if generationManager.nextCursor != nil {
                                 ProgressView()
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 20)
+                                    .frame(height: 64)
                                     .onAppear { Task { await generationManager.loadNextPage() } }
                             }
                         }
@@ -92,12 +92,14 @@ struct LibraryView: View {
                                 .frame(height: 600)
                                 .offset(y: -600)
                         }
+                        // T7: pin the LazyVStack to its exact precomputed total height. Every
+                        // section's true height is computable synchronously (dayHeader is now a
+                        // fixed 36pt, the footer a fixed 64pt, tile heights come from known aspect
+                        // ratios + colWidth) — with a constant contentSize the scroll indicator is
+                        // stable and long-press-draggable, laziness inside is preserved.
+                        .frame(height: totalContentHeight(gridWidth: gridWidth), alignment: .top)
                     }
-                    // Lazy-estimation jitter: sections have wildly different heights, so the
-                    // indicator's position/size (computed from unmaterialized-content estimates)
-                    // visibly jumps as sections materialize. Scrolling itself is unaffected —
-                    // only the indicator lies, so hide it (Photos does the same for its grid).
-                    .scrollIndicators(.hidden)
+                    .scrollIndicators(.visible)
                     // Brackets touch-down -> touch-up with isInteracting so
                     // GenerationManager.mergeLatest() buffers new items instead of
                     // prepending mid-touch (ported from the old FeedView pattern).
@@ -180,7 +182,7 @@ struct LibraryView: View {
                 .frame(height: 1)
         }
         .padding(.horizontal, sectionHPad)
-        .padding(.vertical, 8)
+        .frame(height: 36)
         .background(theme.elevatedBackground)
         // NOTE: do NOT hang an oversized overscroll-cover rect off this header. A previous fix
         // did exactly that (600pt rect offset upward as each header's background) and, because
@@ -188,6 +190,28 @@ struct LibraryView: View {
         // the entire section above it — hiding "Today"'s header and grid, and hiding grid cells
         // until the next header pinned into the overlay layer. The overscroll cover now lives on
         // the LazyVStack itself (see body), where a background can never occlude content.
+    }
+
+    // T7: exact total content height for the LazyVStack — see the .frame(height:) call site in
+    // body for why this must be exact (a content-derived height reintroduces the scroll
+    // indicator jitter this fix removes; an under/over-estimate clips or gaps the grid).
+    private func totalContentHeight(gridWidth: CGFloat) -> CGFloat {
+        let colWidth = (gridWidth - tileSpacing) / 2
+        var h: CGFloat = 0
+        let groups = groupedByDay
+        for group in groups {
+            let (left, right) = distributeToColumns(group.items, colWidth: colWidth)
+            h += 36  // header
+            h += max(columnHeight(left, colWidth: colWidth), columnHeight(right, colWidth: colWidth))
+        }
+        h += 20 * CGFloat(max(0, groups.count - 1))          // LazyVStack spacing between sections
+        // NOTE: spacing also applies between a section's header and its grid content if they are
+        // separate LazyVStack children. They are inside `Section {} header: {}`, so spacing applies
+        // between header and content too — VERIFY empirically and add
+        // `+ 20 * CGFloat(groups.count)` if the bottom is clipped by exactly that amount.
+        if generationManager.nextCursor != nil { h += 64 + 20 } // footer + its preceding spacing
+        h += 100  // existing .padding(.bottom, 100)
+        return h
     }
 
     // MARK: - 2-column masonry (fixed column width, native-ratio heights)
