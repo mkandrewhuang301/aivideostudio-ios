@@ -268,6 +268,21 @@ final class GenerationManager {
         generations.removeAll { $0.id == id }
     }
 
+    // Optimistic favorite toggle (FAV-01): flip local state now, revert if the PATCH fails.
+    func setFavorite(id: String, isFavorite: Bool) async {
+        guard let index = generations.firstIndex(where: { $0.id == id }) else { return }
+        let previous = generations[index].isFavorite
+        generations[index].isFavorite = isFavorite
+        do {
+            try await APIClient.shared.setFavorite(id: id, isFavorite: isFavorite)
+        } catch {
+            print("[GenerationManager] setFavorite error: \(error)")
+            if let i = generations.firstIndex(where: { $0.id == id }) {
+                generations[i].isFavorite = previous
+            }
+        }
+    }
+
     // Optimistic-submit support (Issue 5) — see GenerateView.dispatchGeneration().
     func insertLocalPlaceholder(_ item: GenerationItem) {
         generations.insert(item, at: 0)

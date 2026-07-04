@@ -165,6 +165,12 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/generations/\(id)", method: "DELETE")
     }
 
+    // PATCH /api/generations/:id/favorite — FAV-01
+    func setFavorite(id: String, isFavorite: Bool) async throws {
+        let body = try JSONEncoder().encode(["is_favorite": isFavorite])
+        try await authorizedRequestNoContent(path: "api/generations/\(id)/favorite", method: "PATCH", body: body)
+    }
+
     // D-23, D-24: POST /api/uploads — multipart/form-data file upload
     // Returns UploadResponse.url (1-hour R2 presigned URL for use as reference_images[0] or reference_videos[0])
     // RESEARCH.md Pattern 9: manually construct multipart boundary (no Alamofire dependency needed)

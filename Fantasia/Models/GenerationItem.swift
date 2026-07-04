@@ -67,6 +67,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     let createdAt: Date
     let completedAt: Date?
     let failureReason: String?   // 'content_policy' | 'copyright' | 'generic_error' | nil (legacy rows)
+    var isFavorite: Bool         // FAV-01: the one mutable field — flipped in place by GenerationManager for optimistic UI
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -81,6 +82,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         case createdAt = "created_at"
         case completedAt = "completed_at"
         case failureReason = "failure_reason"
+        case isFavorite = "is_favorite"
     }
 
     // Custom init: decodes mediaType with a .video fallback for existing rows that have no
@@ -99,6 +101,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         failureReason = try container.decodeIfPresent(String.self, forKey: .failureReason)
+        isFavorite = (try? container.decodeIfPresent(Bool.self, forKey: .isFavorite)) ?? false
     }
 
     /// Builds a client-only placeholder row for optimistic submit — shown instantly while the
@@ -126,6 +129,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         self.createdAt = createdAt
         self.completedAt = nil
         self.failureReason = nil
+        self.isFavorite = false
     }
 
     /// True when this item is an unconfirmed optimistic row inserted by dispatchGeneration(),
