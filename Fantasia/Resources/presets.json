@@ -1,0 +1,246 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "preset_id": "cinema-studio",
+      "title": "Cinema Studio",
+      "subtitle": "Coming Soon",
+      "section": "hero",
+      "sort_order": 1,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/cinema-studio/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/cinema-studio/loop-v1.mp4",
+        "aspect": "16:9"
+      }
+    },
+    {
+      "preset_id": "try-on",
+      "title": "AI Try-On",
+      "subtitle": null,
+      "section": "photo_tools",
+      "sort_order": 1,
+      "status": "live",
+      "badge": "NEW",
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/try-on/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/try-on/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Your Photo", "source": "my_look_default" },
+          { "kind": "image", "label": "Garment Photo", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 }
+    },
+    {
+      "preset_id": "hairstyle",
+      "title": "Hairstyle",
+      "subtitle": null,
+      "section": "photo_tools",
+      "sort_order": 2,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/hairstyle/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/hairstyle/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Your Photo", "source": "any" }
+        ],
+        "style_grid": [
+          { "id": "bob", "label": "Bob" },
+          { "id": "pixie-cut", "label": "Pixie Cut" },
+          { "id": "buzz", "label": "Buzz" },
+          { "id": "curtain-bangs", "label": "Curtain Bangs" },
+          { "id": "perm", "label": "Perm" },
+          { "id": "layered", "label": "Layered" },
+          { "id": "slicked-back", "label": "Slicked Back" },
+          { "id": "undercut", "label": "Undercut" },
+          { "id": "soft-waves", "label": "Soft Waves" },
+          { "id": "french-braid", "label": "French Braid" },
+          { "id": "box-braids", "label": "Box Braids" },
+          { "id": "curly", "label": "Curly" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 }
+    },
+    {
+      "preset_id": "enhancer",
+      "title": "AI Enhance",
+      "subtitle": null,
+      "section": "photo_tools",
+      "sort_order": 3,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/enhancer/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/enhancer/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "upscale",
+      "model": "bytedance/video-upscaler",
+      "input_schema": {
+        "slots": [
+          { "kind": "video", "label": "Video to Enhance", "source": "any" }
+        ]
+      },
+      "cost": { "type": "per_second", "credits_per_sec": 0.344, "max_seconds": 60 }
+    },
+    {
+      "preset_id": "faceswap",
+      "title": "Faceswap",
+      "subtitle": "Coming Soon",
+      "section": "photo_tools",
+      "sort_order": 4,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/faceswap/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/faceswap/loop-v1.mp4",
+        "aspect": "3:4"
+      }
+    },
+    {
+      "preset_id": "anime-yourself",
+      "title": "Anime Yourself",
+      "subtitle": null,
+      "section": "effects",
+      "sort_order": 1,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/anime-yourself/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/anime-yourself/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Your Photo", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 }
+    },
+    {
+      "preset_id": "polaroid",
+      "title": "Polaroid Hug",
+      "subtitle": null,
+      "section": "effects",
+      "sort_order": 2,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/polaroid/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/polaroid/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Photo 1", "source": "any" },
+          { "kind": "image", "label": "Photo 2", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 }
+    },
+    {
+      "preset_id": "animate-old-photo",
+      "title": "Animate Old Photo",
+      "subtitle": null,
+      "section": "effects",
+      "sort_order": 3,
+      "status": "live",
+      "badge": "HOT",
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/animate-old-photo/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/animate-old-photo/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "video",
+      "model": "bytedance/seedance-2.0-mini",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Old Photo", "source": "any" }
+        ]
+      },
+      "cost": { "type": "per_second", "credits_per_sec": 9, "max_seconds": 10 }
+    },
+    {
+      "preset_id": "motion-transfer",
+      "title": "Motion Transfer",
+      "subtitle": null,
+      "section": "effects",
+      "sort_order": 4,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/motion-transfer/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/motion-transfer/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "avatar",
+      "model": "bytedance/dreamactor-m2.0",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Portrait Photo", "source": "any" },
+          { "kind": "video", "label": "Driving Video", "source": "any" }
+        ]
+      },
+      "cost": { "type": "per_second", "credits_per_sec": 5, "max_seconds": 30 }
+    },
+    {
+      "preset_id": "avatar-center",
+      "title": "Avatar Center",
+      "subtitle": "Your AI twin, coming soon",
+      "section": "avatar_center",
+      "sort_order": 1,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/avatar-center/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/avatar-center/loop-v1.mp4",
+        "aspect": "16:9"
+      }
+    },
+    {
+      "preset_id": "gorilla-vlogs",
+      "title": "Gorilla Vlogs",
+      "subtitle": "Coming Soon",
+      "section": "shows_vlogs",
+      "sort_order": 1,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/gorilla-vlogs/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/gorilla-vlogs/loop-v1.mp4",
+        "aspect": "3:4"
+      }
+    },
+    {
+      "preset_id": "fruit-island",
+      "title": "Fruit Island",
+      "subtitle": "Coming Soon",
+      "section": "shows_vlogs",
+      "sort_order": 2,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/fruit-island/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/fruit-island/loop-v1.mp4",
+        "aspect": "3:4"
+      }
+    }
+  ]
+}
