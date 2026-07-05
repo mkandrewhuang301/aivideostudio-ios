@@ -58,7 +58,7 @@ struct LibraryThumbnailView: View {
             .clipped()
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
-            .overlay(alignment: .bottomLeading) {
+            .overlay(alignment: .bottomTrailing) {
                 if item.isFavorite {
                     Image(systemName: "heart.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -68,9 +68,24 @@ struct LibraryThumbnailView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .contextMenu {
-                Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
-                Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+            // Tap-triggered Menu, not .contextMenu — a long-press context menu installs a
+            // recognizer over the WHOLE tile that has to hold every touch to decide whether it's
+            // becoming a menu preview, which eats fast swipes starting on media (confirmed
+            // regression: fixed once by removing .contextMenu, reintroduced later, never
+            // re-verified for scroll feel). A Menu confines that to the small button itself.
+            .overlay(alignment: .topTrailing) {
+                Menu {
+                    Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
+                    Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.35), in: Circle())
+                }
+                .menuOrder(.fixed)
+                .padding(6)
             }
             .onAppear {
                 if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {

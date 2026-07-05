@@ -43,7 +43,9 @@ struct GenerateView: View {
     // T2: keyboard-overlap tracking so the composer rides the keyboard during interactive
     // scroll-to-dismiss (UIKeyboardLayoutGuide tracks the drag frame-by-frame; SwiftUI's own
     // keyboard safe-area avoidance only animates begin/end and stays put mid-drag).
-    @State private var keyboardOverlap: CGFloat = 0
+    // Only used by the reference panel's home-indicator padding (panel is shown while the
+    // keyboard is DOWN, so this is never polluted by keyboard avoidance). NOT used for composer
+    // keyboard positioning — see .planning/notes/keyboard-composer-architecture.md (Config C).
     @State private var bottomSafeAreaInset: CGFloat = 0
 
     // D-18: option state with defaults
@@ -166,13 +168,6 @@ struct GenerateView: View {
         creditManager.entitlementLevel != .none && creditManager.creditsBalance < generationCost
     }
 
-    // T2: when the keyboard is fully hidden, keyboardLayoutGuide.topAnchor sits at the bottom
-    // safe-area edge, so raw keyboardOverlap reads ~34 (home indicator height), not 0. Subtract
-    // the actual safe-area inset so "keyboard hidden" resolves to 0 overlap.
-    private var effectiveKeyboardOverlap: CGFloat {
-        max(0, keyboardOverlap - bottomSafeAreaInset)
-    }
-
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
         ("Anime girl",           "sparkles",           "Anime girl sitting in a sunlit cafe in the afternoon, soft golden light streaming through the window"),
         ("Underwater city",      "water.waves",        "An ancient sunken city lit by bioluminescent coral, camera drifting through archways"),
@@ -293,8 +288,10 @@ struct GenerateView: View {
                     }
             }
         )
-        .background(KeyboardHeightReader(keyboardOverlap: $keyboardOverlap))
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // Keyboard positioning: SwiftUI's built-in avoidance ALONE lifts the bottom safeAreaInset
+        // composer above the keyboard (Config C — see .planning/notes/keyboard-composer-architecture.md).
+        // Do NOT add .ignoresSafeArea(.keyboard) + manual keyboardOverlap padding here: that
+        // double-counts the lift and reopens the big gap between the prompt bar and the keyboard.
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
@@ -314,15 +311,12 @@ struct GenerateView: View {
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showReferencePanel)
-            // T2: driven by KeyboardHeightReader instead of the old binary promptFocused switch —
-            // tracks interactive scroll-to-dismiss frame-by-frame. The interactiveSpring smooths
-            // the non-interactive show/hide jump (focus change); during an active drag the value
-            // already changes continuously so the spring mostly rides along rather than lagging.
-            .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.86), value: keyboardOverlap)
-            // T8b: when the reference panel is open it sits flush above the bottom safe area
-            // (its own internal padding — see referencePanel — accounts for the home indicator);
-            // otherwise unchanged from T2's keyboard-tracking formula.
-            .padding(.bottom, showReferencePanel ? 0 : max(65, effectiveKeyboardOverlap + 2))
+            .animation(.easeOut(duration: 0.22), value: promptFocused)
+            // Constant base padding only — SwiftUI's keyboard avoidance adds the keyboard lift on
+            // top (Config C). Focused: 6pt breathing room above the keyboard. Unfocused: 65pt to
+            // clear the custom tab bar. Panel open: flush above the safe area (panel has its own
+            // home-indicator padding). See .planning/notes/keyboard-composer-architecture.md.
+            .padding(.bottom, showReferencePanel ? 0 : (promptFocused ? 6 : 65))
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
@@ -330,12 +324,18 @@ struct GenerateView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
             )
+            // Dismiss on a SMALL downward flick on the composer — fires mid-gesture (.onChanged),
+            // not only on release, so a short downward movement drops the keyboard + composer
+            // right away (Config C's .animation(value: promptFocused) animates them down together).
+            // Guarded to a clearly-vertical-downward vector so horizontal pill-row scrolls and
+            // taps aren't stolen. This is dismiss LOGIC only — it does NOT move the composer's
+            // resting position (frozen). See .planning/notes/keyboard-composer-architecture.md.
             .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        // Predominantly-downward drag on the composer = dismiss, like Messages.
-                        if value.translation.height > 30,
-                           value.translation.height > abs(value.translation.width) {
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard promptFocused else { return }
+                        if value.translation.height > 14,
+                           value.translation.height > abs(value.translation.width) * 1.5 {
                             promptFocused = false
                         }
                     }
@@ -375,6 +375,20 @@ struct GenerateView: View {
                 // so this branch only clears mentionQuery when the panel was never opened.
                 mentionQuery = nil
             }
+        }
+        .onChange(of: promptFocused) { _, focused in
+            // Refocusing the composer while the @-reference panel is open (tapping straight
+            // back into the text view instead of using the panel's select/cancel actions) used
+            // to leave the panel "open" but buried under the keyboard — every subsequent "@"
+            // then couldn't reopen it, and the stranded 300pt panel read as a growing blank gap
+            // between the textbox and the keyboard. Treat refocus as cancel: drop the bare "@"
+            // trigger, clear the query, close the panel.
+            guard focused, showReferencePanel else { return }
+            if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
+                promptText.replaceSubrange(range, with: "")
+            }
+            mentionQuery = nil
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
         }
         .onChange(of: selectedPickerItem) { _, newItem in
             Task { await handlePickerSelection(newItem) }
@@ -746,30 +760,53 @@ struct GenerateView: View {
                 // and can never diverge (the old two-layer ghost-text ZStack let SwiftUI's Text
                 // and the TextField wrap long words at different points, landing the caret
                 // mid-word). UITextView handles its own internal scrolling past maxHeight.
-                ZStack(alignment: .topLeading) {
-                    if promptText.isEmpty {
-                        Text("Describe a scene...")
-                            .font(.body)
-                            .foregroundStyle(theme.textTertiary)
-                            .allowsHitTesting(false)
-                            .padding(.top, 0.5)
+                // .leading (vertical-center) alignment, not .topLeading: the text view reports
+                // its intrinsic ~22pt height via sizeThatFits and gets centered inside the 44pt
+                // frame below, so a top-aligned placeholder sat ~11pt above the actual caret.
+                // Centering both keeps placeholder and caret on the same line.
+                // Wrapping VStack leaves the ZStack's own frame/padding untouched (placeholder/
+                // caret positioning stays exactly as tuned above) and adds a separate, purely
+                // decorative-turned-tappable spacer below it that stretches to match the row's
+                // height (set by the taller paperclip/button columns). Taps landing there focus
+                // the composer instead of falling through to the background's dismiss-tap — that
+                // dead zone previously belonged to no view at all. Doesn't overlap the ZStack's
+                // own bounds, so HighlightingTextView's native tap-to-place-caret is unaffected.
+                VStack(spacing: 0) {
+                    ZStack(alignment: .leading) {
+                        if promptText.isEmpty {
+                            Text("Describe a scene...")
+                                .font(.body)
+                                .foregroundStyle(theme.textTertiary)
+                                .allowsHitTesting(false)
+                        }
+                        HighlightingTextView(
+                            text: $promptText,
+                            selectedRange: $promptTextRange,
+                            isFocused: Binding(get: { promptFocused }, set: { promptFocused = $0 }),
+                            contentHeight: $promptTextHeight,
+                            accentColor: UIColor(accent),
+                            textColor: UIColor(theme.textPrimary),
+                            tokenThumbnails: tokenThumbnails,
+                            onTokenDeleted: { inner in dereferenceToken(inner) },
+                            onDragDismiss: { promptFocused = false }
+                        )
+                        .frame(height: max(44, promptTextHeight))
                     }
-                    HighlightingTextView(
-                        text: $promptText,
-                        selectedRange: $promptTextRange,
-                        isFocused: Binding(get: { promptFocused }, set: { promptFocused = $0 }),
-                        contentHeight: $promptTextHeight,
-                        accentColor: UIColor(accent),
-                        textColor: UIColor(theme.textPrimary),
-                        tokenThumbnails: tokenThumbnails,
-                        onTokenDeleted: { inner in dereferenceToken(inner) }
-                    )
-                    .frame(height: max(44, promptTextHeight))
+                    // leading 0 (was 4) moves the prompt text closer to the paperclip; trailing 8
+                    // (was 15) pushes the wrap/cutoff further right so text gets more width.
+                    .padding(.leading, 0)
+                    .padding(.trailing, 8)
+                    // Placeholder+caret vertical position: smaller top padding = higher (was 16→10→4).
+                    // Bottom 4 (was 14) shrinks the gap between the last text line and the divider.
+                    // See .planning/notes/keyboard-composer-architecture.md.
+                    .padding(.top, 4)
+                    .padding(.bottom, 4)
+
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { promptFocused = true }
                 }
-                .padding(.leading, 4)
-                .padding(.trailing, 15)
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+                .frame(maxHeight: .infinity, alignment: .top)
 
                 // Submit + credit cost, stacked so the cost sits directly under the arrow.
                 VStack(alignment: .trailing, spacing: 6) {
@@ -821,15 +858,19 @@ struct GenerateView: View {
                     creditCostLabel
                 }
                 .padding(.trailing, 10)
-                .padding(.top, 10)
-                .padding(.bottom, 2)
+                .padding(.bottom, 8)
+                // Bottom-anchored (not top) so the arrow+credits track the bottom of the row as
+                // the text box grows across lines (up to its ~4-line max), landing next to the
+                // divider instead of staying stranded near the top on a tall prompt.
+                .frame(maxHeight: .infinity, alignment: .bottom)
             }
 
             Rectangle()
                 .fill(theme.divider)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 5)
+                // 1 (was 2) — tighter gap between the prompt text and the pills row.
+                .padding(.vertical, 1)
 
             // Always-visible settings pill row — Options/Hide toggle removed (D-decision:
             // one always-visible horizontally-scrollable row, no collapse state).
@@ -842,7 +883,8 @@ struct GenerateView: View {
                 audioEnabled: $audioEnabled,
                 selectedImageResolution: $selectedImageResolution
             )
-            .padding(.vertical, 6)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .background(theme.elevatedBackground)

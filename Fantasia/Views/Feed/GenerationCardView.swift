@@ -76,10 +76,25 @@ struct GenerationCardView: View {
                 .aspectRatio(cardAspectRatio, contentMode: .fit)
                 .overlay { mediaContent }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .contextMenu {
+                // Tap-triggered Menu, not .contextMenu — a long-press context menu installs a
+                // recognizer over the WHOLE media box that has to hold every touch to decide
+                // whether it's becoming a menu preview, which eats fast swipes starting on media
+                // (confirmed regression: fixed once by removing .contextMenu, reintroduced later,
+                // never re-verified for scroll feel). A Menu confines that to the small button.
+                .overlay(alignment: .topTrailing) {
                     if item.status == .completed {
-                        Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
-                        Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+                        Menu {
+                            Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
+                            Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 24, height: 24)
+                                .background(.black.opacity(0.35), in: Circle())
+                        }
+                        .menuOrder(.fixed)
+                        .padding(8)
                     }
                 }
                 .padding(.horizontal, 14)

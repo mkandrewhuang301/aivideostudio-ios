@@ -176,7 +176,7 @@ struct GenerationOptionsPanel: View {
                     let audioIsFixed = selectedModel == "xai/grok-imagine-video-1.5"
                     VStack(spacing: 4) {
                         Text("AUDIO")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 9.5, weight: .semibold))
                             .foregroundStyle(theme.textTertiary)
                             .kerning(0.4)
                         Button {
@@ -216,7 +216,7 @@ struct GenerationOptionsPanel: View {
     private var modelPill: some View {
         VStack(spacing: 4) {
             Text("MODEL")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(theme.textTertiary)
                 .kerning(0.4)
             Button {
@@ -256,7 +256,7 @@ struct GenerationOptionsPanel: View {
     ) -> some View {
         VStack(spacing: 4) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(theme.textTertiary)
                 .kerning(0.4)
             Menu {
@@ -275,9 +275,9 @@ struct GenerationOptionsPanel: View {
 
 
     private func pillLabel(icon: String, value: String, showChevron: Bool, isActive: Bool) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(isActive ? accent : theme.textSecondary)
                 .frame(width: 15, alignment: .center)
                 .contentTransition(.symbolEffect(.replace))
@@ -291,8 +291,8 @@ struct GenerationOptionsPanel: View {
                     .foregroundStyle(theme.textTertiary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
         .background(isActive ? accent.opacity(0.16) : theme.surface)
         .clipShape(Capsule())
         .overlay(Capsule().stroke(isActive ? accent.opacity(0.45) : theme.surfaceBorder, lineWidth: 1))
