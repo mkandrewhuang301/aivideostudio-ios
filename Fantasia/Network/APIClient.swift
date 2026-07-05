@@ -259,11 +259,17 @@ struct RatesResponse: Decodable {
     let rates: [String: [String: [String: Double]]]
     let imageCosts: [String: Int]?   // flat credits per image model; optional for backward compat
     let grokImagineRate: Int?        // flat credits/sec for xai/grok-imagine-video-1.5; optional for backward compat
+    // D-21/Pitfall 1: previously served but dropped by the client — DreamActor (Motion Transfer)
+    // and video-upscaler (Enhancer) rates, both already on the cents scale server-side.
+    let dreamactorRate: Double?      // flat credits/sec for bytedance/dreamactor-m2.0
+    let upscalerRates: [String: [String: [String: Double]]]?  // [tier: [resolution: [fpsBand: credits/sec]]]
 
     enum CodingKeys: String, CodingKey {
         case rates
         case imageCosts = "imageCosts"
         case grokImagineRate = "grokImagineRate"
+        case dreamactorRate = "dreamactorRate"
+        case upscalerRates = "upscalerRates"
     }
 }
 

@@ -79,6 +79,7 @@
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F82A13068AFCD7F664A93D4 /* Preset.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
+		F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -163,6 +164,7 @@
 		F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationOptionsPanel.swift; sourceTree = "<group>"; };
 		F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenVideoPlayerView.swift; sourceTree = "<group>"; };
 		F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetRegistryManager.swift; sourceTree = "<group>"; };
 		FF98D41F7BDC89D993199016 /* GenerationCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationCardView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -214,6 +216,7 @@
 			isa = PBXGroup;
 			children = (
 				F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */,
+				FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */,
 				085B4D75DB663F0A8A93228C /* RatesManager.swift */,
 			);
 			path = Network;
@@ -590,6 +593,7 @@
 				1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */,
 				B622ACBB68150822FA0175A8 /* PlanCatalog.swift in Sources */,
 				EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */,
+				F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */,
 				353E782F3022A63807F459DE /* PressableButtonStyle.swift in Sources */,
 				EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
