@@ -46,28 +46,65 @@ struct GenerationCardView: View {
     @State private var revealCompleted = false    // gates media reveal after fill-to-100 animation
     @State private var cachedImage: UIImage? = nil  // for image generations
 
+    // D-11/T-09.1-03: preset badge + Remix-into-sheet fork. Local registry instance mirrors
+    // HomeView's own `@State private var registry = PresetRegistryManager()` — registry rows are
+    // cached to disk (bundled fallback + snapshot), so this is instant, no extra network fetch.
+    @State private var presetRegistry = PresetRegistryManager()
+    @State private var presetInputThumbs: [ReferenceUploadItem] = []   // re-signed via GET /api/uploads
+    @State private var presetForRemix: Preset?                         // drives fullScreenCover(item:)
+    @State private var remixPrefillSlots: [PresetSlotInput?] = []
+    @State private var isPreparingRemix = false
+
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
     private var isActive: Bool { item.status == .pending || item.status == .processing }
+
+    /// The registry row matching this generation's stamped preset_id, if any.
+    private var matchedPreset: Preset? {
+        guard let presetId = item.params.presetId else { return nil }
+        return presetRegistry.presets.first { $0.presetId == presetId }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Truncated prompt (tap → detail popup, D-29). Chevron + primary text color signal
             // tappability the platform-native way (Settings rows, Music lists).
+            // D-11/T-09.1-03: preset-run rows NEVER render item.prompt (the expanded server
+            // template) — badge + input thumbnails replace the prompt row entirely.
             Button(action: onTapDetail) {
-                HStack(spacing: 8) {
-                    Text(item.prompt ?? "No prompt")
-                        .font(.callout)
-                        .foregroundStyle(theme.textPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    referenceThumbnailRow
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.textSecondary)
+                if item.isPreset {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(accent)
+                        Text(matchedPreset?.title ?? "Preset")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        presetInputThumbnailRow
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                } else {
+                    HStack(spacing: 8) {
+                        Text(item.prompt ?? "No prompt")
+                            .font(.callout)
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        referenceThumbnailRow
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -104,7 +141,7 @@ struct GenerationCardView: View {
             // on swipe-to-delete + the detail sheet only — a destructive accent on every card's
             // action row was unwarranted given those two paths already exist.
             HStack(spacing: 8) {
-                actionButton("arrow.2.squarepath", "Remix", action: onRemix)
+                actionButton("arrow.2.squarepath", "Remix", action: handleRemixTap)
                 actionButton("arrow.clockwise", "Regen", action: onRegenerate)
                 actionButton("paperclip", "Reference", action: onReference)
             }
@@ -124,10 +161,18 @@ struct GenerationCardView: View {
             }
         }
 
+        // D-11/T-09.1-03: preset Remix reopens PresetInputSheet prefilled from this row's stored
+        // preset_input_upload_ids (re-signed via the existing GET /api/uploads reference
+        // machinery) — never the composer (remixGenerationRequested is never posted on this path).
+        .fullScreenCover(item: $presetForRemix) { preset in
+            PresetInputSheet(preset: preset, prefillSlots: remixPrefillSlots)
+        }
+
         // Progress jitter lifecycle (D-10, D-11) — Task.sleep, not Timer
         .onAppear {
             loadThumbnail()
             loadCachedImage()
+            loadPresetInputThumbnails()
             if isActive {
                 startProgressTicking()
             } else if item.status == .completed {
@@ -157,6 +202,54 @@ struct GenerationCardView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Preset badge thumbnails (D-11/T-09.1-03)
+    // Shows the slot media the preset run actually used, in place of the freeform reference
+    // thumbnails above — sourced by re-signing `params.preset_input_upload_ids` against the
+    // user's own upload library (same GET /api/uploads machinery the Remix fork below reuses),
+    // since preset rows don't populate `reference_urls` (that field is driven by `ref_upload_ids`,
+    // which the presetResolver never stamps — see aivideostudio-backend generations.ts).
+    @ViewBuilder
+    private var presetInputThumbnailRow: some View {
+        if !presetInputThumbs.isEmpty {
+            let visible = Array(presetInputThumbs.prefix(3))
+            let overflow = presetInputThumbs.count - visible.count
+            HStack(spacing: 3) {
+                ForEach(Array(visible.enumerated()), id: \.offset) { index, upload in
+                    presetInputThumbnail(upload, index: index)
+                }
+                if overflow > 0 {
+                    Text("+\(overflow)")
+                        .font(.caption2)
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private func presetInputThumbnail(_ upload: ReferenceUploadItem, index: Int) -> some View {
+        Group {
+            if upload.isVideo {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
+                                 Color(red: 0.416, green: 0.561, blue: 0.878)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            } else {
+                CachedThumbnailImage(cacheKey: item.id + "-presetinput-\(index)", url: URL(string: upload.url))
+            }
+        }
+        .frame(width: 18, height: 18)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Reference thumbnail row (Issue 4)
@@ -319,6 +412,60 @@ struct GenerationCardView: View {
             withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                 shimmerOffset = 1.5
             }
+        }
+    }
+
+    // MARK: - Preset Remix fork (D-11/T-09.1-03)
+
+    /// Loads this row's preset input thumbnails once, if this is a preset run. Re-signs the
+    /// stored `preset_input_upload_ids` against GET /api/uploads (existing reference machinery —
+    /// same endpoint the composer's reference picker already uses) rather than trusting any
+    /// stale URL, since presigned URLs rotate per fetch (documented project landmine).
+    private func loadPresetInputThumbnails() {
+        guard item.isPreset, let ids = item.params.presetInputUploadIds, !ids.isEmpty,
+              presetInputThumbs.isEmpty else { return }
+        Task {
+            guard let uploads = try? await APIClient.shared.fetchMyUploads() else { return }
+            let map = Dictionary(uploads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            presetInputThumbs = ids.compactMap { map[$0] }
+        }
+    }
+
+    /// Remix fork: preset rows never post `remixGenerationRequested` (which routes freeform
+    /// remix to the composer) — they reopen PresetInputSheet directly, prefilled from this row's
+    /// stored slot uploads. Freeform rows keep the existing composer-remix behavior unchanged.
+    private func handleRemixTap() {
+        if item.isPreset {
+            presentPresetRemixSheet()
+        } else {
+            onRemix()
+        }
+    }
+
+    private func presentPresetRemixSheet() {
+        guard !isPreparingRemix,
+              let presetId = item.params.presetId,
+              let preset = presetRegistry.presets.first(where: { $0.presetId == presetId }) else { return }
+        isPreparingRemix = true
+        let ids = item.params.presetInputUploadIds ?? []
+        Task {
+            defer { isPreparingRemix = false }
+            var slots: [PresetSlotInput?] = Array(repeating: nil, count: ids.count)
+            if let uploads = try? await APIClient.shared.fetchMyUploads() {
+                let map = Dictionary(uploads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                for (index, id) in ids.enumerated() {
+                    guard let match = map[id] else { continue }
+                    slots[index] = PresetSlotInput(
+                        uploadId: match.id,
+                        url: match.url,
+                        thumbnail: nil,
+                        isUploading: false,
+                        durationSeconds: nil
+                    )
+                }
+            }
+            remixPrefillSlots = slots
+            presetForRemix = preset   // triggers .fullScreenCover(item:) above
         }
     }
 

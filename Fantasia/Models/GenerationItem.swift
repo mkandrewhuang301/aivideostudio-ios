@@ -41,6 +41,11 @@ struct GenerationParams: Codable, Equatable {
     let hasReference: Bool?     // optional — older generations won't have this
     let width: Int?             // image-only: e.g. 1024
     let height: Int?            // image-only: e.g. 1024
+    // D-11/T-09.1-03: stamped by the backend presetResolver (09.1-07) onto preset-run rows only.
+    // Default `= nil` so every existing call site constructing GenerationParams (freeform
+    // generations, PresetInputSheet's own placeholder) keeps compiling unchanged.
+    let presetId: String?                    // registry preset id — nil for freeform generations
+    let presetInputUploadIds: [String]?      // stored slot upload ids — Remix reopens PresetInputSheet prefilled from these
 
     enum CodingKeys: String, CodingKey {
         case resolution
@@ -50,6 +55,30 @@ struct GenerationParams: Codable, Equatable {
         case hasReference = "has_reference"
         case width
         case height
+        case presetId = "preset_id"
+        case presetInputUploadIds = "preset_input_upload_ids"
+    }
+
+    init(
+        resolution: String?,
+        duration: Int?,
+        aspectRatio: String?,
+        audioEnabled: Bool?,
+        hasReference: Bool?,
+        width: Int?,
+        height: Int?,
+        presetId: String? = nil,
+        presetInputUploadIds: [String]? = nil
+    ) {
+        self.resolution = resolution
+        self.duration = duration
+        self.aspectRatio = aspectRatio
+        self.audioEnabled = audioEnabled
+        self.hasReference = hasReference
+        self.width = width
+        self.height = height
+        self.presetId = presetId
+        self.presetInputUploadIds = presetInputUploadIds
     }
 }
 
@@ -138,6 +167,11 @@ struct GenerationItem: Codable, Identifiable, Equatable {
 
     /// True when this item is an image generation (not a video).
     var isImage: Bool { mediaType == .image }
+
+    /// True when this generation was created from a preset (registry `preset_id` stamped by the
+    /// backend presetResolver). Gates prompt-row suppression on the feed card/detail sheet and
+    /// forks Remix to reopen PresetInputSheet instead of the composer (D-11/T-09.1-03).
+    var isPreset: Bool { params.presetId != nil }
 
     /// The presigned R2 URL for the completed media (video or image).
     /// Backend returns image URLs under the `video_url` key to avoid a breaking API change.
