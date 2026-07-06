@@ -384,6 +384,14 @@ struct GenerationRequestBody: Encodable {
     let referenceVideoUploadIds: [String?]?
     let referenceImageGenerationIds: [String?]?
     let referenceVideoGenerationIds: [String?]?
+    // Preset submission (09.1-07, D-10/D-11): set only when the request originates from
+    // PresetInputSheet. nil on every freeform composer submission — CodingKeys below omit
+    // nil fields from the encoded JSON, so this is fully additive and does not change the
+    // shape of existing freeform requests. Default `= nil` here means the synthesized
+    // memberwise initializer keeps these two parameters optional, so every existing
+    // GenerationRequestBody(...) call site (GenerateView's composer) compiles unchanged.
+    let presetId: String? = nil
+    let presetInputUploadIds: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
@@ -400,5 +408,7 @@ struct GenerationRequestBody: Encodable {
         case referenceVideoUploadIds = "reference_video_upload_ids"
         case referenceImageGenerationIds = "reference_image_generation_ids"
         case referenceVideoGenerationIds = "reference_video_generation_ids"
+        case presetId = "preset_id"
+        case presetInputUploadIds = "preset_input_upload_ids"
     }
 }
