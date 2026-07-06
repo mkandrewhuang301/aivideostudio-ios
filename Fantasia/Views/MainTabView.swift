@@ -12,6 +12,7 @@ struct MainTabView: View {
     @State private var selectedTab = 1   // open on Generate by default
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
+    @State private var selectedPreset: Preset?
 
     private let tabBarHeight: CGFloat = 74
     private let bottomLift: CGFloat = 16
@@ -22,7 +23,10 @@ struct MainTabView: View {
 
             ZStack(alignment: .bottom) {
                 TabView(selection: $selectedTab) {
-                    HomeView(onNavigateToGenerate: { selectedTab = 1 })
+                    HomeView(
+                        onNavigateToGenerate: { selectedTab = 1 },
+                        onSelectPreset: { selectedPreset = $0 }
+                    )
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(0)
@@ -87,18 +91,20 @@ struct MainTabView: View {
                 .presentationDetents([.fraction(0.62)])
                 .presentationDragIndicator(.hidden)
         }
+        .fullScreenCover(item: $selectedPreset) { preset in
+            PresetInputSheet(preset: preset)
+                .environment(creditManager)
+                .environment(generationManager)
+        }
     }
 
     // MARK: - Shared top bar (used by all non-Generate tabs)
 
-    // `compact` shrinks the bar for Library only (Home keeps the full-size bar) — Library's
-    // date-header grid sits directly under this bar, and at full height it read as an
-    // oversized gap above the first date row.
+    // The bar itself (icons, logo, title, credit ring, tap targets) is identical everywhere —
+    // Home, Generate, and Library must look the same. `compact` ONLY trims the vertical padding
+    // for Library, whose date-header grid sits directly under the bar and otherwise reads as an
+    // oversized gap above the first date row. It must never shrink the controls.
     private func topBar(compact: Bool = false) -> some View {
-        let tapSize: CGFloat = compact ? 38 : 44
-        let logoSize: CGFloat = compact ? 21 : 26
-        let titleFont: CGFloat = compact ? 14 : 16.5
-        let creditIndicatorSize: CGFloat = compact ? 26 : 32
         let topPad: CGFloat = compact ? 0 : 2
         let bottomPad: CGFloat = compact ? 4 : 10
 
@@ -110,7 +116,7 @@ struct MainTabView: View {
                     Rectangle().frame(width: 22, height: 2)
                 }
                 .foregroundStyle(theme.textPrimary)
-                .frame(width: tapSize, height: tapSize)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -119,9 +125,9 @@ struct MainTabView: View {
                 Image("LogoMark")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: logoSize, height: logoSize)
+                    .frame(width: 26, height: 26)
                 Text("Fantasia")
-                    .font(.system(size: titleFont, weight: .semibold))
+                    .font(.system(size: 16.5, weight: .semibold))
                     .foregroundStyle(theme.textPrimary)
                     .kerning(-0.16)
             }
@@ -136,9 +142,9 @@ struct MainTabView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(theme.textSecondary)
                         .contentTransition(.numericText())
-                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: creditIndicatorSize)
+                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
                 }
-                .frame(height: tapSize)
+                .frame(height: 44)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
