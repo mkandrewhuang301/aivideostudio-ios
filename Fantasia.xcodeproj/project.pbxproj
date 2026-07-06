@@ -39,6 +39,7 @@
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
+		5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
 		668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F87E75370CA3504E80E2E52 /* SignUpView.swift */; };
 		67EC63A23BC782891B037701 /* ManageSubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 918EF20B16E3D634C91E9668 /* ManageSubscriptionView.swift */; };
@@ -98,6 +99,7 @@
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
 		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
+		1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInputSheet.swift; sourceTree = "<group>"; };
 		237303656EFC3D6EFF8E850F /* PresetTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetTileView.swift; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 				53184DDF5C85560F33C29D1E /* Onboarding */,
 				BAA9F733EF9638C0A3B62619 /* Paywall */,
 				9754CE97948C45B64BE85462 /* Player */,
+				2852844D5C638484A9E6C72A /* Presets */,
 				A5E948275525FAE94171DD07 /* Shared */,
 			);
 			path = Views;
@@ -224,6 +227,14 @@
 				085B4D75DB663F0A8A93228C /* RatesManager.swift */,
 			);
 			path = Network;
+			sourceTree = "<group>";
+		};
+		2852844D5C638484A9E6C72A /* Presets */ = {
+			isa = PBXGroup;
+			children = (
+				1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */,
+			);
+			path = Presets;
 			sourceTree = "<group>";
 		};
 		310917A575E9D26FDCBE414E /* Home */ = {
@@ -600,6 +611,7 @@
 				1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */,
 				B622ACBB68150822FA0175A8 /* PlanCatalog.swift in Sources */,
 				EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */,
+				5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */,
 				F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */,
 				2D68F00878203FF45BFE152D /* PresetTileView.swift in Sources */,
 				353E782F3022A63807F459DE /* PressableButtonStyle.swift in Sources */,

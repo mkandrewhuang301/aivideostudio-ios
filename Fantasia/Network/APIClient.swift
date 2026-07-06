@@ -387,11 +387,14 @@ struct GenerationRequestBody: Encodable {
     // Preset submission (09.1-07, D-10/D-11): set only when the request originates from
     // PresetInputSheet. nil on every freeform composer submission — CodingKeys below omit
     // nil fields from the encoded JSON, so this is fully additive and does not change the
-    // shape of existing freeform requests. Default `= nil` here means the synthesized
-    // memberwise initializer keeps these two parameters optional, so every existing
-    // GenerationRequestBody(...) call site (GenerateView's composer) compiles unchanged.
-    let presetId: String? = nil
-    let presetInputUploadIds: [String]? = nil
+    // shape of existing freeform requests. Default `= nil` + `var` (not `let`) here is
+    // required for Swift's synthesized memberwise initializer to keep these two parameters
+    // optional-with-default rather than dropping them from the initializer entirely (a `let`
+    // with a default value is excluded from the memberwise init's parameter list altogether) —
+    // this keeps every existing GenerationRequestBody(...) call site (GenerateView's composer)
+    // compiling unchanged while still letting PresetInputSheet pass explicit values.
+    var presetId: String? = nil
+    var presetInputUploadIds: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
