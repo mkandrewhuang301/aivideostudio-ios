@@ -68,6 +68,7 @@
 		C2DC853F0FAFD1A9D4CD22D7 /* presets.json in Resources */ = {isa = PBXBuildFile; fileRef = AFB7654B0746207F617ED9A4 /* presets.json */; };
 		CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */; };
 		D159637964125A3A1F0361EC /* GenerationDetailPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14394B580AF055B8F4BDF02 /* GenerationDetailPagerView.swift */; };
+		D5B57AF6D5862CDBAA8414E8 /* LoopPlayerPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */; };
 		D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2752AF2A62657566B211B9B /* SplashView.swift */; };
 		D9372B8A631BBC6C9CEFE70A /* ActivityViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 901A7F56B670204A64832BCF /* ActivityViewController.swift */; };
 		D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A65D5512DE91F2D2D1BC1B /* SignInView.swift */; };
@@ -142,6 +143,7 @@
 		AD06EBDDED984EC354B17EC5 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		AFB7654B0746207F617ED9A4 /* presets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = presets.json; sourceTree = "<group>"; };
 		B6F014871EA8B9875D754906 /* PressableButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressableButtonStyle.swift; sourceTree = "<group>"; };
+		B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopPlayerPool.swift; sourceTree = "<group>"; };
 		BB17EB669A20752389935966 /* SocialSignInButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialSignInButton.swift; sourceTree = "<group>"; };
 		BD7F4652AE34C76E2B3A7C74 /* GlassTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTextField.swift; sourceTree = "<group>"; };
 		BFE46B720B299E8E732C4EA9 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
@@ -226,6 +228,7 @@
 			isa = PBXGroup;
 			children = (
 				0226A3C8D078EB4BB18B608E /* HomeView.swift */,
+				B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
@@ -578,6 +581,7 @@
 				CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */,
 				4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */,
 				80F186C893BEAC38CD5430DC /* ListSnapshotStore.swift in Sources */,
+				D5B57AF6D5862CDBAA8414E8 /* LoopPlayerPool.swift in Sources */,
 				85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */,
 				67EC63A23BC782891B037701 /* ManageSubscriptionView.swift in Sources */,
 				B8BF8DA5F9DA655818EDEFE8 /* MediaLibraryManager.swift in Sources */,
