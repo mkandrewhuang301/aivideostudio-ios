@@ -22,6 +22,7 @@
 		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
 		2B37491440F3B799AC6DB3FC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7137D3DC45A60C75C3109168 /* GoogleSignInSwift */; };
+		2D68F00878203FF45BFE152D /* PresetTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237303656EFC3D6EFF8E850F /* PresetTileView.swift */; };
 		2DBDB72DBEFE96C2A467E888 /* VideoCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */; };
 		32104E944D1A0E14E9D90D02 /* CircularCreditIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */; };
 		3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0545853EA07D5F8565556FF /* OnboardingVideoView.swift */; };
@@ -97,6 +98,7 @@
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
 		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
+		237303656EFC3D6EFF8E850F /* PresetTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetTileView.swift; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -229,6 +231,7 @@
 			children = (
 				0226A3C8D078EB4BB18B608E /* HomeView.swift */,
 				B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */,
+				237303656EFC3D6EFF8E850F /* PresetTileView.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
@@ -598,6 +601,7 @@
 				B622ACBB68150822FA0175A8 /* PlanCatalog.swift in Sources */,
 				EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */,
 				F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */,
+				2D68F00878203FF45BFE152D /* PresetTileView.swift in Sources */,
 				353E782F3022A63807F459DE /* PressableButtonStyle.swift in Sources */,
 				EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,

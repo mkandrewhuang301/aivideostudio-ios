@@ -1,40 +1,81 @@
 // HomeView.swift
 // Fantasia
-// Discovery home — featured model banner, quick-create cards, style preset grid, recent videos.
-// Placeholder gradients fill in for real video thumbnails until content is available.
+// Registry-driven Home (D-01 replace): one continuous scroll rendering PresetRegistryManager
+// rows in the v10-locked section order — Cinema Studio hero, Photo (merged photo_tools +
+// effects, D-02 revision 2026-07-05), Avatar Center (full-width feature card), Shows & Vlogs.
+// Every card is a poster-first autoplaying loop (D-08); SOON tiles/pills are registry-driven
+// from `status` alone (D-04) — nothing here is hardcoded per-preset.
 
 import SwiftUI
-import AVFoundation
 
 struct HomeView: View {
-    @Environment(CreditManager.self) private var creditManager
     @Environment(ThemeManager.self) private var theme
+    @State private var registry = PresetRegistryManager()
 
     var onNavigateToGenerate: () -> Void
+    /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
+    /// standalone (D-10 sheet doesn't exist yet in this wave).
+    var onSelectPreset: (Preset) -> Void = { _ in }
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
+
+    // MARK: - Registry buckets (D-02 order)
+
+    private var heroPreset: Preset? {
+        registry.presets.first { $0.section == "hero" }
+    }
+
+    /// D-02 revision 2026-07-05: "Photo Tools" and "Effects" merge into one "Photo" grid —
+    /// the registry still carries the two original section strings (this parallel wave hasn't
+    /// updated the backend/bundled schema), so the merge happens here, client-side.
+    private var photoPresets: [Preset] {
+        registry.presets
+            .filter { $0.section == "photo_tools" || $0.section == "effects" }
+            .sorted { lhs, rhs in
+                if lhs.section != rhs.section { return lhs.section == "photo_tools" }
+                return lhs.sortOrder < rhs.sortOrder
+            }
+    }
+
+    private var avatarCenterPreset: Preset? {
+        registry.presets.first { $0.section == "avatar_center" }
+    }
+
+    private var showsPresets: [Preset] {
+        registry.presets
+            .filter { $0.section == "shows_vlogs" }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
 
     var body: some View {
         ZStack {
             background
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    heroBanner
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let heroPreset {
+                        heroCard(heroPreset)
+                    }
 
-                    quickCreateSection
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
+                    if !photoPresets.isEmpty {
+                        sectionHeader("Photo")
+                        photoGrid
+                    }
 
-                    featuredStylesSection
-                        .padding(.top, 28)
+                    if let avatarCenterPreset {
+                        sectionHeader("Avatar Center")
+                        avatarCenterRow(avatarCenterPreset)
+                    }
 
+                    if !showsPresets.isEmpty {
+                        sectionHeader("Shows & Vlogs")
+                        showsRow
+                    }
                 }
                 .padding(.bottom, 110)
             }
         }
+        .task { await registry.loadIfNeeded() }
     }
 
     // MARK: - Background
@@ -52,306 +93,200 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Hero Banner
+    // MARK: - Section header (D-05: bold title left, grey "See all" right, uniform everywhere)
 
-    private var heroBanner: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Placeholder gradient — replace with video thumbnail when available
-            RoundedRectangle(cornerRadius: 20)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.22, green: 0.14, blue: 0.48),
-                            Color(red: 0.10, green: 0.07, blue: 0.28),
-                            Color.black
-                        ],
-                        startPoint: .topTrailing,
-                        endPoint: .bottomLeading
-                    )
-                )
-                .frame(height: 240)
-                .overlay(heroBannerDecoration)
-
-            // Bottom gradient fade so text is legible
-            RoundedRectangle(cornerRadius: 20)
-                .fill(
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.85)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(height: 240)
-
-            heroTextContent
-        }
-    }
-
-    private var heroBannerDecoration: some View {
-        ZStack {
-            Circle()
-                .fill(accent.opacity(0.30))
-                .frame(width: 200, height: 200)
-                .blur(radius: 50)
-                .offset(x: 80, y: -40)
-
-            Circle()
-                .fill(Color(red: 0.30, green: 0.55, blue: 0.90).opacity(0.18))
-                .frame(width: 140, height: 140)
-                .blur(radius: 40)
-                .offset(x: 100, y: 40)
-
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(Color.white.opacity(0.10))
-                .offset(x: 80, y: 0)
-        }
-    }
-
-    private var heroTextContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // "NEW MODEL" pill
-            Text("SEEDANCE 2.0 FAST")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.65))
-                .tracking(1.8)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.12), in: Capsule())
-
-            Text("CREATE\nCINEMATIC\nAI VIDEOS")
-                .font(.system(size: 28, weight: .black))
-                .foregroundStyle(.white)
-                .lineSpacing(1)
-
-            Text("Hollywood-grade video from your imagination")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.white.opacity(0.60))
-
-            Button(action: onNavigateToGenerate) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.sparkles")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Start Creating")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 11)
-                .background(accent, in: RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
-        }
-        .padding(20)
-    }
-
-    // MARK: - Quick Create
-
-    private var quickCreateSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("CRAFT YOUR NEXT VIDEO", action: nil)
-
-            HStack(spacing: 12) {
-                quickCreateCard(
-                    title: "Text to Video",
-                    subtitle: "Describe your vision",
-                    icon: "text.alignleft",
-                    colors: [Color(red: 0.35, green: 0.22, blue: 0.72), Color(red: 0.18, green: 0.12, blue: 0.40)]
-                )
-                quickCreateCard(
-                    title: "Image to Video",
-                    subtitle: "Bring a photo to life",
-                    icon: "photo.on.rectangle.angled",
-                    colors: [Color(red: 0.18, green: 0.28, blue: 0.70), Color(red: 0.10, green: 0.16, blue: 0.40)]
-                )
-            }
-        }
-    }
-
-    private func quickCreateCard(title: String, subtitle: String, icon: String, colors: [Color]) -> some View {
-        Button(action: onNavigateToGenerate) {
-            ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(height: 118)
-                    .overlay(alignment: .topTrailing) {
-                        Image(systemName: icon)
-                            .font(.system(size: 38))
-                            .foregroundStyle(Color.white.opacity(0.12))
-                            .padding(14)
-                    }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.white.opacity(0.60))
-                }
-                .padding(14)
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Featured Styles
-
-    private struct StylePreset: Identifiable {
-        let id = UUID()
-        let title: String
-        let subtitle: String
-        let badge: String?
-        let colors: [Color]
-        let icon: String
-    }
-
-    private let stylePresets: [StylePreset] = [
-        StylePreset(
-            title: "Cinematic",
-            subtitle: "Hollywood-grade footage",
-            badge: "NEW",
-            colors: [Color(red: 0.30, green: 0.16, blue: 0.65), Color(red: 0.10, green: 0.07, blue: 0.30)],
-            icon: "film.stack"
-        ),
-        StylePreset(
-            title: "Portrait",
-            subtitle: "Character-focused",
-            badge: nil,
-            colors: [Color(red: 0.60, green: 0.20, blue: 0.28), Color(red: 0.28, green: 0.10, blue: 0.14)],
-            icon: "person.crop.rectangle"
-        ),
-        StylePreset(
-            title: "Nature",
-            subtitle: "Landscapes & environments",
-            badge: nil,
-            colors: [Color(red: 0.12, green: 0.42, blue: 0.32), Color(red: 0.06, green: 0.20, blue: 0.16)],
-            icon: "leaf.fill"
-        ),
-        StylePreset(
-            title: "Urban",
-            subtitle: "City & street scenes",
-            badge: "HOT",
-            colors: [Color(red: 0.52, green: 0.36, blue: 0.08), Color(red: 0.26, green: 0.18, blue: 0.04)],
-            icon: "building.2.fill"
-        ),
-        StylePreset(
-            title: "Abstract",
-            subtitle: "Surreal dreamlike visuals",
-            badge: nil,
-            colors: [Color(red: 0.52, green: 0.12, blue: 0.52), Color(red: 0.26, green: 0.06, blue: 0.26)],
-            icon: "circle.hexagongrid.fill"
-        ),
-        StylePreset(
-            title: "Action",
-            subtitle: "Dynamic motion sequences",
-            badge: nil,
-            colors: [Color(red: 0.62, green: 0.22, blue: 0.08), Color(red: 0.30, green: 0.10, blue: 0.04)],
-            icon: "bolt.fill"
-        ),
-    ]
-
-    private var featuredStylesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("FEATURED STYLES", action: {})
-                .padding(.horizontal, 16)
-
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 10
-            ) {
-                ForEach(stylePresets) { preset in
-                    stylePresetCard(preset)
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-    }
-
-    private func stylePresetCard(_ preset: StylePreset) -> some View {
-        Button(action: onNavigateToGenerate) {
-            ZStack(alignment: .bottomLeading) {
-                // Gradient placeholder (swap for real thumbnail later)
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(LinearGradient(
-                        colors: preset.colors,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .aspectRatio(0.80, contentMode: .fit)
-                    .overlay(
-                        Image(systemName: preset.icon)
-                            .font(.system(size: 42))
-                            .foregroundStyle(Color.white.opacity(0.10))
-                    )
-
-                // Bottom text fade
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.75)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                // Title + subtitle
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(preset.title)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(preset.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.white.opacity(0.60))
-                        .lineLimit(1)
-                }
-                .padding(12)
-
-                // Badge
-                if let badge = preset.badge {
-                    Text(badge)
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(red: 0.72, green: 0.98, blue: 0.32), in: Capsule())
-                        .padding(10)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Section Header
-
-    @ViewBuilder
-    private func sectionHeader(_ title: String, action: (() -> Void)?) -> some View {
+    private func sectionHeader(_ title: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(theme.textTertiary)
-                .tracking(1.6)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(theme.textPrimary)
             Spacer()
-            if let action {
-                Button(action: action) {
-                    Text("See all")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(accent)
+            Text("See all")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.textTertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 20)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - Hero (Cinema Studio)
+
+    private func heroCard(_ preset: Preset) -> some View {
+        Color.clear
+            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+            .overlay {
+                PresetLoopBackground(preset: preset)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topLeading) {
+                Text("FEATURED")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Color(red: 0.91, green: 0.87, blue: 0.99))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+                    .padding(12)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottom) {
+                ZStack(alignment: .bottom) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(preset.title)
+                                .font(.system(size: 19, weight: .bold))
+                                .foregroundStyle(.white)
+                            if let subtitle = preset.subtitle {
+                                Text(subtitle)
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
+                        }
+                        Spacer()
+                        if preset.isSoon {
+                            Text("Coming Soon")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color(red: 0.106, green: 0.086, blue: 0.147))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(.white.opacity(0.92), in: Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 34)
+                    .padding(.bottom, 12)
                 }
-                .buttonStyle(.plain)
+                .allowsHitTesting(false)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipped()
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .contentShape(Rectangle())
+            .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
+    }
+
+    // MARK: - Photo (merged grid)
+
+    private var photoGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+            spacing: 10
+        ) {
+            ForEach(photoPresets) { preset in
+                PresetTileView(preset: preset, onTap: onSelectPreset)
             }
         }
+        .padding(.horizontal, 12)
+    }
+
+    // MARK: - Avatar Center (App Store feature-card idiom — text header, ONE full-width row card)
+
+    private func avatarCenterRow(_ preset: Preset) -> some View {
+        HStack(spacing: 16) {
+            Color.clear
+                .frame(width: 84, height: 84)
+                .overlay {
+                    PresetLoopBackground(preset: preset)
+                        .allowsHitTesting(false)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .clipped()
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(preset.title)
+                    .font(.system(size: 17, weight: .heavy))
+                    .foregroundStyle(theme.textPrimary)
+                if let subtitle = preset.subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if preset.isSoon {
+                Text("SOON")
+                    .font(.system(size: 8.5, weight: .heavy))
+                    .tracking(0.7)
+                    .foregroundStyle(theme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(theme.textTertiary)
+            }
+        }
+        .padding(16)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
+    }
+
+    // MARK: - Shows & Vlogs (two half-width cards)
+
+    private var showsRow: some View {
+        HStack(spacing: 10) {
+            ForEach(showsPresets) { preset in
+                showsCard(preset)
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func showsCard(_ preset: Preset) -> some View {
+        Color.clear
+            .aspectRatio(16.0 / 12.0, contentMode: .fit)
+            .overlay {
+                PresetLoopBackground(preset: preset)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottom) {
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                        .frame(height: 46)
+                    Text(preset.title.uppercased())
+                        .font(.system(size: 9.5, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 7)
+                }
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topLeading) {
+                if preset.isSoon {
+                    Text("SOON")
+                        .font(.system(size: 8, weight: .heavy))
+                        .tracking(0.7)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .saturation(preset.isSoon ? 0.55 : 1)
+            .brightness(preset.isSoon ? -0.12 : 0)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipped()
+            .contentShape(Rectangle())
+            .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
     }
 }
-
 
 #Preview {
     ZStack {
         Color.black.ignoresSafeArea()
         HomeView(onNavigateToGenerate: {})
-            .environment(GenerationManager())
-            .environment(CreditManager())
             .environment(ThemeManager())
     }
 }
