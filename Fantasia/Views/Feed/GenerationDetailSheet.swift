@@ -14,9 +14,10 @@ struct GenerationDetailSheet: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
+    @Environment(RatesManager.self) private var ratesManager
+    @Environment(CreditManager.self) private var creditManager
 
     @State private var showPlayer = false
-    @State private var showShare = false
     @State private var showDeleteAlert = false
     @State private var isSaving = false
     @State private var isDeleting = false
@@ -25,10 +26,14 @@ struct GenerationDetailSheet: View {
     @State private var showSavedToast = false
     @State private var shareError: String? = nil
     @State private var isReporting = false
-    @State private var tmpShareUrl: URL? = nil
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
     @State private var isFavorite: Bool = false
+    // Generic Animate action (09.1-12): turns any completed IMAGE generation into a short video
+    // via bytedance/seedance-2.0-mini, using the completed image itself as the reference.
+    @State private var showAnimateConfirm = false
+    @State private var isAnimating = false
+    @State private var animateError: String? = nil
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -180,6 +185,12 @@ struct GenerationDetailSheet: View {
                                 circleActionButton("paperclip", "Reference") {
                                     handleReference()
                                 }
+                                if item.isImage {
+                                    circleActionButton(isAnimating ? "hourglass" : "wand.and.stars", "Animate") {
+                                        showAnimateConfirm = true
+                                    }
+                                    .disabled(isAnimating)
+                                }
                                 circleActionButton("tag", "Name") {
                                     generationManager.pendingNameAsReference = item
                                 }
@@ -238,7 +249,11 @@ struct GenerationDetailSheet: View {
                                     }
                                     .frame(maxWidth: .infinity).frame(height: 52)
                                     .foregroundStyle(theme.textPrimary)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                                    // theme.surfaceStrong instead of .ultraThinMaterial — the
+                                    // material is nearly invisible on the light background, so
+                                    // this didn't read as a button in light mode.
+                                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
                                 }
                                 .buttonStyle(PressableButtonStyle())
                                 .disabled(isPreparingShare)
@@ -254,6 +269,8 @@ struct GenerationDetailSheet: View {
                                 }
                                 .foregroundStyle(Color.red.opacity(0.85))
                                 .frame(maxWidth: .infinity).frame(height: 44)
+                                .background(Color.red.opacity(theme.isLight ? 0.07 : 0.10), in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.12), lineWidth: 0.5))
                             }
                             .buttonStyle(PressableButtonStyle())
                             .disabled(isDeleting)
@@ -268,6 +285,8 @@ struct GenerationDetailSheet: View {
                                 }
                                 .foregroundStyle(theme.textSecondary)
                                 .frame(maxWidth: .infinity).frame(height: 44)
+                                .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
                             }
                             .buttonStyle(PressableButtonStyle())
                             .disabled(isReporting)
@@ -298,17 +317,6 @@ struct GenerationDetailSheet: View {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
             }
         }
-        .sheet(isPresented: $showShare) {
-            if let url = tmpShareUrl {
-                // T19: full-height (system default, no .presentationDetents) instead of .medium,
-                // and a typed ShareableMedia item instead of the bare URL — gives extensions an
-                // unambiguous file type + a proper preview header instead of an empty/generic one.
-                ActivityViewController(activityItems: [
-                    ShareableMedia(url: url, isVideo: !item.isImage, thumbnail: thumbnail ?? cachedImage)
-                ])
-                .ignoresSafeArea()
-            }
-        }
         .alert("Delete this \(item.isImage ? "image" : "video")?", isPresented: $showDeleteAlert) {
             Button("Delete", role: .destructive) { Task { await handleDelete() } }
             Button("Cancel", role: .cancel) {}
@@ -330,6 +338,24 @@ struct GenerationDetailSheet: View {
             Button("OK", role: .cancel) { shareError = nil }
         } message: {
             Text(shareError ?? "")
+        }
+        .confirmationDialog(
+            "Animate this photo?",
+            isPresented: $showAnimateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Animate for \(animateCostCredits) credits") { Task { await handleAnimate() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Adds gentle, natural motion to this image and creates a new \(animateDurationSeconds)s video.")
+        }
+        .alert("Couldn't Animate", isPresented: Binding(
+            get: { animateError != nil },
+            set: { if !$0 { animateError = nil } }
+        )) {
+            Button("OK", role: .cancel) { animateError = nil }
+        } message: {
+            Text(animateError ?? "")
         }
         .background(theme.background)
         .presentationDetents([.large])
@@ -379,6 +405,87 @@ struct GenerationDetailSheet: View {
         generationManager.pendingReference = item
         NotificationCenter.default.post(name: .referenceGenerationRequested, object: nil)
         isPresented = false
+    }
+
+    // Generic Animate action (09.1-12): turns any completed image into a short video via
+    // bytedance/seedance-2.0-mini, same model/duration/prompt style as the Animate Old Photo
+    // preset — but works on ANY completed image, not just a fresh upload, since it references
+    // this generation's own output directly (reference_image_generation_ids) instead of routing
+    // through a preset/upload flow. Fixed 5s duration matches Animate Old Photo's max_seconds cap.
+    private let animateModel = "bytedance/seedance-2.0-mini"
+    private let animateDurationSeconds = 5
+    private let animatePrompt =
+        "Bring this photo to life with subtle, natural motion — gentle breathing, slight head " +
+        "movement, soft ambient background motion — keep the look and colors intact, no audio."
+
+    private var animateCostCredits: Int {
+        ratesManager.cost(model: animateModel, durationSeconds: animateDurationSeconds, resolution: "720p", hasVideoReference: false)
+    }
+
+    private func handleAnimate() async {
+        guard !isAnimating, let sourceUrl = item.completedMediaUrl else { return }
+        isAnimating = true
+        defer { isAnimating = false }
+
+        let body = GenerationRequestBody(
+            prompt: animatePrompt,
+            model: animateModel,
+            mediaType: "video",
+            duration: animateDurationSeconds,
+            resolution: "720p",
+            aspectRatio: nil,
+            audioEnabled: false,
+            imageAspectRatio: nil,
+            imageQuality: nil,
+            referenceImages: [sourceUrl],
+            referenceVideos: nil,
+            referenceUploadIds: nil,
+            referenceImageUploadIds: nil,
+            referenceVideoUploadIds: nil,
+            referenceImageGenerationIds: [item.id],
+            referenceVideoGenerationIds: nil
+        )
+
+        let placeholderId = "local-" + UUID().uuidString
+        let placeholder = GenerationItem(
+            localPlaceholderId: placeholderId,
+            model: animateModel,
+            mediaType: .video,
+            prompt: animatePrompt,
+            params: GenerationParams(
+                resolution: "720p",
+                duration: animateDurationSeconds,
+                aspectRatio: nil,
+                audioEnabled: false,
+                hasReference: true,
+                width: nil,
+                height: nil
+            ),
+            costCredits: animateCostCredits,
+            referenceUrls: [GenerationReference(url: sourceUrl, isVideo: false)],
+            createdAt: Date()
+        )
+        generationManager.insertLocalPlaceholder(placeholder)
+
+        do {
+            _ = try await APIClient.shared.submitGeneration(body: body)
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            generationManager.startPolling(forceRefresh: true)
+            await creditManager.fetchBalance()
+        } catch let apiError as APIError {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
+                animateError = "Insufficient credits."
+                await creditManager.fetchBalance()
+            } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
+                animateError = "This may not adhere to our community guidelines. Please try again."
+            } else {
+                animateError = "An error has occurred. Please try again."
+            }
+        } catch {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            animateError = "An error has occurred. Please try again."
+        }
     }
 
     private func handleDelete() async {
@@ -485,8 +592,12 @@ struct GenerationDetailSheet: View {
                 let cachedUrl = try await VideoCache.shared.ensureCached(id: item.id, remoteURL: mediaUrl)
                 try FileManager.default.copyItem(at: cachedUrl, to: destUrl)
             }
-            tmpShareUrl = destUrl
-            showShare = true
+            // Presented natively via UIKit (not a SwiftUI .sheet) — see presentActivityViewController
+            // for why: SwiftUI's sheet sizing either forces full-height or collapses the app-icon
+            // grid to "More" under .presentationDetents([.medium]).
+            presentActivityViewController(items: [
+                ShareableMedia(url: destUrl, isVideo: !item.isImage, thumbnail: thumbnail ?? cachedImage)
+            ])
         } catch {
             print("[GenerationDetailSheet] share prepare error: \(error)")
             shareError = "Could not prepare \(item.isImage ? "image" : "video") for sharing: \(error.localizedDescription)"
