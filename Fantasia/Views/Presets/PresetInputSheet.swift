@@ -6,6 +6,15 @@
 // closure (wired outside this plan) and, later, from a preset-badged feed card's Remix action
 // (Plan 08), prefilled via `prefillSlots`.
 //
+// Preset Sheet Redesign: Higgsfield-style, iPhone-native layout — full-bleed cover loop on top,
+// category eyebrow + bold title + server-driven description, adaptive upload area(s) (one large
+// card for single-slot presets, two side-by-side labeled cards for two-slot presets), the
+// existing style grid + optional text field restyled to match, an aspect-ratio control (selectable
+// chips when the registry declares `sheet.aspect_ratios`, else a fixed caption row), and a sticky
+// Generate bar with cost rendered inline next to a sparkle icon. All slot media handling (Menu,
+// thumbnails, video-duration badge, 30s trim-confirm) is UNCHANGED — only its container styling
+// was reworked to fit the new adaptive layout.
+//
 // CRITICAL (CLAUDE.md keyboard/composer freeze): this is a brand-new, standalone modal. It does
 // NOT import or modify GenerateView or any of its frozen text-input/keyboard-avoidance
 // internals (its custom highlighting text view, its keyboard-height reader, or its bottom
@@ -25,6 +34,11 @@ import PhotosUI
 import AVFoundation
 import UIKit
 
+// Shared purple accent used across the app's primary CTAs (GenerationCardView, CreditStoreView,
+// PresetTileView badges) — kept as a local literal here rather than importing a shared constant,
+// consistent with how the rest of this file already inlines it.
+private let presetAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
+
 struct PresetInputSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var theme
@@ -39,6 +53,10 @@ struct PresetInputSheet: View {
     @State private var selectedStyleId: String?
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    // Aspect-ratio chip selection (only rendered when `preset.sheet?.aspectRatios` is non-empty —
+    // GPT-Image-2 presets). Seeded from `sheet.defaultAspectRatio` in `init`; nil for every other
+    // preset, which instead shows a fixed, non-interactive aspect/length/resolution caption.
+    @State private var selectedAspectRatio: String?
 
     // Slot-picker plumbing — one shared picker set, targeted at `activeSlotIndex`.
     @State private var activeSlotIndex: Int?
@@ -63,43 +81,41 @@ struct PresetInputSheet: View {
             initial[index] = value
         }
         _slotInputs = State(initialValue: initial)
+        _selectedAspectRatio = State(initialValue: preset.sheet?.defaultAspectRatio)
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                theme.elevatedBackground.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            theme.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    coverSection
+
+                    VStack(alignment: .leading, spacing: 26) {
+                        headerSection
                         slotsSection
                         textSection
                         styleGridSection
+                        aspectRatioSection
                     }
                     .padding(.horizontal, 18)
-                    .padding(.top, 12)
+                    .padding(.top, 20)
                     .padding(.bottom, 140)
                 }
-
-                VStack {
-                    Spacer()
-                    generateBar
-                }
             }
-            .navigationTitle(preset.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(theme.textPrimary)
-                            .frame(width: 32, height: 32)
-                            .background(theme.surface, in: Circle())
-                    }
-                }
+            .ignoresSafeArea(edges: .top)
+
+            HStack {
+                Spacer()
+                closeButton
+            }
+            .padding(.top, 8)
+            .padding(.trailing, 18)
+
+            VStack {
+                Spacer()
+                generateBar
             }
         }
         .photosPicker(
@@ -153,23 +169,155 @@ struct PresetInputSheet: View {
         }
     }
 
+    // MARK: - Cover (full-bleed poster+loop, ~42% height, bottom scrim)
+
+    private var coverSection: some View {
+        ZStack(alignment: .bottom) {
+            PresetLoopBackground(preset: preset)
+                .allowsHitTesting(false)
+                .clipped()
+
+            LinearGradient(
+                colors: [.clear, .clear, theme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .frame(height: UIScreen.main.bounds.height * 0.42)
+        .clipped()
+    }
+
+    private var closeButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(.black.opacity(0.35), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 0.5))
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    // MARK: - Header (category eyebrow + title + description)
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let eyebrow = categoryEyebrow {
+                Text(eyebrow)
+                    .font(.system(size: 11, weight: .heavy))
+                    .tracking(1.1)
+                    .foregroundStyle(presetAccent)
+            }
+            Text(preset.title)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(theme.textPrimary)
+            if let description = preset.sheet?.description {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Small-caps category label derived from the registry `section` — display-only, never
+    /// sent to the server. Not registry-driven copy (unlike `sheet.*`) since it mirrors the
+    /// fixed taxonomy already used to group Home's tile sections (09.1-CONTEXT.md D-02).
+    private var categoryEyebrow: String? {
+        switch preset.section {
+        case "video_effects": return "VIDEO EFFECT"
+        case "photo_effects": return "PHOTO EFFECT"
+        case "avatar_center": return "AVATAR"
+        case "shows_vlogs": return "SHOWS & VLOGS"
+        case "hero": return "FEATURED"
+        default: return nil
+        }
+    }
+
     // MARK: - Slots
 
+    /// One large card for a single-slot preset; two side-by-side labeled cards for a two-slot
+    /// preset (Motion Transfer, AI Influencer, Polaroid). All Menu/thumbnail/duration-badge/
+    /// trim-confirm logic lives in `slotTile` below, UNCHANGED from before this redesign.
     private var slotsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array((preset.inputSchema?.slots ?? []).enumerated()), id: \.offset) { index, slot in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(slot.label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.textPrimary)
-                    slotTile(index: index, slot: slot)
+        let slots = preset.inputSchema?.slots ?? []
+        return Group {
+            if slots.count == 1, let slot = slots.first {
+                slotTile(index: 0, slot: slot, style: .large)
+            } else if slots.count > 2 {
+                // Clothes Swap (09.1-12): person is the dominant subject — one large card up top
+                // — followed by its outfit reference(s) as a compact row/grid below (1 required +
+                // up to N optional "Add reference" tiles). Generic over slot count, not hardcoded
+                // to exactly 4, so a future preset with a different outfit-slot count still lays
+                // out correctly.
+                VStack(alignment: .leading, spacing: 14) {
+                    if let personSlot = slots.first {
+                        VStack(alignment: .leading, spacing: 8) {
+                            slotLabel(personSlot, index: 0)
+                            slotTile(index: 0, slot: personSlot, style: .large)
+                        }
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
+                        ForEach(Array(slots.enumerated().dropFirst()), id: \.offset) { index, slot in
+                            VStack(alignment: .leading, spacing: 8) {
+                                slotLabel(slot, index: index)
+                                slotTile(index: index, slot: slot, style: .compact)
+                            }
+                        }
+                    }
+                }
+            } else if slots.count == 2 {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(slots.enumerated()), id: \.offset) { index, slot in
+                        VStack(alignment: .leading, spacing: 8) {
+                            slotLabel(slot, index: index)
+                            slotTile(index: index, slot: slot, style: .compact)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                 }
             }
         }
     }
 
-    private func slotTile(index: Int, slot: PresetSlot) -> some View {
+    private func slotLabel(_ slot: PresetSlot, index: Int) -> some View {
+        HStack(spacing: 4) {
+            Text(slot.label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+            if slot.optional {
+                Text("Optional")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            Spacer(minLength: 0)
+            // Optional slots that already hold a value get a small clear ("x") affordance —
+            // required slots are always re-tappable via the Menu instead, so no clear button.
+            if slot.optional, index < slotInputs.count, slotInputs[index] != nil {
+                Button {
+                    slotInputs[index] = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(theme.textTertiary)
+                }
+                .buttonStyle(PressableButtonStyle())
+            }
+        }
+    }
+
+    private enum SlotTileStyle {
+        case large    // single-slot presets — big Higgsfield-style "Upload media" card
+        case compact  // two-slot presets — half-width, side-by-side
+    }
+
+    private func slotTile(index: Int, slot: PresetSlot, style: SlotTileStyle) -> some View {
         let input = index < slotInputs.count ? slotInputs[index] : nil
+        let height: CGFloat = style == .large ? 220 : 160
 
         return Menu {
             Button {
@@ -197,15 +345,22 @@ struct PresetInputSheet: View {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(theme.surface)
                     .overlay(
+                        // Dashed border for the empty state (Higgsfield "Upload media" look) —
+                        // a filled thumbnail switches to a plain hairline border instead.
                         RoundedRectangle(cornerRadius: 16)
-                            .stroke(theme.surfaceBorder, lineWidth: 1)
+                            .strokeBorder(
+                                theme.surfaceBorder,
+                                style: input?.thumbnail == nil
+                                    ? StrokeStyle(lineWidth: 1.25, dash: [6, 5])
+                                    : StrokeStyle(lineWidth: 1)
+                            )
                     )
 
                 if let thumbnail = input?.thumbnail {
                     Image(uiImage: thumbnail)
                         .resizable()
                         .scaledToFill()
-                        .frame(height: 160)
+                        .frame(height: height)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .overlay(alignment: .topTrailing) {
                             if slot.kind == "video", let duration = input?.durationSeconds {
@@ -224,15 +379,20 @@ struct PresetInputSheet: View {
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: slot.kind == "video" ? "video.badge.plus" : "photo.badge.plus")
-                            .font(.system(size: 26, weight: .medium))
+                            .font(.system(size: style == .large ? 30 : 24, weight: .medium))
                             .foregroundStyle(theme.textSecondary)
-                        Text("Tap to add")
-                            .font(.caption.weight(.medium))
+                        Text(style == .large ? "Upload media" : "Tap to add")
+                            .font((style == .large ? Font.subheadline : .caption).weight(.medium))
                             .foregroundStyle(theme.textSecondary)
+                        if style == .large {
+                            Text("Tap to upload \(slot.label.lowercased())")
+                                .font(.caption)
+                                .foregroundStyle(theme.textTertiary)
+                        }
                     }
                 }
             }
-            .frame(height: 160)
+            .frame(height: height)
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(PressableButtonStyle())
@@ -315,14 +475,95 @@ struct PresetInputSheet: View {
         }
     }
 
+    // MARK: - Aspect ratio (selectable chips for GPT-Image-2 presets, else a fixed caption)
+
+    @ViewBuilder
+    private var aspectRatioSection: some View {
+        if let ratios = preset.sheet?.aspectRatios, !ratios.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Aspect ratio")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(theme.textPrimary)
+                    Spacer()
+                    if let resolutionLabel = preset.sheet?.resolutionLabel {
+                        Text(resolutionLabel)
+                            .font(.caption)
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+                HStack(spacing: 10) {
+                    ForEach(ratios, id: \.self) { ratio in
+                        aspectChip(ratio)
+                    }
+                }
+            }
+        } else if let caption = fixedAspectCaption {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Output")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Text(caption)
+                    .font(.footnote)
+                    .foregroundStyle(theme.textSecondary)
+            }
+        }
+    }
+
+    private func aspectChip(_ ratio: String) -> some View {
+        let isSelected = (selectedAspectRatio ?? preset.sheet?.defaultAspectRatio) == ratio
+        return Button {
+            selectedAspectRatio = ratio
+        } label: {
+            VStack(spacing: 6) {
+                aspectRatioIcon(ratio)
+                    .foregroundStyle(isSelected ? presetAccent : theme.textSecondary)
+                Text(ratio)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isSelected ? presetAccent : theme.surfaceBorder, lineWidth: isSelected ? 1.5 : 1)
+            )
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    /// Small rectangle glyph shaped to the chip's own ratio (e.g. tall for "2:3", wide for "3:2")
+    /// — a lightweight custom "icon" rather than pulling in SF Symbols that don't exist per-ratio.
+    private func aspectRatioIcon(_ ratio: String) -> some View {
+        let components = ratio.split(separator: ":").compactMap { Double($0) }
+        let w = components.count == 2 ? components[0] : 1
+        let h = components.count == 2 ? components[1] : 1
+        let maxDim: CGFloat = 20
+        let size = w >= h
+            ? CGSize(width: maxDim, height: maxDim * CGFloat(h / w))
+            : CGSize(width: maxDim * CGFloat(w / h), height: maxDim)
+        return RoundedRectangle(cornerRadius: 3)
+            .stroke(lineWidth: 1.5)
+            .frame(width: size.width, height: size.height)
+    }
+
+    /// Combines the registry's fixed aspect/duration/resolution labels into one caption for
+    /// input-driven presets (no chip selector) — e.g. "Matches your video · Up to 30s · 720p".
+    private var fixedAspectCaption: String? {
+        guard let sheet = preset.sheet else { return nil }
+        let parts = [sheet.aspectLabel, sheet.durationLabel, sheet.resolutionLabel].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     // MARK: - Generate bar
 
     private var generateBar: some View {
         HStack(spacing: 14) {
             HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color(red: 0.545, green: 0.427, blue: 0.839))
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(presetAccent)
                 Text("\(displayCost)")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.textPrimary)
@@ -349,7 +590,7 @@ struct PresetInputSheet: View {
                 .frame(width: 120, height: 44)
                 .foregroundStyle(.white)
                 .background(
-                    (isValid && !isSubmitting) ? Color(red: 0.545, green: 0.427, blue: 0.839) : theme.surfaceStrong,
+                    (isValid && !isSubmitting) ? presetAccent : theme.surfaceStrong,
                     in: Capsule()
                 )
             }
@@ -388,6 +629,17 @@ struct PresetInputSheet: View {
         }
     }
 
+    /// The real (capped) picked-video duration to actually SEND to the server for per-second
+    /// presets — nil for flat-cost presets. Mirrors `displayCost`'s `cappedSeconds` derivation
+    /// exactly, since the server must bill the same duration the cost label displayed. Fixes a
+    /// gap where this value was previously computed for display only and never transmitted
+    /// (server silently defaulted to a flat 5s regardless of the real duration shown) — D-23.
+    private var estimatedDurationSecondsForSubmission: Double? {
+        guard case .perSecond(_, let maxSeconds)? = preset.cost else { return nil }
+        let rawSeconds = videoSlotDurationSeconds ?? 0
+        return maxSeconds.map { min(rawSeconds, Double($0)) } ?? rawSeconds
+    }
+
     private var videoSlotDurationSeconds: Double? {
         guard let slots = preset.inputSchema?.slots else { return nil }
         for (index, slot) in slots.enumerated() where slot.kind == "video" {
@@ -409,11 +661,16 @@ struct PresetInputSheet: View {
 
     private var isValid: Bool {
         guard let schema = preset.inputSchema else { return false }
-        for index in schema.slots.indices {
-            guard index < slotInputs.count,
-                  let input = slotInputs[index],
-                  input.uploadId != nil,
-                  !input.isUploading else { return false }
+        for (index, slot) in schema.slots.enumerated() {
+            let input = index < slotInputs.count ? slotInputs[index] : nil
+            // 09.1-12 (Clothes Swap): an `optional` slot may stay empty, but if the user started
+            // filling it, it must finish uploading before Generate is enabled — same rule as
+            // required slots, just scoped to "in progress", not "must have a value".
+            if slot.optional {
+                if input?.isUploading == true { return false }
+                continue
+            }
+            guard let input, input.uploadId != nil, !input.isUploading else { return false }
         }
         if let textSchema = schema.text, textSchema.required,
            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -538,9 +795,20 @@ struct PresetInputSheet: View {
         isSubmitting = true
         defer { isSubmitting = false }
 
-        let uploadIds: [String] = schema.slots.indices.compactMap { index in
+        // 09.1-12: `map`, NOT `compactMap` — must stay index-aligned to schema.slots so the
+        // server (presetResolver) can tell "slot 2 was skipped" (nil) apart from "slot 2 shifted
+        // left because slot 1 was skipped" (which compactMap would silently produce).
+        let uploadIds: [String?] = schema.slots.indices.map { index in
             index < slotInputs.count ? slotInputs[index]?.uploadId : nil
         }
+        let hasAnyUpload = uploadIds.contains { $0 != nil }
+
+        // Preset Sheet Redesign: only presets that declare `sheet.aspectRatios` show a chip
+        // selector (GPT-Image-2 image presets) — every other preset's aspect is fixed
+        // server-side (shown as a read-only caption), so `selectedRatio` stays nil for them and
+        // both fields below fall through to nil, exactly as before this redesign.
+        let selectedRatio = selectedAspectRatio ?? preset.sheet?.defaultAspectRatio
+        let isImagePreset = preset.mediaType == "image"
 
         // D-11: the client never constructs or sends the expanded template — only preset_id +
         // the slot upload ids. The server's presetResolver middleware owns prompt/model/media_type.
@@ -550,9 +818,9 @@ struct PresetInputSheet: View {
             mediaType: preset.mediaType,
             duration: nil,
             resolution: nil,
-            aspectRatio: nil,
+            aspectRatio: (!isImagePreset) ? selectedRatio : nil,
             audioEnabled: nil,
-            imageAspectRatio: nil,
+            imageAspectRatio: isImagePreset ? selectedRatio : nil,
             imageQuality: nil,
             referenceImages: nil,
             referenceVideos: nil,
@@ -562,7 +830,8 @@ struct PresetInputSheet: View {
             referenceImageGenerationIds: nil,
             referenceVideoGenerationIds: nil,
             presetId: preset.presetId,
-            presetInputUploadIds: uploadIds.isEmpty ? nil : uploadIds
+            presetInputUploadIds: hasAnyUpload ? uploadIds : nil,
+            estimatedDurationSeconds: estimatedDurationSecondsForSubmission
         )
 
         // Optimistic UI (mirrors GenerateView.dispatchGeneration): drop a pending placeholder
@@ -579,7 +848,7 @@ struct PresetInputSheet: View {
                 duration: nil,
                 aspectRatio: nil,
                 audioEnabled: nil,
-                hasReference: uploadIds.isEmpty ? nil : true,
+                hasReference: hasAnyUpload ? true : nil,
                 width: nil,
                 height: nil
             ),
