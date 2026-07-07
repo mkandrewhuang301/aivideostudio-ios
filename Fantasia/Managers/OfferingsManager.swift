@@ -18,6 +18,11 @@ final class OfferingsManager {
     /// Populated by `refreshIfNeeded(ensuring:)` for required IDs missing from every offering.
     private(set) var standaloneProducts: [String: StoreProduct] = [:]
     private(set) var isRefreshing = false
+    /// True once at least one fetch attempt has actually run (started `isRefreshing`) in this
+    /// process. Lets callers (CreditStoreView's button) distinguish "still loading for the very
+    /// first time" from "a fetch attempt already finished and this product is genuinely
+    /// unavailable" — the former should never show "Reconnect"/offline-style copy.
+    private(set) var hasAttemptedFetch = false
 
     // Only hit the network this often in the background — reopening the top-up/
     // paywall screen should never force a fresh fetch on its own.
@@ -25,7 +30,7 @@ final class OfferingsManager {
     private static let lastFetchKey = "offerings.lastFetchDate"
     private static let priceCacheKey = "offerings.cachedPrices"
 
-    // Mirrors CreditStoreView.packOrder — shared so the app-launch prefetch can ensure these
+    // Mirrors y.packOrder — shared so the app-launch prefetch can ensure these
     // specific consumables are purchasable without CreditStoreView existing yet.
     static let topUpProductIds = [
         "com.fantasiaai.topup_9_99",
@@ -65,6 +70,21 @@ final class OfferingsManager {
         package(for: productId) != nil || standaloneProducts[productId] != nil
     }
 
+    /// Await a purchasable product for `id`, up to `timeout`. Triggers a forced refresh; if one is
+    /// already running the guard drops our call, but the in-flight refresh (store .task / launch
+    /// prefetch both pass `ensuring: allProductIds`, so `id` is covered) populates state and the poll
+    /// below catches it. Returns whether the product is purchasable when it finishes.
+    func awaitProduct(for id: String, timeout: TimeInterval = 12) async -> Bool {
+        if hasProduct(for: id) { return true }
+        Task { await refreshIfNeeded(force: true, ensuring: [id]) }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if hasProduct(for: id) { return true }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        return hasProduct(for: id)
+    }
+
     /// Cheap to call from every screen's `.task {}` — only actually reaches the
     /// network if we have nothing in memory yet or the last fetch is stale.
     ///
@@ -88,21 +108,35 @@ final class OfferingsManager {
         guard !isRefreshing else { return }
 
         isRefreshing = true
+        hasAttemptedFetch = true
         defer { isRefreshing = false }
 
-        if let offerings = try? await Purchases.shared.offerings() {
+        // Fetch offerings and any still-missing required products IN PARALLEL. This used to be
+        // serial (offerings() first, products() fallback only after it returned) — that meant the
+        // CreditStoreView purchase button sat on a spinner for the FULL offerings() round trip
+        // even though products() alone (usually faster — it's a direct StoreKit/RC product
+        // lookup, not full offering config) is enough to make a top-up pack purchasable. Racing
+        // them means the button unlocks as soon as whichever call returns first.
+        // `neededProducts` is computed from the pre-fetch cache state (including the
+        // cachedOfferings apply above), so a warm cache with everything already resolved doesn't
+        // trigger a redundant products() call.
+        let neededProducts = requiredIds.filter { !hasProduct(for: $0) }
+        async let offeringsTask = try? Purchases.shared.offerings()
+        async let productsTask: [StoreProduct] = neededProducts.isEmpty ? [] : Purchases.shared.products(neededProducts)
+
+        if let offerings = await offeringsTask {
             apply(offerings)
             lastFetchDate = Date()
         }
 
-        // Fallback: fetch any still-missing required products directly from StoreKit/RC.
-        let stillMissing = requiredIds.filter { !hasProduct(for: $0) }
-        if !stillMissing.isEmpty {
-            let fetched = await Purchases.shared.products(stillMissing)
-            for product in fetched {
+        let fetchedProducts = await productsTask
+        if !fetchedProducts.isEmpty {
+            // Skip ids the offerings fetch above already resolved, so an offering-backed Package
+            // stays the source of truth instead of being shadowed by a standalone StoreProduct.
+            for product in fetchedProducts where !hasProduct(for: product.productIdentifier) {
                 standaloneProducts[product.productIdentifier] = product
             }
-            persistPrices(fromProducts: fetched)
+            persistPrices(fromProducts: fetchedProducts)
         }
     }
 

@@ -43,6 +43,12 @@ actor MediaPrepService {
         return PreparedVideo(data: finalData, url: finalURL, thumbnail: thumbnail)
     }
 
+    /// Poster frame for a local or remote video URL — used by reference chips and inline
+    /// token pills when no in-memory thumbnail is available yet.
+    func thumbnailFromVideo(at url: URL) -> UIImage? {
+        Self.extractThumbnail(from: url)
+    }
+
     private static func extractThumbnail(from url: URL) -> UIImage? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true

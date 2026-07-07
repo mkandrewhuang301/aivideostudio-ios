@@ -26,7 +26,8 @@ struct HighlightingTextView: UIViewRepresentable {
 
     var accentColor: UIColor
     var textColor: UIColor = .white
-    var maxHeight: CGFloat = 112
+    // ~4 lines of body text before the field starts scrolling internally (was 112 ≈ 5 lines).
+    var maxHeight: CGFloat = 90
     var font: UIFont = .preferredFont(forTextStyle: .body)
     /// Keys are a token's inner text (no brackets), lowercased — see GenerateView's
     /// rebuildTokenThumbnails(). Tokens with no entry render text-only pills.
@@ -51,14 +52,19 @@ struct HighlightingTextView: UIViewRepresentable {
         tv.textContainer.lineBreakMode = .byWordWrapping
         tv.autocorrectionType = .default
         tv.autocapitalizationType = .sentences
+        // Native indicator is transient (only flashes while scrolling); we draw our own thin
+        // always-visible thumb instead (see updateScrollIndicator) so a >4-line prompt always
+        // shows the user there's more text above/below.
         tv.showsVerticalScrollIndicator = false
-        // Drags that begin inside a tall (scrolling) prompt also track the keyboard down,
-        // matching the surrounding history ScrollView's .scrollDismissesKeyboard(.interactively).
-        tv.keyboardDismissMode = .interactive
+        // .none (not .interactive): scrolling a tall (overflowing) prompt must never dismiss the
+        // keyboard — only the outer history ScrollView's .scrollDismissesKeyboard(.immediately)
+        // (outside the composer) does that. See .planning/notes/keyboard-composer-architecture.md.
+        tv.keyboardDismissMode = .none
         tv.attributedText = displayAttributedString(from: text)
         tv.typingAttributes = [.font: font, .foregroundColor: textColor]
         context.coordinator.lastAppliedTextColor = textColor
-        context.coordinator.lastThumbKeys = Set(tokenThumbnails.keys)
+        context.coordinator.lastThumbSignature = Self.thumbnailSignature(tokenThumbnails)
+
         return tv
     }
 
@@ -74,14 +80,14 @@ struct HighlightingTextView: UIViewRepresentable {
         // why re-running full CoreText layout only on genuine divergence — not the live getter —
         // matters here, per the note that used to guard just the color check below).
         let currentModelText = Self.modelText(from: uiView.attributedText)
-        let currentThumbKeys = Set(tokenThumbnails.keys)
+        let currentThumbSignature = Self.thumbnailSignature(tokenThumbnails)
         let needsRebuild = context.coordinator.lastAppliedTextColor != textColor
             || currentModelText != text
-            || context.coordinator.lastThumbKeys != currentThumbKeys
+            || context.coordinator.lastThumbSignature != currentThumbSignature
 
         if needsRebuild {
             context.coordinator.lastAppliedTextColor = textColor
-            context.coordinator.lastThumbKeys = currentThumbKeys
+            context.coordinator.lastThumbSignature = currentThumbSignature
             uiView.textColor = textColor
 
             // Preserve caret position through the rebuild: map the OLD display caret into OLD
@@ -151,7 +157,13 @@ struct HighlightingTextView: UIViewRepresentable {
                 let pillImage = Self.pillImage(inner: inner, thumbnail: thumb, accent: accentColor, font: font)
                 let attachment = TokenPillAttachment(tokenText: tokenText, image: pillImage, font: font)
                 let attachmentString = NSMutableAttributedString(attachment: attachment)
-                attachmentString.addAttribute(.font, value: font, range: NSRange(location: 0, length: attachmentString.length))
+                // foregroundColor on the attachment run so the caret placed right after the pill
+                // inherits the theme text color — without it, the first typed character after a
+                // token renders in the default (black) color until textViewDidChange resets it.
+                attachmentString.addAttributes(
+                    [.font: font, .foregroundColor: textColor],
+                    range: NSRange(location: 0, length: attachmentString.length)
+                )
                 result.append(attachmentString)
                 lastEnd = NSMaxRange(match.range)
             }
@@ -236,6 +248,15 @@ struct HighlightingTextView: UIViewRepresentable {
         return NSRange(location: start, length: max(0, end - start))
     }
 
+    /// Fingerprint of which thumbnails are bound to which token keys — keys alone miss async
+    /// arrivals and in-place UIImage swaps under an existing key.
+    static func thumbnailSignature(_ thumbs: [String: UIImage]) -> String {
+        thumbs
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\(UInt(bitPattern: ObjectIdentifier($0.value)))" }
+            .joined(separator: "|")
+    }
+
     // MARK: - Pill rendering
 
     private static func pillImage(inner: String, thumbnail: UIImage?, accent: UIColor, font: UIFont) -> UIImage {
@@ -253,8 +274,10 @@ struct HighlightingTextView: UIViewRepresentable {
         let textAttrs: [NSAttributedString.Key: Any] = [.font: textFont, .foregroundColor: accent]
         let textSize = (inner as NSString).size(withAttributes: textAttrs)
 
-        let height: CGFloat = max(font.lineHeight - 2, 14)
-        let thumbSize: CGFloat = hasThumb ? height - 6 : 0
+        // height MUST equal TokenPillAttachment's height (font.lineHeight - 1) so the drawn pill
+        // isn't squashed; still < font.lineHeight so the line doesn't grow taller.
+        let height: CGFloat = max(font.lineHeight - 1, 15)
+        let thumbSize: CGFloat = hasThumb ? height - 3 : 0   // larger image inside the pill (was height - 6)
         let spacing: CGFloat = hasThumb ? 3 : 0
         let padding: CGFloat = 4
         let width = padding + thumbSize + spacing + textSize.width + padding
@@ -305,12 +328,58 @@ struct HighlightingTextView: UIViewRepresentable {
         if abs(contentHeight - capped) > 0.5 {
             DispatchQueue.main.async { contentHeight = capped }
         }
+        updateScrollIndicator(tv)
+    }
+
+    // MARK: - Custom scroll indicator (thin, persistently visible thumb on the right edge)
+
+    private static let scrollIndicatorTag = 918_273
+
+    /// Finds (or, if `create`, lazily makes) the thumb subview. Kept as a tagged subview rather
+    /// than a stored property since `HighlightingTextView` is a struct recreated on every body
+    /// evaluation — the UITextView instance (and its subviews) is what actually persists.
+    private func scrollIndicatorView(for tv: UITextView, create: Bool) -> UIView? {
+        if let existing = tv.viewWithTag(Self.scrollIndicatorTag) { return existing }
+        guard create else { return nil }
+        let v = UIView()
+        v.tag = Self.scrollIndicatorTag
+        // Uses the composer's own textColor (app-theme-driven, not the system trait collection —
+        // see GenerateView's `UIColor(theme.textPrimary)`) at low alpha so it stays legible
+        // whichever theme is active, rather than assuming system light/dark via .label.
+        v.backgroundColor = textColor.withAlphaComponent(0.25)
+        v.layer.cornerRadius = 1.5
+        v.isUserInteractionEnabled = false
+        v.isHidden = true
+        tv.addSubview(v)
+        return v
+    }
+
+    /// Only shown once the prompt overflows the ~4-line cap and the text view starts scrolling
+    /// internally — matches `shouldScroll` in recalcHeight, not the native (transient) indicator.
+    fileprivate func updateScrollIndicator(_ tv: UITextView) {
+        let shouldShow = tv.isScrollEnabled && tv.contentSize.height > tv.bounds.height + 0.5
+        guard let indicator = scrollIndicatorView(for: tv, create: shouldShow) else { return }
+        indicator.isHidden = !shouldShow
+        indicator.backgroundColor = textColor.withAlphaComponent(0.25)
+        guard shouldShow else { return }
+
+        let verticalInset: CGFloat = 2
+        let trackHeight = tv.bounds.height - verticalInset * 2
+        guard trackHeight > 0 else { return }
+        let visibleRatio = min(1, tv.bounds.height / tv.contentSize.height)
+        let thumbHeight = max(trackHeight * visibleRatio, 16)
+        let maxOffsetY = max(tv.contentSize.height - tv.bounds.height, 1)
+        let scrollProgress = min(max(tv.contentOffset.y / maxOffsetY, 0), 1)
+        let thumbY = verticalInset + scrollProgress * (trackHeight - thumbHeight)
+        let thumbWidth: CGFloat = 3
+        indicator.frame = CGRect(x: tv.bounds.width - thumbWidth - 2, y: thumbY, width: thumbWidth, height: thumbHeight)
+        tv.bringSubviewToFront(indicator)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: HighlightingTextView
         var lastAppliedTextColor: UIColor?
-        var lastThumbKeys: Set<String> = []
+        var lastThumbSignature: String = ""
         /// Display-coordinate selection from the previous delegate call — feeds
         /// scrollSelectionIntoView's "which edge moved" heuristic. Deliberately separate from
         /// parent.selectedRange, which is in MODEL coordinates for GenerateView's consumption;
@@ -384,6 +453,14 @@ struct HighlightingTextView: UIViewRepresentable {
             lastDisplayRange = textView.selectedRange
         }
 
+        // UITextViewDelegate inherits UIScrollViewDelegate — used here purely to keep the custom
+        // scroll indicator thumb (see updateScrollIndicator) tracking live while the overflowed
+        // prompt is dragged, independent of the per-keystroke recalcHeight calls.
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard let textView = scrollView as? UITextView else { return }
+            parent.updateScrollIndicator(textView)
+        }
+
         func textViewDidBeginEditing(_ textView: UITextView) {
             parent.isFocused = true
         }
@@ -427,7 +504,9 @@ final class TokenPillAttachment: NSTextAttachment {
         self.tokenText = tokenText
         super.init(data: nil, ofType: nil)
         self.image = image
-        let height = font.lineHeight - 2
+        // MUST match pillImage's height (font.lineHeight - 1); stays < font.lineHeight so the
+        // attachment doesn't increase line height.
+        let height = font.lineHeight - 1
         let width = image.size.width * (height / max(image.size.height, 1))
         // Baseline-relative y-offset (descender-based) keeps the pill vertically centered on the
         // line without growing line height — the same trick UIKit uses for inline image runs.

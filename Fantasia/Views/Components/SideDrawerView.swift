@@ -1,5 +1,4 @@
 import SwiftUI
-import StoreKit
 
 struct SideDrawerView: View {
     @Environment(DrawerManager.self) private var drawer
@@ -9,7 +8,7 @@ struct SideDrawerView: View {
 
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
     @State private var showSignOutConfirm = false
-    @State private var isOpeningManageSub = false
+    @State private var showManageSubscription = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -38,7 +37,7 @@ struct SideDrawerView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 header
-                    .padding(.top, 60)
+                    .padding(.top, 84)
                     .padding(.bottom, 28)
                     .padding(.horizontal, 22)
 
@@ -71,6 +70,10 @@ struct SideDrawerView: View {
         .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
             Button("Sign Out", role: .destructive) { try? authManager.signOut() }
             Button("Cancel", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showManageSubscription) {
+            ManageSubscriptionView(isPresented: $showManageSubscription)
+                .environment(creditManager)
         }
     }
 
@@ -127,11 +130,12 @@ struct SideDrawerView: View {
 
             rowDivider
 
-            HStack {
+            // Stacked (label above full-width picker): the drawer is only 65% of the screen
+            // wide, so an inline label + fixed-width segmented picker overflowed and clipped.
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Appearance")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(theme.textPrimary)
-                Spacer()
                 Picker("", selection: Binding(
                     get: { theme.theme },
                     set: { theme.theme = $0 }
@@ -140,10 +144,9 @@ struct SideDrawerView: View {
                     Text("Light").tag(AppTheme.light)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 140)
             }
             .padding(.horizontal, 14)
-            .frame(height: 48)
+            .padding(.vertical, 12)
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
@@ -153,15 +156,8 @@ struct SideDrawerView: View {
 
     private var accountCard: some View {
         VStack(spacing: 0) {
-            actionRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription", isLoading: isOpeningManageSub) {
-                guard !isOpeningManageSub else { return }
-                guard let scene = UIApplication.shared.connectedScenes
-                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
-                isOpeningManageSub = true
-                Task {
-                    try? await AppStore.showManageSubscriptions(in: scene)
-                    isOpeningManageSub = false
-                }
+            actionRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription") {
+                showManageSubscription = true
             }
 
             rowDivider
@@ -171,10 +167,7 @@ struct SideDrawerView: View {
                 iconColor: Color(red: 1.0, green: 0.8, blue: 0.15),
                 label: "Rate Fantasia"
             ) {
-                if let scene = UIApplication.shared.connectedScenes
-                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
-                    SKStoreReviewController.requestReview(in: scene)
-                }
+                AppReview.requestOrOpenStorePage()
             }
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
@@ -259,7 +252,8 @@ struct SideDrawerView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 48)
+            .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isLoading)

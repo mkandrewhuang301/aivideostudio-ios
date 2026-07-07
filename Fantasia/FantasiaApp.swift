@@ -17,6 +17,15 @@ struct FantasiaApp: App {
     @State private var ratesManager = RatesManager()
     @State private var offeringsManager = OfferingsManager()
     @State private var themeManager = ThemeManager()
+    // Keeps the Railway backend awake during an active session. Railway's Serverless sleep
+    // triggers after exactly 10 minutes with ZERO outbound traffic (fixed, not configurable —
+    // confirmed via Railway docs). Generation polling already produces traffic while a job is
+    // in flight, but idle periods (e.g. composing a prompt) have none, so anything touched next
+    // — like the @-mention References panel — paid a ~7s cold-boot penalty on a plain network
+    // call. Pinging /health every 4 minutes (well under the 10-minute window) while foregrounded
+    // keeps the instance warm without materially increasing usage. Swift Concurrency only, per
+    // CLAUDE.md — no Timer.
+    @State private var keepWarmTask: Task<Void, Never>? = nil
 
     init() {
         // UIWindow's default backgroundColor is black. Between the launch-screen snapshot
@@ -45,6 +54,7 @@ struct FantasiaApp: App {
                     // screen — splash shows instantly, Firebase/RevenueCat set up behind it.
                     // IMPORTANT: FirebaseApp.configure() MUST run before any Auth.auth() call.
                     Task { await ratesManager.load() }  // public endpoint — fire in parallel with auth setup
+                    startKeepWarmLoop()  // belt-and-suspenders: scenePhase's .active onChange isn't guaranteed to fire on cold launch
                     FirebaseApp.configure()
                     GIDSignIn.sharedInstance.configuration = GIDConfiguration(
                         clientID: FirebaseApp.app()?.options.clientID ?? ""
@@ -61,11 +71,37 @@ struct FantasiaApp: App {
                     )
                     // ensuring: top-up ids so the launch prefetch (not just the stale-cache check)
                     // covers the consumable packs — they live in a separate offering from `current`.
-                    Task { await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) } // throttled — see OfferingsManager
+                    Task {
+                        await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) // throttled — see OfferingsManager
+                        // Sandbox StoreKit fetches fail intermittently — retry with backoff so the
+                        // store is usually instant by the time the user opens it.
+                        for delaySec in [2.0, 4.0] {
+                            let missing = OfferingsManager.topUpProductIds.filter { !offeringsManager.hasProduct(for: $0) }
+                            if missing.isEmpty { break }
+                            try? await Task.sleep(for: .seconds(delaySec))
+                            await offeringsManager.refreshIfNeeded(force: true, ensuring: OfferingsManager.topUpProductIds)
+                        }
+                        // Debug-only visibility into whether the launch prefetch actually resolved
+                        // purchasable products — a silent failure/timeout here (e.g. sandbox
+                        // flakiness) is exactly what makes CreditStoreView's button feel "stuck"
+                        // later, since it then has to do the full fetch itself.
+                        if AppConfig.nodeEnv != "production" {
+                            let missing = OfferingsManager.topUpProductIds.filter { !offeringsManager.hasProduct(for: $0) }
+                            if missing.isEmpty {
+                                print("[FantasiaApp] launch prefetch: all top-up products resolved")
+                            } else {
+                                print("[FantasiaApp] launch prefetch: still missing products \(missing) — CreditStoreView will need to fetch on open")
+                            }
+                        }
+                    }
 
                     // Listen for RevenueCat entitlement updates in real time (RESEARCH.md Pattern 5)
                     let purchaseManager = PurchaseManager(creditManager: creditManager)
                     await purchaseManager.listenForEntitlementUpdates()
+
+                    // Pre-warm the keyboard so the first tap on the Generate prompt box doesn't
+                    // hitch. Standalone/offscreen — does NOT touch the frozen composer positioning.
+                    KeyboardWarmer.warmUp()
                 }
                 .onOpenURL { url in
                     // Required for Google Sign-In OAuth redirect back into the app.
@@ -76,10 +112,30 @@ struct FantasiaApp: App {
                         Task { await ratesManager.loadIfNeeded() } // no-op unless stale (>1h)
                         Task { await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) } // no-op unless stale
                         generationManager.resumePollingIfNeeded() // no-op unless a job is active
+                        startKeepWarmLoop()
                     } else if phase == .background {
                         generationManager.stopPolling()
+                        stopKeepWarmLoop()   // let the backend sleep while we're not in the foreground
                     }
                 }
         }
+    }
+
+    /// Pings immediately, then every 4 minutes for as long as the app stays foregrounded.
+    /// No-op if a loop is already running (background→active transitions and the initial
+    /// launch's scenePhase callback can otherwise both try to start one).
+    private func startKeepWarmLoop() {
+        guard keepWarmTask == nil else { return }
+        keepWarmTask = Task {
+            while !Task.isCancelled {
+                await APIClient.shared.pingHealth()
+                try? await Task.sleep(for: .seconds(240))
+            }
+        }
+    }
+
+    private func stopKeepWarmLoop() {
+        keepWarmTask?.cancel()
+        keepWarmTask = nil
     }
 }

@@ -16,151 +16,11 @@
       }
     },
     {
-      "preset_id": "try-on",
-      "title": "AI Try-On",
-      "subtitle": null,
-      "section": "photo_tools",
-      "sort_order": 1,
-      "status": "live",
-      "badge": "NEW",
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/try-on/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/try-on/loop-v1.mp4",
-        "aspect": "3:4"
-      },
-      "media_type": "image",
-      "model": "openai/gpt-image-2",
-      "input_schema": {
-        "slots": [
-          { "kind": "image", "label": "Your Photo", "source": "my_look_default" },
-          { "kind": "image", "label": "Garment Photo", "source": "any" }
-        ]
-      },
-      "cost": { "type": "flat", "credits": 5 }
-    },
-    {
-      "preset_id": "hairstyle",
-      "title": "Hairstyle",
-      "subtitle": null,
-      "section": "photo_tools",
-      "sort_order": 2,
-      "status": "live",
-      "badge": null,
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/hairstyle/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/hairstyle/loop-v1.mp4",
-        "aspect": "3:4"
-      },
-      "media_type": "image",
-      "model": "openai/gpt-image-2",
-      "input_schema": {
-        "slots": [
-          { "kind": "image", "label": "Your Photo", "source": "any" }
-        ],
-        "style_grid": [
-          { "id": "bob", "label": "Bob" },
-          { "id": "pixie-cut", "label": "Pixie Cut" },
-          { "id": "buzz", "label": "Buzz" },
-          { "id": "curtain-bangs", "label": "Curtain Bangs" },
-          { "id": "perm", "label": "Perm" },
-          { "id": "layered", "label": "Layered" },
-          { "id": "slicked-back", "label": "Slicked Back" },
-          { "id": "undercut", "label": "Undercut" },
-          { "id": "soft-waves", "label": "Soft Waves" },
-          { "id": "french-braid", "label": "French Braid" },
-          { "id": "box-braids", "label": "Box Braids" },
-          { "id": "curly", "label": "Curly" }
-        ]
-      },
-      "cost": { "type": "flat", "credits": 5 }
-    },
-    {
-      "preset_id": "enhancer",
-      "title": "AI Enhance",
-      "subtitle": null,
-      "section": "photo_tools",
-      "sort_order": 3,
-      "status": "live",
-      "badge": null,
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/enhancer/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/enhancer/loop-v1.mp4",
-        "aspect": "3:4"
-      },
-      "media_type": "upscale",
-      "model": "bytedance/video-upscaler",
-      "input_schema": {
-        "slots": [
-          { "kind": "video", "label": "Video to Enhance", "source": "any" }
-        ]
-      },
-      "cost": { "type": "per_second", "credits_per_sec": 0.344, "max_seconds": 60 }
-    },
-    {
-      "preset_id": "faceswap",
-      "title": "Faceswap",
-      "subtitle": "Coming Soon",
-      "section": "photo_tools",
-      "sort_order": 4,
-      "status": "soon",
-      "badge": null,
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/faceswap/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/faceswap/loop-v1.mp4",
-        "aspect": "3:4"
-      }
-    },
-    {
-      "preset_id": "anime-yourself",
-      "title": "Anime Yourself",
-      "subtitle": null,
-      "section": "effects",
-      "sort_order": 1,
-      "status": "live",
-      "badge": null,
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/anime-yourself/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/anime-yourself/loop-v1.mp4",
-        "aspect": "3:4"
-      },
-      "media_type": "image",
-      "model": "openai/gpt-image-2",
-      "input_schema": {
-        "slots": [
-          { "kind": "image", "label": "Your Photo", "source": "any" }
-        ]
-      },
-      "cost": { "type": "flat", "credits": 5 }
-    },
-    {
-      "preset_id": "polaroid",
-      "title": "Polaroid Hug",
-      "subtitle": null,
-      "section": "effects",
-      "sort_order": 2,
-      "status": "live",
-      "badge": null,
-      "tile": {
-        "poster_url": "https://cdn.aivideostudio.app/presets/polaroid/poster-v1.jpg",
-        "loop_url": "https://cdn.aivideostudio.app/presets/polaroid/loop-v1.mp4",
-        "aspect": "3:4"
-      },
-      "media_type": "image",
-      "model": "openai/gpt-image-2",
-      "input_schema": {
-        "slots": [
-          { "kind": "image", "label": "Photo 1", "source": "any" },
-          { "kind": "image", "label": "Photo 2", "source": "any" }
-        ]
-      },
-      "cost": { "type": "flat", "credits": 5 }
-    },
-    {
       "preset_id": "animate-old-photo",
       "title": "Animate Old Photo",
       "subtitle": null,
-      "section": "effects",
-      "sort_order": 3,
+      "section": "video_effects",
+      "sort_order": 1,
       "status": "live",
       "badge": "HOT",
       "tile": {
@@ -175,14 +35,20 @@
           { "kind": "image", "label": "Old Photo", "source": "any" }
         ]
       },
-      "cost": { "type": "per_second", "credits_per_sec": 9, "max_seconds": 10 }
+      "cost": { "type": "per_second", "credits_per_sec": 9, "max_seconds": 5 },
+      "sheet": {
+        "description": "Bring an old photo to life with gentle, natural motion — soft breathing, subtle head movement, and ambient motion in the background.",
+        "aspect_label": "Matches your photo",
+        "duration_label": "5s",
+        "resolution_label": "720p"
+      }
     },
     {
       "preset_id": "motion-transfer",
       "title": "Motion Transfer",
       "subtitle": null,
-      "section": "effects",
-      "sort_order": 4,
+      "section": "video_effects",
+      "sort_order": 2,
       "status": "live",
       "badge": null,
       "tile": {
@@ -194,11 +60,226 @@
       "model": "bytedance/dreamactor-m2.0",
       "input_schema": {
         "slots": [
-          { "kind": "image", "label": "Portrait Photo", "source": "any" },
-          { "kind": "video", "label": "Driving Video", "source": "any" }
+          { "kind": "image", "label": "Your photo", "source": "any" },
+          { "kind": "video", "label": "Driving video", "source": "any" }
         ]
       },
-      "cost": { "type": "per_second", "credits_per_sec": 5, "max_seconds": 30 }
+      "cost": { "type": "per_second", "credits_per_sec": 5, "max_seconds": 30 },
+      "sheet": {
+        "description": "Upload a photo and a driving video — your photo comes to life, moving and expressing just like the video.",
+        "aspect_label": "Matches your video",
+        "duration_label": "Up to 30s"
+      }
+    },
+    {
+      "preset_id": "enhancer-video",
+      "title": "AI Enhance",
+      "subtitle": "Video",
+      "section": "video_effects",
+      "sort_order": 3,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/enhancer-video/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/enhancer-video/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "upscale",
+      "model": "bytedance/video-upscaler",
+      "input_schema": {
+        "slots": [
+          { "kind": "video", "label": "Video to enhance", "source": "any" }
+        ]
+      },
+      "cost": { "type": "per_second", "credits_per_sec": 1 },
+      "sheet": {
+        "description": "Sharpen and upscale any video for a cleaner, higher-quality result.",
+        "aspect_label": "Matches your video",
+        "duration_label": "Matches your video",
+        "resolution_label": "720p"
+      }
+    },
+    {
+      "preset_id": "ai-influencer",
+      "title": "AI Influencer",
+      "subtitle": "Become someone else",
+      "section": "video_effects",
+      "sort_order": 4,
+      "status": "live",
+      "badge": "NEW",
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/ai-influencer/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/ai-influencer/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "character_replace",
+      "model": "wan-video/wan-2.2-animate-replace",
+      "input_schema": {
+        "slots": [
+          { "kind": "video", "label": "Your video", "source": "any" },
+          { "kind": "image", "label": "Choose your character", "source": "any" }
+        ]
+      },
+      "cost": { "type": "per_second", "credits_per_sec": 5, "max_seconds": 30 },
+      "sheet": {
+        "description": "Replace yourself with any character in your own video — the motion, lighting, and background stay exactly the same.",
+        "aspect_label": "Matches your video",
+        "duration_label": "Up to 30s",
+        "resolution_label": "720p"
+      }
+    },
+    {
+      "preset_id": "try-on",
+      "title": "AI Try-On",
+      "subtitle": null,
+      "section": "photo_effects",
+      "sort_order": 1,
+      "status": "soon",
+      "badge": "NEW",
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/try-on/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/try-on/loop-v1.mp4",
+        "aspect": "3:4"
+      }
+    },
+    {
+      "preset_id": "hairstyle",
+      "title": "Hairstyle",
+      "subtitle": null,
+      "section": "photo_effects",
+      "sort_order": 2,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/hairstyle/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/hairstyle/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2-medium",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Your photo", "source": "any" }
+        ],
+        "style_grid": [
+          { "id": "bob", "label": "Bob" },
+          { "id": "pixie-cut", "label": "Pixie Cut" },
+          { "id": "crew-cut", "label": "Buzz" },
+          { "id": "side-swept-bangs", "label": "Curtain Bangs" },
+          { "id": "perm", "label": "Perm" },
+          { "id": "layered", "label": "Layered" },
+          { "id": "slicked-back", "label": "Slicked Back" },
+          { "id": "undercut", "label": "Undercut" },
+          { "id": "soft-waves", "label": "Soft Waves" },
+          { "id": "french-braid", "label": "French Braid" },
+          { "id": "box-braids", "label": "Box Braids" },
+          { "id": "curly", "label": "Curly" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 },
+      "sheet": {
+        "description": "Try a new hairstyle on your own photo — pick a style below and see yourself with a fresh new look.",
+        "aspect_ratios": ["16:9", "1:1", "9:16"],
+        "default_aspect_ratio": "1:1",
+        "resolution_label": "High resolution"
+      }
+    },
+    {
+      "preset_id": "anime-yourself",
+      "title": "Anime Yourself",
+      "subtitle": null,
+      "section": "photo_effects",
+      "sort_order": 3,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/anime-yourself/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/anime-yourself/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2-medium",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Your photo", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 },
+      "sheet": {
+        "description": "Turn your photo into a hand-drawn, Studio-quality anime illustration of yourself.",
+        "aspect_ratios": ["3:2", "1:1", "2:3"],
+        "default_aspect_ratio": "1:1",
+        "resolution_label": "High resolution"
+      }
+    },
+    {
+      "preset_id": "polaroid",
+      "title": "Polaroid Hug",
+      "subtitle": null,
+      "section": "photo_effects",
+      "sort_order": 4,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/polaroid/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/polaroid/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "image",
+      "model": "openai/gpt-image-2-medium",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Person 1", "source": "any" },
+          { "kind": "image", "label": "Person 2", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 5 },
+      "sheet": {
+        "description": "Composite two people into one warm, vintage polaroid-style photo — hugging like old friends.",
+        "aspect_ratios": ["3:2", "1:1", "2:3"],
+        "default_aspect_ratio": "1:1",
+        "resolution_label": "High resolution"
+      }
+    },
+    {
+      "preset_id": "enhancer-image",
+      "title": "AI Enhance",
+      "subtitle": "Photo",
+      "section": "photo_effects",
+      "sort_order": 5,
+      "status": "live",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/enhancer-image/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/enhancer-image/loop-v1.mp4",
+        "aspect": "3:4"
+      },
+      "media_type": "upscale",
+      "model": "recraft-ai/recraft-crisp-upscale",
+      "input_schema": {
+        "slots": [
+          { "kind": "image", "label": "Image to enhance", "source": "any" }
+        ]
+      },
+      "cost": { "type": "flat", "credits": 1 },
+      "sheet": {
+        "description": "Sharpen and upscale any photo for a cleaner, higher-resolution result.",
+        "aspect_label": "Matches your photo"
+      }
+    },
+    {
+      "preset_id": "faceswap",
+      "title": "Faceswap",
+      "subtitle": "Coming Soon",
+      "section": "photo_effects",
+      "sort_order": 6,
+      "status": "soon",
+      "badge": null,
+      "tile": {
+        "poster_url": "https://cdn.aivideostudio.app/presets/faceswap/poster-v1.jpg",
+        "loop_url": "https://cdn.aivideostudio.app/presets/faceswap/loop-v1.mp4",
+        "aspect": "3:4"
+      }
     },
     {
       "preset_id": "avatar-center",

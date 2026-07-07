@@ -2,7 +2,7 @@
 // Fantasia
 // Full-screen feature carousel slide (slides 2-4 of onboarding).
 // Mirrors OnboardingVideoView aesthetic: full-bleed video (with gradient fallback),
-// bottom scrim, headline + subtitle, glass CTA, 4-dot carousel indicator.
+// bottom scrim, headline + subtitle, glass CTA, 3-dot carousel indicator.
 
 import SwiftUI
 import AVKit
@@ -17,8 +17,9 @@ struct OnboardingFeatureSlide {
 
 struct OnboardingFeatureSlideView: View {
     let slide: OnboardingFeatureSlide
-    let pageIndex: Int
-    let totalPages: Int
+    /// 0-based index among feature slides only (not counting the intro full-bleed screen).
+    let activeDotIndex: Int
+    let dotCount: Int
     var onContinue: () -> Void
 
     @State private var videoViewModel: LoopingPlayerViewModel?
@@ -104,13 +105,13 @@ struct OnboardingFeatureSlideView: View {
 
     private var carouselDots: some View {
         HStack(spacing: 5) {
-            ForEach(0..<totalPages, id: \.self) { i in
+            ForEach(0..<dotCount, id: \.self) { i in
                 Capsule()
-                    .fill(Color.white.opacity(i == pageIndex ? 1 : 0.3))
-                    .frame(width: i == pageIndex ? 16 : 6, height: 6)
+                    .fill(Color.white.opacity(i == activeDotIndex ? 1 : 0.3))
+                    .frame(width: i == activeDotIndex ? 16 : 6, height: 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
-        .animation(.easeInOut(duration: 0.25), value: pageIndex)
+        .animation(.easeInOut(duration: 0.25), value: activeDotIndex)
     }
 }

@@ -52,8 +52,8 @@ struct OnboardingView: View {
                     let slideIndex = currentPage - 1
                     OnboardingFeatureSlideView(
                         slide: featureSlides[slideIndex],
-                        pageIndex: currentPage,
-                        totalPages: totalPages,
+                        activeDotIndex: slideIndex,
+                        dotCount: featureSlides.count,
                         onContinue: { advance() }
                     )
                 }

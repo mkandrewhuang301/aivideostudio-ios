@@ -1,10 +1,10 @@
 // HomeView.swift
 // Fantasia
 // Registry-driven Home (D-01 replace): one continuous scroll rendering PresetRegistryManager
-// rows in the v10-locked section order — Cinema Studio hero, Photo (merged photo_tools +
-// effects, D-02 revision 2026-07-05), Avatar Center (full-width feature card), Shows & Vlogs.
-// Every card is a poster-first autoplaying loop (D-08); SOON tiles/pills are registry-driven
-// from `status` alone (D-04) — nothing here is hardcoded per-preset.
+// rows in the v10-locked section order — Cinema Studio hero, Video Effects, Photo Effects
+// (split by output media type, D-02 revision 2026-07-06), Avatar Center (full-width feature
+// card), Shows & Vlogs. Every card is a poster-first autoplaying loop (D-08); SOON tiles/pills
+// are registry-driven from `status` alone (D-04) — nothing here is hardcoded per-preset.
 
 import SwiftUI
 
@@ -25,16 +25,18 @@ struct HomeView: View {
         registry.presets.first { $0.section == "hero" }
     }
 
-    /// D-02 revision 2026-07-05: "Photo Tools" and "Effects" merge into one "Photo" grid —
-    /// the registry still carries the two original section strings (this parallel wave hasn't
-    /// updated the backend/bundled schema), so the merge happens here, client-side.
-    private var photoPresets: [Preset] {
+    /// D-02 revision 2026-07-06: split by output media type — "Video Effects" (produces a
+    /// video) rendered above "Photo Effects" (produces a still image).
+    private var videoEffectsPresets: [Preset] {
         registry.presets
-            .filter { $0.section == "photo_tools" || $0.section == "effects" }
-            .sorted { lhs, rhs in
-                if lhs.section != rhs.section { return lhs.section == "photo_tools" }
-                return lhs.sortOrder < rhs.sortOrder
-            }
+            .filter { $0.section == "video_effects" }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private var photoEffectsPresets: [Preset] {
+        registry.presets
+            .filter { $0.section == "photo_effects" }
+            .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var avatarCenterPreset: Preset? {
@@ -57,9 +59,14 @@ struct HomeView: View {
                         heroCard(heroPreset)
                     }
 
-                    if !photoPresets.isEmpty {
-                        sectionHeader("Photo")
-                        photoGrid
+                    if !videoEffectsPresets.isEmpty {
+                        sectionHeader("Video Effects")
+                        effectsGrid(videoEffectsPresets)
+                    }
+
+                    if !photoEffectsPresets.isEmpty {
+                        sectionHeader("Photo Effects")
+                        effectsGrid(photoEffectsPresets)
                     }
 
                     if let avatarCenterPreset {
@@ -168,14 +175,14 @@ struct HomeView: View {
             .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
     }
 
-    // MARK: - Photo (merged grid)
+    // MARK: - Video Effects / Photo Effects (same 2-col tile grid, different rows)
 
-    private var photoGrid: some View {
+    private func effectsGrid(_ presets: [Preset]) -> some View {
         LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
             spacing: 10
         ) {
-            ForEach(photoPresets) { preset in
+            ForEach(presets) { preset in
                 PresetTileView(preset: preset, onTap: onSelectPreset)
             }
         }

@@ -12,32 +12,74 @@ import AVFoundation
 // hero, Avatar Center row, Shows & Vlogs cards) — callers add their own overlays/hit-test/tap.
 struct PresetLoopBackground: View {
     let preset: Preset
+    // How much of the source to zoom into. 1.0 = show the full source width (no horizontal crop);
+    // >1 crops in horizontally too (e.g. the 3:4 grid tile zooms to 1.65 for a head-focused
+    // portrait). Higher = tighter/bigger subject.
+    var zoom: CGFloat = 1.0
+    // Which source row sits at the tile's TOP edge, as a fraction of source height (0 = very top,
+    // 0.5 = middle). Loops are portrait people-videos: head up top, torso filling the lower half.
+    // Trimming a little off the top (e.g. 0.125) drops dead ceiling above the hair without cutting
+    // the hairline; 0 keeps the whole top (used by the input-sheet cover).
+    // nil = center vertically — the historical default, preserved for the hero / Avatar Center /
+    // Shows & Vlogs cards, whose wide/square boxes want the subject's FACE centered, not its top.
+    var focalTop: CGFloat? = nil
 
     @State private var poster: UIImage?
     @State private var loopState = LoopTileState()
 
+    // All registry loop assets are ingested at native portrait 9:16 (uploadPresetArt.ts's
+    // transcodeLoop only ever downscales within a portrait bounding box, preserving source AR) —
+    // hardcoding avoids a poster/video decode round-trip just to learn an AR we control at
+    // ingestion time.
+    private let sourceAspectRatio: CGFloat = 9.0 / 16.0
+
     var body: some View {
-        ZStack {
-            if let poster {
-                Image(uiImage: poster)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Color.white.opacity(0.06)
+        GeometryReader { geo in
+            // Render the media at (geo * zoom), preserving source AR, then window into it by
+            // offset + clip. This draws at FULL resolution for the zoom level (SwiftUI resamples
+            // the source into this larger frame) — unlike `.scaleEffect`, which rasterizes at the
+            // small tile size FIRST and then magnifies that bitmap, producing upscale blur even
+            // from a hi-res source (user-reported 2026-07-08: blurry after delete+reinstall, i.e.
+            // not a cache issue — the source frame is sharp, scaleEffect was softening it).
+            let contentW = geo.size.width * zoom
+            let contentH = contentW / sourceAspectRatio        // preserve source 9:16
+            let offsetX = -(contentW - geo.size.width) / 2       // center horizontally
+            // focalTop set → put that source row at the top edge; nil → center the overflow.
+            let offsetY = focalTop.map { -$0 * contentH } ?? -(contentH - geo.size.height) / 2
+
+            ZStack {
+                if let poster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Color.white.opacity(0.06)
+                }
+                if let player = loopState.player {
+                    // Hard cut, no crossfade (user request 2026-07-08) — video simply replaces
+                    // the poster the instant it's ready, no animation.
+                    FillingVideoPlayerView(player: player, videoGravity: .resizeAspectFill)
+                        .opacity(loopState.isReady ? 1 : 0)
+                }
             }
-            if let player = loopState.player {
-                FillingVideoPlayerView(player: player, videoGravity: .resizeAspectFill)
-                    .opacity(loopState.isReady ? 1 : 0)
-                    .animation(.easeIn(duration: 0.35), value: loopState.isReady)
-            }
+            .frame(width: contentW, height: contentH)
+            .offset(x: offsetX, y: offsetY)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .clipped()
         }
         .onAppear {
             loadPoster()
-            Task {
-                guard let url = preset.tile.loopURL else { return }
-                if let player = await LoopPlayerPool.shared.acquire(presetId: preset.id, loopURL: url) {
-                    loopState.attach(player)
-                }
+        }
+        // Keyed on availabilityGeneration (not a plain onAppear Task): runs immediately when the
+        // tile appears (covers the original acquire-on-appear), AND re-runs every time the pool
+        // frees a slot elsewhere — the only way a tile that was denied a player (pool full of
+        // active slots, see LoopPlayerPool) later upgrades from poster-only to actually playing.
+        // Guarded on `loopState.player == nil` so tiles that already have a player don't
+        // needlessly re-acquire on every unrelated release() elsewhere (2026-07-08).
+        .task(id: LoopPlayerPool.shared.availabilityGeneration) {
+            guard loopState.player == nil, let url = preset.tile.loopURL else { return }
+            if let player = await LoopPlayerPool.shared.acquire(presetId: preset.id, loopURL: url) {
+                loopState.attach(player)
             }
         }
         .onDisappear {
@@ -48,15 +90,33 @@ struct PresetLoopBackground: View {
 
     private func loadPoster() {
         guard poster == nil, let url = preset.tile.posterURL else { return }
-        let key = preset.id + "-poster"
+        // Key includes the URL's filename (e.g. poster-v2.jpg), mirroring LoopFileCache's
+        // versioned key below — the ingestion script's version-suffixed filenames give free
+        // cache-busting on re-ingestion. Without this, re-ingesting a preset's art (e.g. the
+        // 2026-07-08 resolution fix) silently kept serving the OLD cached poster forever, since
+        // a bare "presetId-poster" key never changes when the server URL does (user-reported:
+        // still blurry after the server-side fix deployed — root cause was this stale client
+        // cache, not the server data).
+        let versionedKey = preset.id + "-poster-" + url.lastPathComponent
+        // Preset-scoped (NOT version-scoped) fallback: whatever poster last successfully loaded
+        // for this preset, however old. Shown immediately on any versioned-cache miss — first
+        // launch after a version bump, a slow/offline network, whatever — so the tile never
+        // shows a blank placeholder while the current version fetches in the background
+        // (user request 2026-07-08: "even if the video is loading it is the first image rather
+        // than nothing").
+        let latestKey = preset.id + "-poster-latest"
         Task {
-            if let cached = await ThumbnailCache.shared.image(for: key) {
+            if let cached = await ThumbnailCache.shared.image(for: versionedKey) {
                 poster = cached
                 return
             }
+            if let stale = await ThumbnailCache.shared.image(for: latestKey) {
+                poster = stale
+            }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = UIImage(data: data) else { return }
-            ThumbnailCache.shared[key] = image
+            ThumbnailCache.shared[versionedKey] = image
+            ThumbnailCache.shared[latestKey] = image
             poster = image
         }
     }
@@ -96,7 +156,13 @@ struct PresetTileView: View {
         Color.clear
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .overlay {
-                PresetLoopBackground(preset: preset)
+                // Head-focused portrait crop: zoom 1.65 into the source, top edge at 12.5% of
+                // source height → shows ~hair(14%)-through-chin(58%), trimming ceiling above the
+                // hair and torso below. This is the SAME visible framing the old
+                // `.scaleEffect(1.65, anchor: .top)` produced, but rendered at full source
+                // resolution instead of magnifying a tile-sized bitmap (which was the blur — see
+                // PresetLoopBackground body). Do NOT reintroduce scaleEffect here.
+                PresetLoopBackground(preset: preset, zoom: 1.65, focalTop: 0.125)
                     .allowsHitTesting(false)
             }
             .overlay(alignment: .bottom) { titleScrim }

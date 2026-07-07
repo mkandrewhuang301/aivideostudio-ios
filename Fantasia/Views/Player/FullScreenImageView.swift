@@ -13,6 +13,7 @@ struct FullScreenImageView: View {
     @State private var isLoading = false
     @State private var isDismissDragging = false
     @State private var isDismissing = false
+    @State private var contentOpacity: Double = 1
     @State private var dragOffset: CGSize = .zero
     @State private var zoomScale: CGFloat = 1.0
 
@@ -23,17 +24,28 @@ struct FullScreenImageView: View {
     private let exitDistance: CGFloat = 900
 
     /// 0...1 progress of an in-flight swipe-to-dismiss drag (only active when unzoomed).
-    /// Reaches 1 well before the image is fully off-screen so the backdrop finishes
-    /// fading to reveal the presenting view underneath as the image flies out.
+    /// Divisor is larger than the 120pt dismiss-distance threshold so the live fade lags
+    /// behind the finger — a full swipe-to-dismiss drag no longer fully fades the background
+    /// until well past the point where the dismiss itself would already commit.
     private var dismissProgress: CGFloat {
         guard zoomScale <= 1.01 else { return 0 }
-        return min(1, abs(dragOffset.height) / 300)
+        return min(1, abs(dragOffset.height) / 500)
+    }
+
+    /// Drives the background/chrome "reveal" fade. While dragging, tracks live drag distance
+    /// (dismissProgress) for real-time feedback. Once dismiss is committed, switches to
+    /// contentOpacity instead — dismissProgress saturates almost immediately once the exit
+    /// animation starts moving past its 300pt cap, which made the reveal fade feel instant
+    /// no matter how long the fly-out animation was. contentOpacity animates independently
+    /// (see commitDismiss) so the fade can be slower than the fly-out.
+    private var revealOpacity: CGFloat {
+        isDismissing ? contentOpacity : (1 - dismissProgress)
     }
 
     var body: some View {
         ZStack {
             theme.background.ignoresSafeArea()
-                .opacity(1 - dismissProgress)
+                .opacity(revealOpacity)
 
             if let img = loadedImage {
                 GeometryReader { geo in
@@ -65,7 +77,7 @@ struct FullScreenImageView: View {
                 // (its own no-content branch).
                 Group {
                     if isLoading {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(theme.textPrimary)
                     } else {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
@@ -94,7 +106,7 @@ struct FullScreenImageView: View {
                 }
                 Spacer()
             }
-            .opacity(1 - dismissProgress)
+            .opacity(revealOpacity)
         }
         .background(TransparentFullScreenBackground())
         .statusBar(hidden: true)
@@ -176,14 +188,27 @@ struct FullScreenImageView: View {
     /// transparent, so the presenting view is revealed via fade rather than a slide-away.
     private func commitDismiss(from dragOffsetOverride: CGSize? = nil) {
         guard !isDismissing else { return }
-        isDismissing = true
         let base = dragOffsetOverride ?? dragOffset
         let verticalSign: CGFloat = base.height < 0 ? -1 : 1
+
+        // Snapshot the live drag-based fade into contentOpacity (no animation — just a
+        // baseline handoff) before switching revealOpacity over to it, so there's no visual
+        // jump at the moment of release.
+        var noAnimation = Transaction()
+        noAnimation.disablesAnimations = true
+        withTransaction(noAnimation) { contentOpacity = 1 - dismissProgress }
+        isDismissing = true
+
+        // Fly-out (position) stays quick; the reveal fade runs slower and independently so
+        // the background doesn't finish fading before the image has visibly moved.
         withAnimation(.easeOut(duration: 0.22)) {
             dragOffset = CGSize(width: base.width, height: verticalSign * exitDistance)
         }
+        withAnimation(.easeOut(duration: 0.45)) {
+            contentOpacity = 0
+        }
         Task {
-            try? await Task.sleep(for: .seconds(0.22))
+            try? await Task.sleep(for: .seconds(0.45))
             dismiss()
         }
     }

@@ -57,16 +57,30 @@ final class GenerationManager {
     /// button's touch-up onto whatever card slides into that screen position. Flushed via
     /// flushPendingInserts() the moment the touch lifts.
     ///
-    /// Bug history: both call sites use DragGesture(minimumDistance: 0) so this also engages on
-    /// a plain tap (not just real drags) — tapping a thumbnail to open its detail sheet is
-    /// itself such a tap. SwiftUI only calls a DragGesture's .onEnded on a *successful*
-    /// recognition; presenting a sheet mid-touch routinely interrupts/cancels the recognizer
-    /// instead, so .onEnded silently never fires and this flag gets stuck true forever. Because
-    /// it's shared app-wide, one stray stuck tap on Feed silently poisons Library too: anything
-    /// that finishes generating afterward sits invisible in pendingNewItems until some other
-    /// drag elsewhere in the app happens to complete normally and flush it — which is why a
-    /// freshly-completed item (e.g. today's Library section) could go missing until an unrelated
-    /// scroll. The watchdog below self-heals a stuck flag without weakening the real protection:
+    /// Gesture threshold: every call site that attaches this buffering gesture DIRECTLY TO THE
+    /// SCROLLVIEW ITSELF uses DragGesture(minimumDistance: 20), NOT 0. A 0-distance DragGesture
+    /// attached to a ScrollView (even via .simultaneousGesture) engages on touch-down and wins
+    /// UIKit gesture arbitration on a quick flick FROM REST, so the scroll view never claims the
+    /// flick and the list doesn't move — while a flick mid-deceleration works because content
+    /// touches aren't delayed then. Raising the threshold to 20pt (the stable value for a
+    /// ScrollView-attached gesture; <=15 is flaky) lets the scroll view claim scroll-intent
+    /// movement first. Tradeoff: this now engages only on a genuine scroll drag (>=20pt), not on
+    /// a stationary tap. That's intentional — buffering during an active scroll is the case that
+    /// matters, and it also eliminates the old stuck-flag class of bug (a tap that opened a sheet
+    /// mid-touch cancelled the 0-distance recognizer so .onEnded never fired, wedging this flag
+    /// true forever and silently poisoning merges app-wide until some unrelated drag flushed it).
+    ///
+    /// This 20pt figure is NOT a universal safe threshold — it's specific to gestures attached to
+    /// the ScrollView itself, which only observe touches and never compete for them. A SwiftUI
+    /// DragGesture attached to CONTENT INSIDE a ScrollView genuinely competes with the
+    /// ScrollView's own pan recognizer, and on iOS 18 NO minimumDistance makes it safe: 30 was
+    /// tried for GenerateView's SwipeToDeleteRow and fast flicks from rest were still eaten
+    /// (bisect-confirmed on device 2026-07-06). Content-attached swipes must instead use a UIKit
+    /// UIPanGestureRecognizer direction-gated in gestureRecognizerShouldBegin (see
+    /// HorizontalSwipeToDeletePan in GenerateView.swift and
+    /// .planning/notes/2026-07-06-generate-fast-swipe-investigation.md).
+    ///
+    /// The watchdog below still self-heals a stuck flag without weakening the real protection:
     /// every onChanged tick (fired continuously through a genuine drag) refreshes the deadline,
     /// so only a truly abandoned/cancelled gesture — one that stops emitting updates — times out.
     var isInteracting = false {

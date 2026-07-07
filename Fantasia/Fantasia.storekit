@@ -1,0 +1,274 @@
+{
+  "identifier" : "9F1B7A2C-3D4E-4F5A-8B6C-1D2E3F4A5B6C",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "topup9990001",
+      "localizations" : [
+        {
+          "description" : "500 credits",
+          "displayName" : "500 Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fantasiaai.topup_9_99",
+      "referenceName" : "Top Up $9.99 (500 credits)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "24.99",
+      "familyShareable" : false,
+      "internalID" : "topup24990002",
+      "localizations" : [
+        {
+          "description" : "1400 credits",
+          "displayName" : "1400 Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fantasiaai.topup_24_99",
+      "referenceName" : "Top Up $24.99 (1400 credits)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "49.99",
+      "familyShareable" : false,
+      "internalID" : "topup49990003",
+      "localizations" : [
+        {
+          "description" : "2900 credits",
+          "displayName" : "2900 Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fantasiaai.topup_49_99",
+      "referenceName" : "Top Up $49.99 (2900 credits)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "99.99",
+      "familyShareable" : false,
+      "internalID" : "topup99990004",
+      "localizations" : [
+        {
+          "description" : "5800 credits",
+          "displayName" : "5800 Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.fantasiaai.topup_99_99",
+      "referenceName" : "Top Up $99.99 (5800 credits)",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "0",
+    "_developerTeamID" : "0",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redemption Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "basicgroup001",
+      "localizations" : [],
+      "name" : "Basic",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "basicmonthly001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "500 credits/month",
+              "displayName" : "Basic Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.basic_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Basic Monthly",
+          "subscriptionGroupID" : "basicgroup001",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "95.88",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "basicyearly001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "500 credits/month, billed yearly",
+              "displayName" : "Basic Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.basic_yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Basic Yearly",
+          "subscriptionGroupID" : "basicgroup001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id" : "progroup002",
+      "localizations" : [],
+      "name" : "Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "24.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "promonthly002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "1400 credits/month",
+              "displayName" : "Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.pro_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "progroup002",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "239.88",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "proyearly002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "1400 credits/month, billed yearly",
+              "displayName" : "Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.pro_yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Yearly",
+          "subscriptionGroupID" : "progroup002",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id" : "creatorgroup003",
+      "localizations" : [],
+      "name" : "Creator",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "99.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "creatormonthly003",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "5800 credits/month",
+              "displayName" : "Creator Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.creator_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Creator Monthly",
+          "subscriptionGroupID" : "creatorgroup003",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "959.88",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "creatoryearly003",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "5800 credits/month, billed yearly",
+              "displayName" : "Creator Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.fantasiaai.creator_yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Creator Yearly",
+          "subscriptionGroupID" : "creatorgroup003",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

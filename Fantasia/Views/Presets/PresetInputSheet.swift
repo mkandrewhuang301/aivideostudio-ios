@@ -51,8 +51,16 @@ struct PresetInputSheet: View {
     @State private var slotInputs: [PresetSlotInput?]
     @State private var text: String = ""
     @State private var selectedStyleId: String?
+    // Client-side only, purely organizational — never sent to the server, no auto-detection
+    // from the uploaded photo (deliberate: see 2026-07-07 notes/
+    // hairstyle-preset-style-images-gender-filter.md). Defaults to showing every style.
+    @State private var styleGenderFilter: PresetStyleGenderTag?
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    // Likeness consent for the upload-driven face presets (Motion Transfer / AI Influencer). These
+    // animate an uploaded face, so we require the user to affirm they have the rights to it before
+    // submitting — pairs with the server-side celebrity-likeness block (celebrityCheckMiddleware).
+    @State private var consentAccepted = false
     // Aspect-ratio chip selection (only rendered when `preset.sheet?.aspectRatios` is non-empty —
     // GPT-Image-2 presets). Seeded from `sheet.defaultAspectRatio` in `init`; nil for every other
     // preset, which instead shows a fixed, non-interactive aspect/length/resolution caption.
@@ -60,6 +68,11 @@ struct PresetInputSheet: View {
 
     // Slot-picker plumbing — one shared picker set, targeted at `activeSlotIndex`.
     @State private var activeSlotIndex: Int?
+    // Source chooser as a confirmationDialog (not a Menu) — a Menu lifts its label into the menu
+    // presentation, dimming/hiding the rest of the sheet (the "Upload media" box appeared to
+    // vanish, user-reported 2026-07-08). The dialog dims everything OVER the sheet content
+    // instead, so the box/cover/header all stay visible behind it.
+    @State private var showSourceDialog = false
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
@@ -113,10 +126,19 @@ struct PresetInputSheet: View {
             .padding(.top, 8)
             .padding(.trailing, 18)
 
-            VStack {
+            VStack(spacing: 10) {
                 Spacer()
+                if requiresLikenessConsent {
+                    consentRow
+                }
                 generateBar
             }
+        }
+        .task {
+            // Warm the backend as soon as the sheet opens — overlaps a cold Railway boot with the
+            // user reading the sheet/picking a style, so the first slot upload isn't racing a
+            // sleeping instance (same pattern as CreditStoreView.swift's pingHealth on open).
+            await APIClient.shared.pingHealth()
         }
         .photosPicker(
             isPresented: $showPhotosPicker,
@@ -146,6 +168,14 @@ struct PresetInputSheet: View {
             guard case .success(let url) = result, let index = activeSlotIndex else { return }
             Task { await handleImportedFile(url, forSlot: index) }
         }
+        .confirmationDialog("Add media", isPresented: $showSourceDialog, titleVisibility: .visible) {
+            Button("Photo Library") { showPhotosPicker = true }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button(activeSlotKind == "video" ? "Record Video" : "Take Photo") { showCameraPicker = true }
+            }
+            Button("Choose File") { showFileImporter = true }
+            Button("Cancel", role: .cancel) {}
+        }
         .confirmationDialog(
             "This video is longer than 30 seconds",
             isPresented: Binding(
@@ -172,19 +202,19 @@ struct PresetInputSheet: View {
     // MARK: - Cover (full-bleed poster+loop, ~42% height, bottom scrim)
 
     private var coverSection: some View {
-        ZStack(alignment: .bottom) {
-            PresetLoopBackground(preset: preset)
-                .allowsHitTesting(false)
-                .clipped()
-
-            LinearGradient(
-                colors: [.clear, .clear, theme.background],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .frame(height: UIScreen.main.bounds.height * 0.42)
-        .clipped()
+        // Cover box (screenHeight * 0.42, full width) is proportionally much wider/shorter
+        // than the source 9:16 loops — a center crop (the old default) chopped the subject's
+        // hair off entirely (user-reported 2026-07-08). focalTop 0 keeps the whole top
+        // (hairline in frame); no zoom (full source width shown).
+        //
+        // No bottom gradient: the user wants a HARD LINE between the cover image and the
+        // header/background below it (2026-07-08 "blur between the image and the effect, I want
+        // a hard line"), not the old [.clear, .clear, theme.background] fade. The .clipped()
+        // frame edge gives that clean cut.
+        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.0)
+            .allowsHitTesting(false)
+            .frame(height: UIScreen.main.bounds.height * 0.42)
+            .clipped()
     }
 
     private var closeButton: some View {
@@ -319,27 +349,9 @@ struct PresetInputSheet: View {
         let input = index < slotInputs.count ? slotInputs[index] : nil
         let height: CGFloat = style == .large ? 220 : 160
 
-        return Menu {
-            Button {
-                activeSlotIndex = index
-                showPhotosPicker = true
-            } label: {
-                Label("Photo Library", systemImage: "photo.on.rectangle")
-            }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button {
-                    activeSlotIndex = index
-                    showCameraPicker = true
-                } label: {
-                    Label(slot.kind == "video" ? "Record Video" : "Take Photo", systemImage: "camera")
-                }
-            }
-            Button {
-                activeSlotIndex = index
-                showFileImporter = true
-            } label: {
-                Label("Choose File", systemImage: "folder")
-            }
+        return Button {
+            activeSlotIndex = index
+            showSourceDialog = true
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 16)
@@ -357,10 +369,22 @@ struct PresetInputSheet: View {
                     )
 
                 if let thumbnail = input?.thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFill()
+                    // Constrain BOTH dimensions (not just height) before scaledToFill, so the
+                    // image zoom-crops to fill the entire tile regardless of its aspect ratio —
+                    // height-only constraint left the width intrinsic, leaving side gaps on
+                    // portrait images / overflow past the rounded corners on landscape ones
+                    // (user-reported 2026-07-08). Color.clear sets the layout frame; the image is
+                    // an overlay so scaledToFill's oversized intrinsic size can't affect layout
+                    // (documented scaledToFill hit-test landmine).
+                    Color.clear
+                        .frame(maxWidth: .infinity)
                         .frame(height: height)
+                        .overlay {
+                            Image(uiImage: thumbnail)
+                                .resizable()
+                                .scaledToFill()
+                                .allowsHitTesting(false)
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .overlay(alignment: .topTrailing) {
                             if slot.kind == "video", let duration = input?.durationSeconds {
@@ -438,6 +462,22 @@ struct PresetInputSheet: View {
 
     // MARK: - Optional style grid
 
+    // "All" always shown; Feminine/Masculine chips only appear when at least one style in this
+    // preset's grid actually declares that tag — presets with no gender_tag data (or an
+    // all-unisex grid) never show a filter row with nothing to filter.
+    private var availableGenderFilters: [PresetStyleGenderTag] {
+        guard let styles = preset.inputSchema?.styleGrid else { return [] }
+        var tags: [PresetStyleGenderTag] = []
+        if styles.contains(where: { $0.genderTag == .feminine }) { tags.append(.feminine) }
+        if styles.contains(where: { $0.genderTag == .masculine }) { tags.append(.masculine) }
+        return tags
+    }
+
+    private func filteredStyles(_ styles: [PresetStyle]) -> [PresetStyle] {
+        guard let styleGenderFilter else { return styles }
+        return styles.filter { $0.genderTag == styleGenderFilter || $0.genderTag == nil }
+    }
+
     @ViewBuilder
     private var styleGridSection: some View {
         if let styles = preset.inputSchema?.styleGrid, !styles.isEmpty {
@@ -446,8 +486,21 @@ struct PresetInputSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(theme.textPrimary)
 
+                if !availableGenderFilters.isEmpty {
+                    HStack(spacing: 8) {
+                        genderFilterChip(label: "All", isSelected: styleGenderFilter == nil) {
+                            styleGenderFilter = nil
+                        }
+                        ForEach(availableGenderFilters, id: \.self) { tag in
+                            genderFilterChip(label: tag == .feminine ? "Feminine" : "Masculine", isSelected: styleGenderFilter == tag) {
+                                styleGenderFilter = tag
+                            }
+                        }
+                    }
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
-                    ForEach(styles, id: \.id) { style in
+                    ForEach(filteredStyles(styles), id: \.id) { style in
                         Button {
                             selectedStyleId = (selectedStyleId == style.id) ? nil : style.id
                         } label: {
@@ -455,6 +508,12 @@ struct PresetInputSheet: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(theme.surface)
                                     .frame(height: 72)
+                                    .overlay {
+                                        if let thumbURL = style.thumbURL {
+                                            CachedThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)", url: thumbURL)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        }
+                                    }
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
                                             .stroke(
@@ -473,6 +532,23 @@ struct PresetInputSheet: View {
                 }
             }
         }
+    }
+
+    private func genderFilterChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isSelected ? Color.white : theme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(isSelected ? presetAccent : theme.surface)
+                )
+                .overlay(
+                    Capsule().stroke(theme.surfaceBorder, lineWidth: isSelected ? 0 : 1)
+                )
+        }
+        .buttonStyle(PressableButtonStyle())
     }
 
     // MARK: - Aspect ratio (selectable chips for GPT-Image-2 presets, else a fixed caption)
@@ -557,6 +633,32 @@ struct PresetInputSheet: View {
     }
 
     // MARK: - Generate bar
+
+    // Likeness-rights attestation for the face presets — required before Generate enables (see
+    // requiresLikenessConsent / isValid). Tapping anywhere on the row toggles the checkbox.
+    private var consentRow: some View {
+        Button {
+            consentAccepted.toggle()
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: consentAccepted ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(consentAccepted ? presetAccent : theme.textSecondary)
+                Text("I have the rights to this face and it isn't a real person's likeness used without permission.")
+                    .font(.caption)
+                    .foregroundStyle(theme.textSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 18)
+        .accessibilityAddTraits(consentAccepted ? [.isSelected] : [])
+    }
 
     private var generateBar: some View {
         HStack(spacing: 14) {
@@ -676,7 +778,14 @@ struct PresetInputSheet: View {
            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
+        if requiresLikenessConsent && !consentAccepted { return false }
         return true
+    }
+
+    /// True for the upload-driven face presets (Motion Transfer / AI Influencer), which require a
+    /// likeness-rights attestation before Generate is enabled.
+    private var requiresLikenessConsent: Bool {
+        preset.mediaType == "avatar" || preset.mediaType == "character_replace"
     }
 
     // MARK: - Slot media handlers
@@ -732,9 +841,13 @@ struct PresetInputSheet: View {
                 capSeconds: nil
             )
         } else {
-            let thumbnail = UIImage(data: data)
+            // Decode/downscale/re-encode to real JPEG first — Photos hands back full-res HEIC,
+            // which the upload below mislabels as image/jpeg without this step (slow payload,
+            // and gpt-image-2 can't decode the mislabeled bytes downstream — root cause of the
+            // "takes forever then Couldn't complete that" report).
+            let prepared = await PresetMediaPrep.shared.prepareImage(data)
             guard let response = try? await APIClient.shared.uploadReferenceMedia(
-                data: data, mimeType: "image/jpeg", fileName: "preset-input.jpg"
+                data: prepared.data, mimeType: "image/jpeg", fileName: "preset-input.jpg"
             ) else {
                 slotInputs[index] = nil
                 errorMessage = "Couldn't upload this image. Try again."
@@ -743,7 +856,7 @@ struct PresetInputSheet: View {
             slotInputs[index] = PresetSlotInput(
                 uploadId: response.id,
                 url: response.url,
-                thumbnail: thumbnail,
+                thumbnail: prepared.thumbnail,
                 isUploading: false,
                 durationSeconds: nil
             )
@@ -871,6 +984,8 @@ struct PresetInputSheet: View {
                 await creditManager.fetchBalance()
             } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
                 errorMessage = "This may not adhere to our community guidelines. Please try again."
+            } else if case .unexpectedResponse(_, let code) = apiError, code == "celebrity_likeness_blocked" {
+                errorMessage = "This image looks like a real public figure. To protect against unauthorized likenesses, we can't animate it. You weren't charged."
             } else {
                 errorMessage = "An error has occurred. Please try again."
             }
@@ -926,6 +1041,31 @@ private actor PresetMediaPrep {
     struct PreparedVideo {
         let data: Data
         let thumbnail: UIImage?
+    }
+
+    struct PreparedImage {
+        let data: Data
+        let thumbnail: UIImage?
+    }
+
+    /// Decode (handles HEIC/PNG/etc. — Photos returns HEIC on-device, but this file's upload path
+    /// hardcodes mimeType "image/jpeg"), downscale so the longest side ≤ maxDimension, and
+    /// re-encode as real JPEG so the bytes actually match the declared mime and the payload is
+    /// small/fast to upload. Falls back to the original data if decoding fails.
+    func prepareImage(_ data: Data, maxDimension: CGFloat = 2048, quality: CGFloat = 0.85) async -> PreparedImage {
+        guard let image = UIImage(data: data) else { return PreparedImage(data: data, thumbnail: nil) }
+        let longest = max(image.size.width, image.size.height)
+        let scaled: UIImage
+        if longest > maxDimension {
+            let f = maxDimension / longest
+            let newSize = CGSize(width: image.size.width * f, height: image.size.height * f)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            scaled = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+        } else {
+            scaled = image
+        }
+        let jpeg = scaled.jpegData(compressionQuality: quality) ?? data
+        return PreparedImage(data: jpeg, thumbnail: scaled)
     }
 
     /// Optionally trims to the first `capSeconds` (D-16/D-17 confirmed trim), transcodes

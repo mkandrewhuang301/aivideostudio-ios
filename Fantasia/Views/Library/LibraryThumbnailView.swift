@@ -16,6 +16,7 @@ struct LibraryThumbnailView: View {
     @Environment(ThemeManager.self) private var theme
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
+    @State private var isMediaPreviewActive = false  // hides the tile while the long-press lift is on screen (no duplicate)
 
     var body: some View {
         // scaledToFill makes the thumbnail's LAYOUT FRAME larger than the cell (clipShape/
@@ -53,12 +54,13 @@ struct LibraryThumbnailView: View {
                     }
                 }
                 .allowsHitTesting(false)
+                // Hidden while the long-press preview is lifted so the lifted copy is the only
+                // visible image (avoids the "two images" duplicate look).
+                .opacity(isMediaPreviewActive ? 0 : 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .clipped()
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onTap)
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottomLeading) {
                 if item.isFavorite {
                     Image(systemName: "heart.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -66,26 +68,34 @@ struct LibraryThumbnailView: View {
                         .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                         .padding(6)
                         .allowsHitTesting(false)
+                        .opacity(isMediaPreviewActive ? 0 : 1)
                 }
             }
-            // Tap-triggered Menu, not .contextMenu — a long-press context menu installs a
-            // recognizer over the WHOLE tile that has to hold every touch to decide whether it's
-            // becoming a menu preview, which eats fast swipes starting on media (confirmed
-            // regression: fixed once by removing .contextMenu, reintroduced later, never
-            // re-verified for scroll feel). A Menu confines that to the small button itself.
-            .overlay(alignment: .topTrailing) {
-                Menu {
-                    Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
-                    Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.35), in: Circle())
-                }
-                .menuOrder(.fixed)
-                .padding(6)
+            // Long-press context menu + tap, UIKit-backed. ⚠️ A SwiftUI .contextMenu here held
+            // every touch-down while the grid was at rest, so very fast flicks starting on a
+            // tile (i.e. anywhere on the grid) died before the ScrollView could claim them —
+            // the "quick swipe from rest doesn't scroll" bug. See ScrollFriendlyContextMenu's
+            // header. The overlay hit-tests the whole tile, so it forwards the plain tap too.
+            .overlay {
+                ScrollFriendlyContextMenu(
+                    menu: {
+                        UIMenu(children: [
+                            UIAction(title: "Name as Reference", image: UIImage(systemName: "tag")) { _ in
+                                onNameAsReference()
+                            },
+                            UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                                onRequestDelete()
+                            }
+                        ])
+                    },
+                    previewImage: item.isImage ? cachedImage : thumbnail,
+                    onTap: onTap,
+                    onPreviewingChanged: { active in isMediaPreviewActive = active },
+                    previewCornerRadius: 8,
+                    showsPlayIcon: !item.isImage,
+                    playIconSize: 28,
+                    showsFavoriteBadge: item.isFavorite
+                )
             }
             .onAppear {
                 if !item.isImage, let urlString = item.videoUrl, thumbnail == nil {

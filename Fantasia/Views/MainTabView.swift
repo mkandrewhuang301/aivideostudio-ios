@@ -91,10 +91,16 @@ struct MainTabView: View {
                 .presentationDetents([.fraction(0.62)])
                 .presentationDragIndicator(.hidden)
         }
-        .fullScreenCover(item: $selectedPreset) { preset in
+        // .sheet (not .fullScreenCover) so it swipe-down-dismisses like the generation detail
+        // pullup (GenerationDetailPagerView) — user request 2026-07-08.
+        .sheet(item: $selectedPreset) { preset in
             PresetInputSheet(preset: preset)
                 .environment(creditManager)
                 .environment(generationManager)
+                .environment(theme)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
     }
 
@@ -136,12 +142,26 @@ struct MainTabView: View {
 
             Button { showProfileSheet = true } label: {
                 HStack(spacing: 12) {
-                    Text(creditManager.totalCreditsPossible > 0
-                         ? "\(creditManager.creditsBalance)/\(creditManager.totalCreditsPossible)"
-                         : "\(creditManager.creditsBalance)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(theme.textSecondary)
-                        .contentTransition(.numericText())
+                    Group {
+                        if creditManager.totalCreditsPossible > 0 {
+                            Text("\(creditManager.creditsBalance)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(theme.textSecondary)
+                            // Emphasized separator — heavier weight + primary (vs. secondary)
+                            // text color so current/total reads as a clear ratio, not one blob.
+                            + Text("/")
+                                .font(.system(size: 13, weight: .heavy))
+                                .foregroundStyle(theme.textPrimary)
+                            + Text("\(creditManager.totalCreditsPossible)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(theme.textSecondary)
+                        } else {
+                            Text("\(creditManager.creditsBalance)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                    }
+                    .contentTransition(.numericText())
                     CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
                 }
                 .frame(height: 44)

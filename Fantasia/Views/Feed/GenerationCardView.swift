@@ -195,8 +195,13 @@ struct GenerationCardView: View {
         // D-11/T-09.1-03: preset Remix reopens PresetInputSheet prefilled from this row's stored
         // preset_input_upload_ids (re-signed via the existing GET /api/uploads reference
         // machinery) — never the composer (remixGenerationRequested is never posted on this path).
-        .fullScreenCover(item: $presetForRemix) { preset in
+        // .sheet (not .fullScreenCover) so it swipe-down-dismisses like the generation detail
+        // pullup (GenerationDetailPagerView) — user request 2026-07-08.
+        .sheet(item: $presetForRemix) { preset in
             PresetInputSheet(preset: preset, prefillSlots: remixPrefillSlots)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
 
         // Progress jitter lifecycle (D-10, D-11) — Task.sleep, not Timer

@@ -38,15 +38,13 @@ struct GenerateView: View {
     // promptText's end (e.g. after a previously inserted [Image1] token).
     @State private var promptTextRange: NSRange?
     @State private var promptTextHeight: CGFloat = 22
+    // Fixed top inset for the composer's first text line, replacing the old ZStack
+    // center-alignment: centering a `max(44, promptTextHeight)`-tall box made the top gap shrink
+    // toward 0 once text wrapped to a 2nd line (content height crossed the 44pt floor, so the
+    // centering slack that used to pad the top disappeared). (44 - single-line height 22) / 2.
+    private let promptFirstLineTopInset: CGFloat = 11
     @State private var showProfileSheet = false
     @State private var promptFocused: Bool = false
-    // T2: keyboard-overlap tracking so the composer rides the keyboard during interactive
-    // scroll-to-dismiss (UIKeyboardLayoutGuide tracks the drag frame-by-frame; SwiftUI's own
-    // keyboard safe-area avoidance only animates begin/end and stays put mid-drag).
-    // Only used by the reference panel's home-indicator padding (panel is shown while the
-    // keyboard is DOWN, so this is never polluted by keyboard avoidance). NOT used for composer
-    // keyboard positioning — see .planning/notes/keyboard-composer-architecture.md (Config C).
-    @State private var bottomSafeAreaInset: CGFloat = 0
 
     // D-18: option state with defaults
     @State private var selectedMode = "AI Video"
@@ -59,6 +57,7 @@ struct GenerateView: View {
 
     // Multi-reference attachment state
     @State private var selectedPickerItem: PhotosPickerItem?
+    private let maxReferences = 3
     @State private var attachedReferences: [AttachedReference] = []
     // Keys are a token's inner text (lowercased, no brackets) — feeds HighlightingTextView's
     // inline pill rendering (Issue 6). Rebuilt whenever a reference is added/removed/renamed.
@@ -77,6 +76,9 @@ struct GenerateView: View {
     // Media library + @-mention state
     @State private var mentionQuery: String? = nil
     @State private var showReferencePanel = false
+    // Live downward-drag translation while swiping the reference panel down to dismiss it.
+    // Render-only offset on the PANEL (not the composer) — resting composer position is unaffected.
+    @State private var referencePanelDragOffset: CGFloat = 0
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -186,7 +188,25 @@ struct GenerateView: View {
             // in a multiline prompt AND fought with the paperclip/options/remove-reference
             // buttons for the touch.
             background
-                .onTapGesture { promptFocused = false }
+                .onTapGesture {
+                    promptFocused = false
+                    // Escape hatch: if the reference panel ever desyncs from the composer's
+                    // hit-testing (see the panel-open call site's race note), this background
+                    // tap still lands and gives the user a way out even when the textbox/X
+                    // buttons don't respond. Same cleanup as swipe-dismiss: drop the bare "@",
+                    // close the panel, don't refocus.
+                    if showReferencePanel { dismissReferencePanelViaSwipe() }
+                }
+                // Covers the empty-history state (centerContent/chips, no ScrollView present) —
+                // the ScrollView case below has its own copy of this same drag-to-dismiss check
+                // since the ScrollView sits on top of this background and claims the touch there.
+                // See that gesture's comment for why this mirrors .scrollDismissesKeyboard.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { _ in
+                            if showReferencePanel { dismissReferencePanelViaSwipe() }
+                        }
+                )
 
             VStack(spacing: 0) {
                 topBar
@@ -261,17 +281,32 @@ struct GenerateView: View {
                             Task { await loadOlderHistory(proxy: proxy) }
                         }
                         .defaultScrollAnchor(.bottom)
-                        .scrollDismissesKeyboard(.interactively)
+                        // .immediately (not .interactively): a small swipe outside the composer
+                        // drops the keyboard right away while the content keeps scrolling in the
+                        // same gesture, rather than needing to drag all the way past the keyboard.
+                        .scrollDismissesKeyboard(.immediately)
                         .onChange(of: generationManager.generations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
-                        // Brackets touch-down -> touch-up with isInteracting so
+                        // Brackets an active scroll drag with isInteracting so
                         // GenerationManager.mergeLatest() buffers new items instead of
-                        // prepending mid-touch (ported from the old FeedView pattern).
+                        // prepending mid-scroll (ported from the old FeedView pattern).
+                        // minimumDistance MUST stay >= 20: a 0-distance DragGesture on a
+                        // ScrollView engages on touch-down and wins arbitration on a quick flick
+                        // from rest, blocking the scroll (see LibraryView + GenerationManager
+                        // .isInteracting doc comment). This is the merge-buffering gesture only —
+                        // it does NOT touch the composer/keyboard positioning.
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                            DragGesture(minimumDistance: 20, coordinateSpace: .global)
                                 .onChanged { _ in
                                     generationManager.isInteracting = true
+                                    // The @-reference panel replaces the keyboard while it's open,
+                                    // so .scrollDismissesKeyboard(.immediately) above has nothing
+                                    // to dismiss then. Mirror that exact behavior for the panel: a
+                                    // drag starting here (outside the composer, over the history)
+                                    // closes it right away, the same way it would drop the
+                                    // keyboard, and the composer settles back down as a result.
+                                    if showReferencePanel { dismissReferencePanelViaSwipe() }
                                 }
                                 .onEnded { _ in generationManager.isInteracting = false }
                         )
@@ -279,15 +314,6 @@ struct GenerateView: View {
                 }
             }
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { bottomSafeAreaInset = geo.safeAreaInsets.bottom }
-                    .onChange(of: geo.safeAreaInsets.bottom) { _, newValue in
-                        bottomSafeAreaInset = newValue
-                    }
-            }
-        )
         // Keyboard positioning: SwiftUI's built-in avoidance ALONE lifts the bottom safeAreaInset
         // composer above the keyboard (Config C — see .planning/notes/keyboard-composer-architecture.md).
         // Do NOT add .ignoresSafeArea(.keyboard) + manual keyboardOverlap padding here: that
@@ -297,9 +323,16 @@ struct GenerateView: View {
             VStack(spacing: 6) {
                 if let msg = errorMessage {
                     Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(.red.opacity(0.85))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.red, lineWidth: 1)
+                        )
                         .padding(.horizontal, 16)
                         .transition(.opacity)
                 }
@@ -311,7 +344,13 @@ struct GenerateView: View {
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showReferencePanel)
-            .animation(.easeOut(duration: 0.22), value: promptFocused)
+            // MUST exactly match UIKit's keyboard animation curve (mass 3 / stiffness 1000 /
+            // damping 500). The composer's dismiss motion is (keyboard lift → 0, system-timed)
+            // plus (padding 6 → 65, this animation). Identical curves ⇒ strictly monotonic
+            // descent, lowest point at the end. ANY slower curve here makes the padding lag the
+            // keyboard, so the composer dips below its resting spot and bounces back up at the
+            // end of dismiss (tried 2026-07-06, reverted). Do not retune independently.
+            .animation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500), value: promptFocused)
             // Constant base padding only — SwiftUI's keyboard avoidance adds the keyboard lift on
             // top (Config C). Focused: 6pt breathing room above the keyboard. Unfocused: 65pt to
             // clear the custom tab bar. Panel open: flush above the safe area (panel has its own
@@ -324,22 +363,10 @@ struct GenerateView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
             )
-            // Dismiss on a SMALL downward flick on the composer — fires mid-gesture (.onChanged),
-            // not only on release, so a short downward movement drops the keyboard + composer
-            // right away (Config C's .animation(value: promptFocused) animates them down together).
-            // Guarded to a clearly-vertical-downward vector so horizontal pill-row scrolls and
-            // taps aren't stolen. This is dismiss LOGIC only — it does NOT move the composer's
-            // resting position (frozen). See .planning/notes/keyboard-composer-architecture.md.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        guard promptFocused else { return }
-                        if value.translation.height > 14,
-                           value.translation.height > abs(value.translation.width) * 1.5 {
-                            promptFocused = false
-                        }
-                    }
-            )
+            // No dismiss-on-drag gesture here by design — swiping down anywhere inside the
+            // composer (text box, paperclip column, divider gap, options row) must never dismiss
+            // the keyboard; only the history ScrollView's .scrollDismissesKeyboard(.immediately)
+            // (outside the composer) does that now. See .planning/notes/keyboard-composer-architecture.md.
         }
         .onChange(of: promptText) { old, new in
             // Atomic token deletion now happens inside HighlightingTextView's UITextView
@@ -366,8 +393,26 @@ struct GenerateView: View {
                     // further filter text, so mentionQuery stays "" and mentionSuggestions falls
                     // back to defaultMentionSuggestions.
                     promptFocused = false
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = true }
                     Task { await mediaLibrary.load() }
+                    // Insert the panel only once the keyboard is FULLY down. Adding a 300pt
+                    // child to the keyboard-avoiding bottom safeAreaInset while the dismissal is
+                    // still animating races the collapsing geometry — when the race is lost the
+                    // inset renders in one place but hit-tests in another, freezing the whole
+                    // composer (can't type, X buttons dead). A single deferred runloop tick
+                    // (tried previously) does NOT guarantee the keyboard is down, only that
+                    // resignFirstResponder started; waiting for keyboardDidHide does. The
+                    // timeout covers hardware-keyboard / already-hidden cases where the
+                    // notification never fires. Does NOT change the composer's frozen
+                    // position/padding. See
+                    // .planning/notes/2026-07-06-reference-panel-cutoff-freeze-investigation.md.
+                    Task { @MainActor in
+                        await waitForKeyboardHidden(timeout: .milliseconds(500))
+                        guard mentionQuery != nil, !showReferencePanel else { return }
+                        // Start flush regardless of any leftover drag offset from a prior
+                        // swipe-dismiss, so the slide-in transition begins from y=0.
+                        referencePanelDragOffset = 0
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = true }
+                    }
                 }
             } else if !showReferencePanel {
                 // Panel hide is explicit now (select/cancel) — with the keyboard down while the
@@ -391,6 +436,7 @@ struct GenerateView: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
         }
         .onChange(of: selectedPickerItem) { _, newItem in
+            guard newItem != nil else { return }
             Task { await handlePickerSelection(newItem) }
         }
         // Keyed on id + displayName so both attach/remove and rename trigger a rebuild — the
@@ -686,9 +732,17 @@ struct GenerateView: View {
                     .padding(.trailing, 50)
                     .offset(y: 4)
                     .transition(.scale.combined(with: .opacity))
+                    // Scoped to just this button (not the whole ZStack): an .animation(value:)
+                    // on the shared parent also reaches the placeholder Text inside
+                    // promptBarContent, which used to need a `.transaction { $0.animation = nil }`
+                    // escape hatch to avoid fading with this button. That escape hatch
+                    // unconditionally stripped animation from EVERY transaction reaching the
+                    // placeholder — including the composer's own keyboard-position spring — so
+                    // the placeholder snapped instantly instead of riding the composer up/down
+                    // with the keyboard. Scoping the fade here removes the need for that hatch.
+                    .animation(.easeOut(duration: 0.15), value: promptText.isEmpty)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: promptText.isEmpty)
         .padding(.horizontal, 14)
         .padding(.bottom, 8)
     }
@@ -714,6 +768,10 @@ struct GenerateView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Menu {
                         Button {
+                            guard attachedReferences.count < maxReferences else {
+                                showError("You can attach up to \(maxReferences) references.")
+                                return
+                            }
                             showPhotosPicker = true
                         } label: {
                             Label("Photo Library", systemImage: "photo.on.rectangle")
@@ -735,6 +793,7 @@ struct GenerateView: View {
                             .font(.system(size: 19, weight: .medium))
                             .foregroundStyle(theme.textSecondary)
                             .frame(width: 36, height: 36)
+                            .offset(y: 3)
                     }
                     // The menu pops upward from this bottom-anchored button, and iOS renders
                     // upward-popping menus bottom-to-top by default — .fixed keeps declared
@@ -760,10 +819,15 @@ struct GenerateView: View {
                 // and can never diverge (the old two-layer ghost-text ZStack let SwiftUI's Text
                 // and the TextField wrap long words at different points, landing the caret
                 // mid-word). UITextView handles its own internal scrolling past maxHeight.
-                // .leading (vertical-center) alignment, not .topLeading: the text view reports
-                // its intrinsic ~22pt height via sizeThatFits and gets centered inside the 44pt
-                // frame below, so a top-aligned placeholder sat ~11pt above the actual caret.
-                // Centering both keeps placeholder and caret on the same line.
+                // .top alignment with a single shared `promptFirstLineTopInset` padding wrapping
+                // the whole ZStack (not ZStack-centering inside `max(44, promptTextHeight)`):
+                // centering made the gap above line 1 depend on line count — it shrank toward 0
+                // once wrapped text made the content height cross the 44pt floor, since there was
+                // no more slack to center into. A constant top inset keeps line 1 at the same
+                // offset regardless of how many lines follow. The inset MUST be a single padding
+                // wrapping both the placeholder and the text view (not one `.padding` per child) —
+                // two separately-applied paddings looked equivalent but didn't land identically:
+                // the UITextView's caret rendered visibly higher than the placeholder text.
                 // Wrapping VStack leaves the ZStack's own frame/padding untouched (placeholder/
                 // caret positioning stays exactly as tuned above) and adds a separate, purely
                 // decorative-turned-tappable spacer below it that stretches to match the row's
@@ -772,12 +836,22 @@ struct GenerateView: View {
                 // dead zone previously belonged to no view at all. Doesn't overlap the ZStack's
                 // own bounds, so HighlightingTextView's native tap-to-place-caret is unaffected.
                 VStack(spacing: 0) {
-                    ZStack(alignment: .leading) {
+                    ZStack(alignment: .topLeading) {
                         if promptText.isEmpty {
                             Text("Describe a scene...")
                                 .font(.body)
                                 .foregroundStyle(theme.textTertiary)
                                 .allowsHitTesting(false)
+                                // No `.transaction { $0.animation = nil }` here (removed 2026-07-06):
+                                // that used to be needed to opt this placeholder out of the
+                                // clear-button's fade animation, but it unconditionally stripped
+                                // animation from EVERY transaction reaching this view — including
+                                // the composer's own keyboard-position spring — so the placeholder
+                                // snapped instantly instead of moving with the composer on
+                                // focus/dismiss. The fade animation is now scoped directly to
+                                // clearPromptButton in `promptBar`, so this Text no longer needs an
+                                // escape hatch and freely inherits the composer's real positioning
+                                // animation.
                         }
                         HighlightingTextView(
                             text: $promptText,
@@ -787,15 +861,24 @@ struct GenerateView: View {
                             accentColor: UIColor(accent),
                             textColor: UIColor(theme.textPrimary),
                             tokenThumbnails: tokenThumbnails,
-                            onTokenDeleted: { inner in dereferenceToken(inner) },
-                            onDragDismiss: { promptFocused = false }
+                            onTokenDeleted: { inner in dereferenceToken(inner) }
                         )
-                        .frame(height: max(44, promptTextHeight))
                     }
-                    // leading 0 (was 4) moves the prompt text closer to the paperclip; trailing 8
-                    // (was 15) pushes the wrap/cutoff further right so text gets more width.
+                    .padding(.top, promptFirstLineTopInset)
+                    // Explicit content-driven height (restored 2026-07-07): promptTextHeight is
+                    // the UITextView's content height already capped at its maxHeight by
+                    // recalcHeight, so this floors at 44 and tops out at the cap — giving the box a
+                    // STABLE bounded height so the UITextView scrolls internally past ~4 lines.
+                    // Regression it fixes: today's edit dropped this frame in favor of
+                    // sizeThatFits/.fixedSize sizing, which left promptTextHeight as dead state that
+                    // still churned every layout pass (glitchy, wouldn't scroll). +inset so the
+                    // 11pt top padding above isn't clipped off the last line. Keeps the .topLeading
+                    // placeholder fix intact.
+                    .frame(height: max(44, promptTextHeight + promptFirstLineTopInset), alignment: .top)
+                    // leading 0 (was 4) moves the prompt text closer to the paperclip; trailing 2
+                    // (was 15, then 8, then 5) pushes the wrap/cutoff further right so text gets more width.
                     .padding(.leading, 0)
-                    .padding(.trailing, 8)
+                    .padding(.trailing, 2)
                     // Placeholder+caret vertical position: smaller top padding = higher (was 16→10→4).
                     // Bottom 4 (was 14) shrinks the gap between the last text line and the divider.
                     // See .planning/notes/keyboard-composer-architecture.md.
@@ -856,9 +939,10 @@ struct GenerateView: View {
                     .disabled(isSubmitDisabled)
 
                     creditCostLabel
+                        .offset(y: 3)
                 }
                 .padding(.trailing, 10)
-                .padding(.bottom, 8)
+                .padding(.bottom, 4)
                 // Bottom-anchored (not top) so the arrow+credits track the bottom of the row as
                 // the text box grows across lines (up to its ~4-line max), landing next to the
                 // divider instead of staying stranded near the top on a tall prompt.
@@ -900,22 +984,51 @@ struct GenerateView: View {
         let totalWidth = 40 + CGFloat(max(0, visible.count - 1)) * 3
         return ZStack(alignment: .bottomLeading) {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, ref in
-                referenceCard(ref)
+                referenceCard(ref, isTop: index == visible.count - 1)
                     .offset(x: CGFloat(index) * 3, y: 0)
                     .zIndex(Double(index))
             }
         }
-        .frame(width: totalWidth, height: 54)
+        .frame(width: totalWidth, height: 52)
     }
 
+    // Cards fan with only a 3pt offset, so the underlying thumbnails just peek out at the left
+    // edge. Only the frontmost (top) card shows its X + name label — otherwise every stacked
+    // card renders its own full-width label at the same spot, piling into illegible overlapping
+    // text (e.g. "Image 1"/"Image 2" mashing into "Iimage 12"). The label space is still reserved
+    // (opacity, not removal) on the hidden cards so all thumbnails stay vertically aligned.
     @ViewBuilder
-    private func referenceCard(_ ref: AttachedReference) -> some View {
+    private func referenceCard(_ ref: AttachedReference, isTop: Bool) -> some View {
         let label = attachedReferenceLabel(ref)
-        ZStack(alignment: .topTrailing) {
-            VStack(spacing: 3) {
-                // Thumbnail
+        VStack(spacing: 2) {
+            // X sits on the thumbnail only — keeping it in an outer ZStack that also wrapped
+            // the name label pinned it to the full card height and made the label overlap the
+            // media.
+            ZStack(alignment: .topTrailing) {
                 Group {
-                    if ref.isUploading {
+                    if ref.isUploading, let thumb = ref.thumbnail {
+                        // Show the already-available thumbnail immediately with a subtle spinner
+                        // overlay, rather than hiding it behind a full blank spinner while the
+                        // upload is still in flight.
+                        Color.clear
+                            .overlay {
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .allowsHitTesting(false)
+                            }
+                            .clipped()
+                            .contentShape(Rectangle())
+                            .overlay {
+                                ZStack {
+                                    Color.black.opacity(0.25)
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.5)
+                                }
+                            }
+                    } else if ref.isUploading {
+                        // No thumbnail yet (e.g. a video still being prepared).
                         ZStack {
                             Color.white.opacity(0.08)
                             ProgressView()
@@ -954,21 +1067,24 @@ struct GenerateView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
 
-                // Name label
-                Text(label)
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .lineLimit(1)
-                    .frame(width: 40)
+                if isTop {
+                    Button { removeReference(ref) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white)
+                            .background(Color.black.opacity(0.5), in: Circle())
+                    }
+                    .offset(x: 4, y: -4)
+                }
             }
+            .frame(width: 40, height: 40)
 
-            Button { removeReference(ref) } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white)
-                    .background(Color.black.opacity(0.5), in: Circle())
-            }
-            .offset(x: 1, y: -10)
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(theme.textSecondary)
+                .lineLimit(1)
+                .frame(width: 40)
+                .opacity(isTop ? 1 : 0)
         }
         .contextMenu(menuItems: {
             if !ref.isUploading,
@@ -1012,34 +1128,55 @@ struct GenerateView: View {
 
     private var referencePanel: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("References")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(theme.textPrimary)
-                Spacer()
-                Button {
-                    cancelReferencePanel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(theme.textSecondary)
-                        .frame(width: 28, height: 28)
-                        .background(theme.surface, in: Circle())
+            // Grabber + title row double as the swipe-down-to-dismiss handle: the drag lives on
+            // this non-scrolling top region only (NOT the grid below) so dragging the finger over
+            // the thumbnail grid still scrolls it instead of dismissing the panel.
+            VStack(spacing: 0) {
+                Capsule()
+                    .fill(theme.textSecondary.opacity(0.35))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                HStack {
+                    Text("References")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(theme.textPrimary)
+                    Spacer()
+                    Button {
+                        cancelReferencePanel()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 28, height: 28)
+                            .background(theme.surface, in: Circle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        referencePanelDragOffset = max(0, value.translation.height)
+                    }
+                    .onEnded { value in
+                        if value.translation.height > 80 {
+                            dismissReferencePanelViaSwipe()
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                referencePanelDragOffset = 0
+                            }
+                        }
+                    }
+            )
 
             if mediaLibrary.isLoading {
                 Spacer(minLength: 0)
-                HStack(spacing: 8) {
-                    ProgressView().tint(theme.textSecondary)
-                    Text("Loading…")
-                        .font(.caption)
-                        .foregroundStyle(theme.textSecondary)
-                }
+                ReferencePanelLoadingIndicator(textColor: theme.textSecondary)
                 Spacer(minLength: 0)
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
@@ -1086,7 +1223,13 @@ struct GenerateView: View {
                 }
             }
         }
-        .padding(.bottom, max(24, bottomSafeAreaInset))
+        // Constant, NOT measured: the panel sits above MainTabView's 90pt tab-bar safe-area
+        // inset, so the home indicator can never overlap it — and measuring
+        // safeAreaInsets.bottom here was poisoned by SwiftUI keyboard avoidance (inflates to
+        // keyboard height while the keyboard is up / mid-dismiss), which compressed the grid
+        // to a sliver inside this fixed 300pt frame. See
+        // .planning/notes/2026-07-06-reference-panel-cutoff-freeze-investigation.md.
+        .padding(.bottom, 24)
         .frame(height: 300)
         .frame(maxWidth: .infinity)
         .background(theme.elevatedBackground)
@@ -1094,6 +1237,9 @@ struct GenerateView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(theme.divider).frame(height: 0.5)
         }
+        // Render-only follow of the swipe-down drag; reset to 0 whenever the panel is dismissed
+        // so the next open starts flush. Does not affect the composer's layout above it.
+        .offset(y: referencePanelDragOffset)
     }
 
     /// Cell tap: commits the token/reference (unchanged commitMention logic), closes the panel,
@@ -1104,8 +1250,8 @@ struct GenerateView: View {
         promptFocused = true
     }
 
-    /// X button or drag-down cancel: removes the typed "@" (bare trigger, no filter text since
-    /// the keyboard was down), closes the panel, and refocuses the composer keyboard.
+    /// X button cancel: removes the typed "@" (bare trigger, no filter text since the keyboard was
+    /// down), closes the panel, and refocuses the composer keyboard (tap-target implies "keep typing").
     private func cancelReferencePanel() {
         if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
             promptText.replaceSubrange(range, with: "")
@@ -1115,19 +1261,59 @@ struct GenerateView: View {
         promptFocused = true
     }
 
+    /// Swipe-down-to-dismiss: same cleanup as cancelReferencePanel (drop the bare "@", close the
+    /// panel) but does NOT refocus — popping the keyboard back up on a downward dismissal gesture
+    /// reads as contradictory, so a swipe-away lands on the resting (unfocused) composer instead.
+    private func dismissReferencePanelViaSwipe() {
+        if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
+            promptText.replaceSubrange(range, with: "")
+        }
+        mentionQuery = nil
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+    }
+
+    /// Suspends until UIKit posts keyboardDidHide, or the timeout elapses (covers the
+    /// already-hidden / hardware-keyboard cases where the notification never fires). Used to
+    /// gate the @-reference panel's insertion so it never lands mid-dismiss-animation — see
+    /// the panel-open call site above for why that race froze the composer.
+    @MainActor
+    private func waitForKeyboardHidden(timeout: Duration) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIResponder.keyboardDidHideNotification
+                ) { break }
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+            }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
     @ViewBuilder
     private func libraryItemThumbnail(cacheKey: String, isVideo: Bool, url: String?, size: CGFloat = 64) -> some View {
         let radius = size * 0.125
         ZStack {
             if isVideo {
-                LinearGradient(
-                    colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
-                             Color(red: 0.416, green: 0.561, blue: 0.878)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-                Image(systemName: "video.fill")
-                    .font(.system(size: size * 0.31, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                // Video reference uploads have no stored preview frame (see MentionCandidate.
+                // thumbnailURL — nil for .upload), so they keep the generic placeholder. A
+                // generation's completedMediaUrl IS playable media we already have, so extract
+                // an actual frame from it instead of showing the same placeholder for every
+                // video candidate (fixes "Last Generation" always rendering as a plain icon).
+                if let urlStr = url, let videoURL = URL(string: urlStr) {
+                    CachedVideoFrameThumbnail(cacheKey: cacheKey + "-lib", videoURL: videoURL)
+                } else {
+                    LinearGradient(
+                        colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
+                                 Color(red: 0.416, green: 0.561, blue: 0.878)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "video.fill")
+                        .font(.system(size: size * 0.31, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
             } else {
                 // Perf: cacheKey is the mention candidate's stable DB id (upload or generation
                 // id) — see CachedThumbnailImage for why this replaces AsyncImage here.
@@ -1270,6 +1456,11 @@ struct GenerateView: View {
     /// Uploads a raw attachment and adds its reference card + prompt token. Shared by the
     /// photo library, camera, and file import sources behind the paperclip menu.
     private func handleAttachedData(_ data: Data, isVideo: Bool) async {
+        // Central cap enforcement — covers camera + file-import sources too, not just the picker.
+        guard attachedReferences.count < maxReferences else {
+            showError("You can attach up to \(maxReferences) references.")
+            return
+        }
         // Compute slot before appending
         let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
         let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
@@ -1428,17 +1619,21 @@ struct GenerateView: View {
     /// populate synchronously; anything else is fetched async and merged in once ready.
     private func rebuildTokenThumbnails() {
         var result: [String: UIImage] = [:]
-        var pending: [(inner: String, cacheKey: String, url: URL)] = []
+        var pendingImages: [(inner: String, cacheKey: String, url: URL, refId: String)] = []
+        var pendingVideos: [(inner: String, cacheKey: String, url: URL, refId: String)] = []
         var imageCount = 0
         var videoCount = 0
         for ref in attachedReferences {
             if ref.isVideo { videoCount += 1 } else { imageCount += 1 }
             let token = ref.compositionToken(imageSlot: imageCount, videoSlot: videoCount)
             let inner = String(token.dropFirst().dropLast()).lowercased()
+            let cacheKey = (ref.uploadId ?? ref.id) + "-tokenpill"
             if let thumb = ref.thumbnail {
                 result[inner] = thumb
-            } else if let urlStr = ref.thumbnailURL ?? (ref.isVideo ? nil : ref.url), let url = URL(string: urlStr) {
-                pending.append((inner, (ref.uploadId ?? ref.id) + "-tokenpill", url))
+            } else if ref.isVideo, !ref.url.isEmpty, let url = URL(string: ref.url) {
+                pendingVideos.append((inner, cacheKey, url, ref.id))
+            } else if let url = URL(string: ref.thumbnailURL ?? ref.url) {
+                pendingImages.append((inner, cacheKey, url, ref.id))
             }
         }
         tokenThumbnails = result
@@ -1447,20 +1642,43 @@ struct GenerateView: View {
         // a different image is attached under the same token before the old fetch resolves).
         tokenThumbnailsGeneration += 1
         let gen = tokenThumbnailsGeneration
-        for item in pending {
+        for item in pendingImages {
             Task {
                 if let cached = await ThumbnailCache.shared.image(for: item.cacheKey) {
                     guard gen == tokenThumbnailsGeneration else { return }
-                    tokenThumbnails[item.inner] = cached
+                    applyFetchedTokenThumbnail(cached, inner: item.inner, refId: item.refId, cacheKey: item.cacheKey)
                     return
                 }
                 guard let (data, _) = try? await URLSession.shared.data(from: item.url),
                       let downloaded = UIImage(data: data) else { return }
                 let thumb = downloaded.preparingThumbnail(of: CGSize(width: 80, height: 80)) ?? downloaded
-                ThumbnailCache.shared[item.cacheKey] = thumb
                 guard gen == tokenThumbnailsGeneration else { return }
-                tokenThumbnails[item.inner] = thumb
+                applyFetchedTokenThumbnail(thumb, inner: item.inner, refId: item.refId, cacheKey: item.cacheKey)
             }
+        }
+        for item in pendingVideos {
+            Task {
+                if let cached = await ThumbnailCache.shared.image(for: item.cacheKey) {
+                    guard gen == tokenThumbnailsGeneration else { return }
+                    applyFetchedTokenThumbnail(cached, inner: item.inner, refId: item.refId, cacheKey: item.cacheKey)
+                    return
+                }
+                guard let extracted = await MediaPrepService.shared.thumbnailFromVideo(at: item.url) else { return }
+                let thumb = extracted.preparingThumbnail(of: CGSize(width: 80, height: 80)) ?? extracted
+                guard gen == tokenThumbnailsGeneration else { return }
+                applyFetchedTokenThumbnail(thumb, inner: item.inner, refId: item.refId, cacheKey: item.cacheKey)
+            }
+        }
+    }
+
+    /// Merges a fetched thumbnail into the inline-pill dict and backfills the paperclip chip
+    /// when the reference row is still showing a generic video placeholder.
+    private func applyFetchedTokenThumbnail(_ thumb: UIImage, inner: String, refId: String, cacheKey: String) {
+        ThumbnailCache.shared[cacheKey] = thumb
+        tokenThumbnails[inner] = thumb
+        if let idx = attachedReferences.firstIndex(where: { $0.id == refId }),
+           attachedReferences[idx].thumbnail == nil {
+            attachedReferences[idx].thumbnail = thumb
         }
     }
 
@@ -1786,7 +2004,12 @@ struct GenerateView: View {
                 generationManager.removeGeneration(id: item.id)
             }
         } catch {
+            // A failed delete used to fail completely silently — the row just sprang back
+            // closed with zero explanation, which reads as "nothing happened" or "it's stuck"
+            // if the user doesn't notice the closing animation. Surface it like every other
+            // network failure in this view (showError banner).
             print("[GenerateView] delete error: \(error)")
+            showError("Couldn't delete — check your connection and try again.")
         }
         deletingItemIds.remove(item.id)
     }
@@ -1811,6 +2034,31 @@ struct GenerateView: View {
     }
 }
 
+/// References panel loading state. Appears fresh each time `mediaLibrary.isLoading` flips true
+/// (it's only in the view hierarchy while loading) and is torn down — cancelling its `.task` —
+/// the moment loading finishes, so the delay timer never leaks across load cycles. Most loads
+/// resolve via MediaLibraryManager's cache almost instantly; the "waking up" copy only appears
+/// if a real network fetch is still in flight after 1.5s, i.e. the rare case where the Railway
+/// backend cold-started (see FantasiaApp's keep-warm ping, which is the primary mitigation).
+private struct ReferencePanelLoadingIndicator: View {
+    let textColor: Color
+    @State private var isSlow = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().tint(textColor)
+            Text(isSlow ? "Waking up the server — almost there…" : "Loading…")
+                .font(.caption)
+                .foregroundStyle(textColor)
+        }
+        .task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            isSlow = true
+        }
+    }
+}
+
 // MARK: - SwipeToDeleteRow
 
 /// Standard iOS drag-to-delete for a plain VStack-in-ScrollView (no free .swipeActions here).
@@ -1825,20 +2073,26 @@ private struct SwipeToDeleteRow<Content: View>: View {
     var isHeldOpen: Bool = false
     @ViewBuilder var content: () -> Content
 
-    // @GestureState (not @State) auto-resets to 0 whenever the gesture ends for ANY reason,
-    // including being cancelled mid-drag when the ScrollView claims the touch instead (the
-    // common case: a mostly-vertical scroll with a slight horizontal wobble). resetTransaction
-    // animates that snap-back so the card springs home instead of teleporting.
+    // ⚠️ Fast-flick-from-rest fix (2026-07-06): the swipe is driven by a UIKit
+    // UIPanGestureRecognizer (HorizontalSwipeToDeletePan below), NOT a SwiftUI DragGesture.
+    // Do not convert this back to a SwiftUI gesture.
     //
-    // T9 fix: direction used to be re-evaluated on every .updating tick (abs(w) > abs(h) * 1.5),
-    // so mid-drag wobble flapped the guard — state updates stopped/resumed while the vertical
-    // ScrollView simultaneously scrolled, producing red-pane flicker and a gesture that often
-    // ended without cleanly crossing the threshold. Direction is now decided once, near the
-    // start of the drag, and locked for the rest of the gesture.
-    private enum DragDirection { case undetermined, horizontal, vertical }
-
-    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.35, dampingFraction: 0.8)))
-    private var drag: (width: CGFloat, direction: DragDirection) = (0, .undetermined)
+    // Why: a SwiftUI DragGesture attached to CONTENT INSIDE the ScrollView competes with the
+    // ScrollView's own pan for the touch. On iOS 18, a fast flick from rest covers the drag's
+    // minimumDistance within the first touch sample or two, so the row's drag recognized
+    // BEFORE the scroll pan could claim — the drag then did nothing visually (vertical
+    // direction lock) and the flick was completely eaten: no scroll, no reveal. Slow drags
+    // were unaffected (the scroll pan claims at ~10pt and wins that race). Bisect-confirmed
+    // on device: raising minimumDistance 20 -> 30 did NOT fix it; fully disabling the gesture
+    // made the feed perfectly smooth. The scroll-attached gestures elsewhere (e.g.
+    // GenerationManager.isInteracting buffering, min 20) only observe and never compete —
+    // they are a different, safe case.
+    //
+    // The UIKit pan is gated in gestureRecognizerShouldBegin to horizontal-dominant leftward
+    // velocity, so for any vertical movement it FAILS instantly and never enters the race —
+    // this is how UIKit swipe-rows (Mail/Messages) coexist with their table's scroll natively.
+    // See .planning/notes/2026-07-06-generate-fast-swipe-investigation.md.
+    @State private var dragWidth: CGFloat = 0
 
     private let deleteThreshold: CGFloat = 90   // release past this = ask to delete
     private let maxReveal: CGFloat = 130
@@ -1847,10 +2101,10 @@ private struct SwipeToDeleteRow<Content: View>: View {
     // While a confirmation is up for this row (isHeldOpen), stay parked at full reveal
     // instead of springing home (Messages pattern).
     private var offset: CGFloat {
-        if isHeldOpen && drag.width == 0 { return -maxReveal }
-        guard drag.width < 0 else { return 0 }
-        if drag.width < -maxReveal { return -maxReveal + (drag.width + maxReveal) * 0.25 }
-        return drag.width
+        if isHeldOpen && dragWidth == 0 { return -maxReveal }
+        guard dragWidth < 0 else { return 0 }
+        if dragWidth < -maxReveal { return -maxReveal + (dragWidth + maxReveal) * 0.25 }
+        return dragWidth
     }
 
     private var isPastThreshold: Bool { offset <= -deleteThreshold }
@@ -1878,27 +2132,79 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 }
             }
             .sensoryFeedback(.impact(weight: .medium), trigger: isPastThreshold) { _, crossed in crossed }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .updating($drag) { value, state, _ in
-                        if state.direction == .undetermined {
-                            let t = value.translation
-                            guard abs(t.width) + abs(t.height) > 12 else { return }   // wait for a clear vector
-                            state.direction = abs(t.width) > abs(t.height) ? .horizontal : .vertical
+            .gesture(
+                HorizontalSwipeToDeletePan(
+                    onChanged: { translationX in
+                        dragWidth = min(translationX, 0)
+                    },
+                    onEnded: { translationX in
+                        if translationX <= -deleteThreshold {
+                            onRequestDelete()
                         }
-                        guard state.direction == .horizontal else { return }
-                        state.width = min(value.translation.width, 0)
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            dragWidth = 0
+                        }
                     }
-                    .onEnded { value in
-                        // Same one-shot direction decision as .updating, recomputed from the
-                        // final translation (dominated by whichever direction the drag locked
-                        // into) — only a horizontal drag past the threshold triggers delete.
-                        let t = value.translation
-                        guard abs(t.width) > abs(t.height),
-                              t.width <= -deleteThreshold else { return }
-                        onRequestDelete()
-                    }
+                )
             )
+    }
+}
+
+/// UIKit-backed leftward swipe recognizer for SwipeToDeleteRow. Exists because a SwiftUI
+/// DragGesture on scroll content eats fast flicks from rest on iOS 18 (see SwipeToDeleteRow's
+/// header comment — bisect-confirmed on device 2026-07-06). The pan begins ONLY when the
+/// initial velocity is horizontal-dominant and leftward; for anything else (i.e. every scroll
+/// gesture) it fails instantly in gestureRecognizerShouldBegin, so it never competes with the
+/// ScrollView's pan for the touch — native UIKit swipe-row behavior.
+private struct HorizontalSwipeToDeletePan: UIGestureRecognizerRepresentable {
+    var onChanged: (CGFloat) -> Void
+    /// Called with the final x translation on a completed pan, and with 0 on cancel/failure
+    /// (so the row always springs home).
+    var onEnded: (CGFloat) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = context.coordinator
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        guard let view = recognizer.view else { return }
+        switch recognizer.state {
+        case .changed:
+            onChanged(recognizer.translation(in: view).x)
+        case .ended:
+            onEnded(recognizer.translation(in: view).x)
+        case .cancelled, .failed:
+            onEnded(0)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        // The direction gate — consulted once, when the pan would begin (~10pt of movement,
+        // when velocity is meaningful). Vertical or rightward movement -> instant failure,
+        // so scroll flicks never even see this recognizer in their arbitration.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                  let view = pan.view else { return false }
+            let v = pan.velocity(in: view)
+            return abs(v.x) > abs(v.y) && v.x < 0
+        }
+
+        // Never blocks other recognizers (scroll pan, context-menu long-press, taps).
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
     }
 }
 
@@ -1929,7 +2235,11 @@ private enum MentionCandidate: Identifiable {
     var thumbnailURL: String? {
         switch self {
         case .upload(let item): return item.isVideo ? nil : item.url
-        case .generation(let item): return item.isImage ? item.completedMediaUrl : nil
+        // Unlike upload items (no stored preview frame for videos), a generation's
+        // completedMediaUrl is playable media we already have — image or video — so it always
+        // has something to render a real thumbnail from (see libraryItemThumbnail's video
+        // branch, which extracts a frame when a URL is present).
+        case .generation(let item): return item.completedMediaUrl
         }
     }
 
@@ -1951,7 +2261,7 @@ private enum MentionCandidate: Identifiable {
             }
             return item.isVideo ? "Video" : "Image"
         case .generation:
-            return "Latest generation"
+            return "Last Generation"
         }
     }
 }
@@ -1989,6 +2299,42 @@ struct CachedThumbnailImage: View {
             guard let url, let (data, _) = try? await URLSession.shared.data(from: url),
                   let downloaded = UIImage(data: data) else { return }
             let thumb = downloaded.preparingThumbnail(of: CGSize(width: 160, height: 160)) ?? downloaded
+            ThumbnailCache.shared[cacheKey] = thumb
+            image = thumb
+        }
+    }
+}
+
+// MARK: - CachedVideoFrameThumbnail
+
+/// Poster-frame counterpart to `CachedThumbnailImage`, for mention candidates whose media is a
+/// video (e.g. the "Last Generation" synthetic entry) rather than a stored image URL. Extracts
+/// a frame directly from the video via `MediaPrepService` (works for both remote and local
+/// URLs) instead of downloading + decoding the whole clip.
+private struct CachedVideoFrameThumbnail: View {
+    let cacheKey: String
+    let videoURL: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Color.clear
+                    .overlay {
+                        Image(uiImage: image).resizable().scaledToFill()
+                            .allowsHitTesting(false)
+                    }
+                    .clipped()
+                    .contentShape(Rectangle())
+            } else {
+                Color.white.opacity(0.08)
+            }
+        }
+        .task(id: cacheKey) {
+            guard image == nil else { return }
+            if let cached = await ThumbnailCache.shared.image(for: cacheKey) { image = cached; return }
+            guard let extracted = await MediaPrepService.shared.thumbnailFromVideo(at: videoURL) else { return }
+            let thumb = extracted.preparingThumbnail(of: CGSize(width: 160, height: 160)) ?? extracted
             ThumbnailCache.shared[cacheKey] = thumb
             image = thumb
         }

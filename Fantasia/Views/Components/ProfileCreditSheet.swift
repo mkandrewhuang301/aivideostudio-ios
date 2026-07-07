@@ -3,17 +3,17 @@
 // Profile bottom sheet: identity, credits, actions, account management.
 
 import SwiftUI
-import StoreKit
 
 struct ProfileCreditSheet: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
     @Environment(ThemeManager.self) private var theme
+    @Environment(OfferingsManager.self) private var offeringsManager
     @Binding var isPresented: Bool
 
     @State private var showCreditStore = false
+    @State private var showManageSubscription = false
     @State private var showSignOutConfirm = false
-    @State private var isOpeningManageSub = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -57,8 +57,17 @@ struct ProfileCreditSheet: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
+        .task {
+            // Cheap head start on the top-up products before the user taps into the store —
+            // no-op if already warm (see OfferingsManager.refreshIfNeeded).
+            await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds)
+        }
         .fullScreenCover(isPresented: $showCreditStore) {
             CreditStoreView(isPresented: $showCreditStore)
+                .environment(creditManager)
+        }
+        .fullScreenCover(isPresented: $showManageSubscription) {
+            ManageSubscriptionView(isPresented: $showManageSubscription)
                 .environment(creditManager)
         }
     }
@@ -136,7 +145,7 @@ struct ProfileCreditSheet: View {
             .padding(.top, 6)
         }
         .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
@@ -146,23 +155,14 @@ struct ProfileCreditSheet: View {
         VStack(spacing: 0) {
             // Primary actions card
             VStack(spacing: 0) {
-                menuRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription", isLoading: isOpeningManageSub) {
-                    guard !isOpeningManageSub else { return }
-                    guard let windowScene = UIApplication.shared.connectedScenes
-                        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
-                    isOpeningManageSub = true
-                    Task {
-                        try? await AppStore.showManageSubscriptions(in: windowScene)
-                        isOpeningManageSub = false
-                    }
+                menuRow(icon: "creditcard.fill", iconColor: accent, label: "Manage Subscription") {
+                    showManageSubscription = true
                 }
 
                 rowDivider
 
                 menuRow(icon: "star.fill", iconColor: Color(red: 1.0, green: 0.8, blue: 0.15), label: "Rate Fantasia") {
-                    if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
-                        SKStoreReviewController.requestReview(in: scene)
-                    }
+                    AppReview.requestOrOpenStorePage()
                 }
             }
             .padding(.horizontal, 12)
@@ -251,7 +251,8 @@ struct ProfileCreditSheet: View {
                 }
             }
             .padding(.horizontal, 4)
-            .frame(height: 52)
+            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isLoading)

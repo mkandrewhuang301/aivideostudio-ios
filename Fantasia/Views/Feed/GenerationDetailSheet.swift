@@ -174,7 +174,7 @@ struct GenerationDetailSheet: View {
                     // Actions
                     if item.status == .completed {
                         VStack(spacing: 14) {
-                            // Remix + Regenerate + Reference + Name row
+                            // Remix + Regenerate + Reference (+ Animate for images) + Favorite row
                             HStack(spacing: 20) {
                                 circleActionButton("arrow.2.squarepath", "Remix") {
                                     handleRemix()
@@ -190,9 +190,6 @@ struct GenerationDetailSheet: View {
                                         showAnimateConfirm = true
                                     }
                                     .disabled(isAnimating)
-                                }
-                                circleActionButton("tag", "Name") {
-                                    generationManager.pendingNameAsReference = item
                                 }
                                 circleActionButton(isFavorite ? "heart.fill" : "heart", isFavorite ? "Favorited" : "Favorite") {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -275,20 +272,19 @@ struct GenerationDetailSheet: View {
                             .buttonStyle(PressableButtonStyle())
                             .disabled(isDeleting)
 
-                            // Report — quiet neutral text row
+                            // Report — small, low-emphasis flag beneath Delete (no button chrome)
                             Button {
                                 Task { await reportGeneration() }
                             } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "flag").font(.system(size: 15, weight: .medium))
-                                    Text(isReporting ? "Reported" : "Report an issue").font(.subheadline)
+                                HStack(spacing: 5) {
+                                    Image(systemName: "flag").font(.caption2)
+                                    Text(isReporting ? "Reported" : "Report an issue").font(.caption)
                                 }
-                                .foregroundStyle(theme.textSecondary)
-                                .frame(maxWidth: .infinity).frame(height: 44)
-                                .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+                                .foregroundStyle(theme.textSecondary.opacity(0.7))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
                             }
-                            .buttonStyle(PressableButtonStyle())
+                            .buttonStyle(.plain)
                             .disabled(isReporting)
                         }
                     }

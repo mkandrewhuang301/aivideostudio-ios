@@ -18,6 +18,7 @@
 		18F347EAB3D07C4ACAB89528 /* GenerationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */; };
 		1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9325B3ED5B04712AB19C26 /* FeedView.swift */; };
 		1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226A3C8D078EB4BB18B608E /* HomeView.swift */; };
+		2234D1252AC365C122FD0D0D /* AppReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717CD558C67E62B28DC71D97 /* AppReview.swift */; };
 		23577959873A72580EBEACD8 /* HighlightingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CADE304C9B50E97EED46BA1 /* HighlightingTextView.swift */; };
 		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
@@ -55,6 +56,7 @@
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		9CBE3B9FE3090E3EB4DBFE1C /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93666B740F1CC44A352A2920 /* CameraPicker.swift */; };
 		9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE46B720B299E8E732C4EA9 /* PushNotificationManager.swift */; };
+		A095F5D76111A4BB10B021A7 /* KeyboardWarmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32FA7D103105D0F66A50D38C /* KeyboardWarmer.swift */; };
 		AA5B5DFFE899799050F6619F /* OnboardingFeatureSlideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */; };
 		AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */; };
 		ABB54C63E460F8B91648880B /* CreditStoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E800BB75E6A7C706622D1CB0 /* CreditStoreView.swift */; };
@@ -67,6 +69,7 @@
 		BCC4CF3583585BC660A132BB /* OfferingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */; };
 		BDF570EB3BF6C429ECD7E7F1 /* GenerationOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */; };
 		C13DE69B70EBD480C723B43F /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCEBE956B3FB9187BF83EE4 /* ThumbnailCache.swift */; };
+		C2B359997B2C9829C6BB635F /* ScrollFriendlyContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A200AB6D9DBBC0500F05205 /* ScrollFriendlyContextMenu.swift */; };
 		C2DC853F0FAFD1A9D4CD22D7 /* presets.json in Resources */ = {isa = PBXBuildFile; fileRef = AFB7654B0746207F617ED9A4 /* presets.json */; };
 		CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */; };
 		D159637964125A3A1F0361EC /* GenerationDetailPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14394B580AF055B8F4BDF02 /* GenerationDetailPagerView.swift */; };
@@ -98,13 +101,15 @@
 /* Begin PBXFileReference section */
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
-		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
+		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInputSheet.swift; sourceTree = "<group>"; };
 		237303656EFC3D6EFF8E850F /* PresetTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetTileView.swift; sourceTree = "<group>"; };
 		27960EB90112C73C94A802EC /* FantasiaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FantasiaApp.swift; sourceTree = "<group>"; };
+		2A200AB6D9DBBC0500F05205 /* ScrollFriendlyContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollFriendlyContextMenu.swift; sourceTree = "<group>"; };
 		2B5077D8688B1538D3C4D849 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2D982E3DBBB56BABEB652202 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		2F87E75370CA3504E80E2E52 /* SignUpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignUpView.swift; sourceTree = "<group>"; };
+		32FA7D103105D0F66A50D38C /* KeyboardWarmer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardWarmer.swift; sourceTree = "<group>"; };
 		36EC4AF5B53AC10A99D47267 /* CheckInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckInboxView.swift; sourceTree = "<group>"; };
 		3DA93D5A4C686554C519842D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		42C0949F568AD6AB3810C1C3 /* ZoomPanScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomPanScrollView.swift; sourceTree = "<group>"; };
@@ -123,9 +128,10 @@
 		68544EFABAD6EC84426B2794 /* GenerateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateView.swift; sourceTree = "<group>"; };
 		6CADE304C9B50E97EED46BA1 /* HighlightingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightingTextView.swift; sourceTree = "<group>"; };
 		6F17BD017E319CD6B181876C /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
+		717CD558C67E62B28DC71D97 /* AppReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReview.swift; sourceTree = "<group>"; };
 		71907E2C4814D307EE0AADF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		739201A04305B948BFA7474D /* Fantasia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fantasia.entitlements; sourceTree = "<group>"; };
-		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		76D50E6F16247DF7BE7CE91E /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		79385464051C4A0AD6E66F28 /* PlanCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCatalog.swift; sourceTree = "<group>"; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
@@ -255,6 +261,7 @@
 				9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */,
 				E800BB75E6A7C706622D1CB0 /* CreditStoreView.swift */,
 				E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */,
+				2A200AB6D9DBBC0500F05205 /* ScrollFriendlyContextMenu.swift */,
 				ACCB6A3EF8F44442A1657016 /* SideDrawerView.swift */,
 				EA736381FE914D7303D5DE5E /* TransparentFullScreenBackground.swift */,
 			);
@@ -363,8 +370,10 @@
 		A89496FC599418237C67CAC3 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				717CD558C67E62B28DC71D97 /* AppReview.swift */,
 				677EDD477B29B62723B6D417 /* DrawerManager.swift */,
 				AB1C6A280163238E4A8CF83F /* KeyboardHeightReader.swift */,
+				32FA7D103105D0F66A50D38C /* KeyboardWarmer.swift */,
 				CB3D6B0358D3CBC11D8A73E1 /* ListSnapshotStore.swift */,
 				D20DDB7630607116A21D7693 /* MediaPrepService.swift */,
 				76D50E6F16247DF7BE7CE91E /* ThemeManager.swift */,
@@ -515,8 +524,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 3627511614C8BD9B77F16CD0 /* Build configuration list for PBXProject "Fantasia" */;
 			developmentRegion = en;
@@ -566,6 +573,7 @@
 				65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */,
 				D9372B8A631BBC6C9CEFE70A /* ActivityViewController.swift in Sources */,
 				B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */,
+				2234D1252AC365C122FD0D0D /* AppReview.swift in Sources */,
 				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */,
 				9CBE3B9FE3090E3EB4DBFE1C /* CameraPicker.swift in Sources */,
@@ -592,6 +600,7 @@
 				23577959873A72580EBEACD8 /* HighlightingTextView.swift in Sources */,
 				1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */,
 				B181A2F03B20C67EC33045BE /* KeyboardHeightReader.swift in Sources */,
+				A095F5D76111A4BB10B021A7 /* KeyboardWarmer.swift in Sources */,
 				CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */,
 				4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */,
 				80F186C893BEAC38CD5430DC /* ListSnapshotStore.swift in Sources */,
@@ -619,6 +628,7 @@
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */,
 				DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */,
+				C2B359997B2C9829C6BB635F /* ScrollFriendlyContextMenu.swift in Sources */,
 				3CB8B7981D22B914A0AB0E26 /* SideDrawerView.swift in Sources */,
 				D9E82A35EB3D988E52600956 /* SignInView.swift in Sources */,
 				668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */,
@@ -714,6 +724,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -837,6 +848,7 @@
 				CODE_SIGN_ENTITLEMENTS = Fantasia/Fantasia.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 549T8GHTB8;
 				INFOPLIST_FILE = Fantasia/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (

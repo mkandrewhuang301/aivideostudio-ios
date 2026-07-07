@@ -100,11 +100,19 @@ struct LibraryView: View {
                         .frame(height: totalContentHeight(gridWidth: gridWidth), alignment: .top)
                     }
                     .scrollIndicators(.visible)
-                    // Brackets touch-down -> touch-up with isInteracting so
+                    // Brackets an active scroll drag with isInteracting so
                     // GenerationManager.mergeLatest() buffers new items instead of
-                    // prepending mid-touch (ported from the old FeedView pattern).
+                    // prepending mid-scroll (ported from the old FeedView pattern).
+                    // minimumDistance MUST stay >= 20: a 0-distance DragGesture on a
+                    // ScrollView (even .simultaneousGesture) engages on touch-down and wins
+                    // gesture arbitration on a quick flick FROM REST, so the scroll view never
+                    // claims the flick and the list doesn't move (works fine mid-deceleration
+                    // because content touches aren't delayed then). 20pt is the stable scroll
+                    // threshold — the scroll view claims scroll-intent movement first, and this
+                    // still fires during any genuine scroll so buffering is preserved for the
+                    // case that matters. See GenerationManager.isInteracting doc comment.
                     .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
+                        DragGesture(minimumDistance: 20)
                             .onChanged { _ in generationManager.isInteracting = true }
                             .onEnded { _ in generationManager.isInteracting = false }
                     )

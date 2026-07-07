@@ -180,6 +180,7 @@ struct FullScreenVideoPlayerView: View {
 
     @State private var viewModel: URLLoopingPlayerViewModel?
     @State private var contentOpacity: Double = 1
+    @State private var isDismissing = false
     @State private var dragOffset: CGSize = .zero
     @State private var zoomScale: CGFloat = 1.0
     @State private var controlsVisible = true
@@ -194,9 +195,22 @@ struct FullScreenVideoPlayerView: View {
     private let nativeDismissVelocityThreshold: CGFloat = 1200
 
     /// 0...1 progress of an in-flight swipe-to-dismiss drag (mirrors FullScreenImageView).
+    /// Divisor is larger than the 120pt dismiss-distance threshold so the live fade lags
+    /// behind the finger — a full swipe-to-dismiss drag no longer fully fades the background
+    /// until well past the point where the dismiss itself would already commit.
     private var dismissProgress: CGFloat {
         guard zoomScale <= 1.01 else { return 0 }
-        return min(1, abs(dragOffset.height) / 300)
+        return min(1, abs(dragOffset.height) / 500)
+    }
+
+    /// Drives the background/chrome "reveal" fade. While dragging, tracks live drag distance
+    /// (dismissProgress) for real-time feedback. Once the dismiss is committed, switches to
+    /// contentOpacity instead — dismissProgress saturates almost immediately once the exit
+    /// animation starts moving past its 300pt cap, which made the reveal fade feel instant
+    /// no matter how long the fly-out animation was. contentOpacity animates independently
+    /// (see performDismiss) so the fade can be slower than the fly-out.
+    private var revealOpacity: CGFloat {
+        isDismissing ? contentOpacity : (1 - dismissProgress)
     }
 
     var body: some View {
@@ -204,10 +218,15 @@ struct FullScreenVideoPlayerView: View {
             let rect = videoRect(containerSize: geo.size)
 
             ZStack {
-                Group {
-                    theme.background.ignoresSafeArea()
-                        .opacity(1 - dismissProgress)
+                // Pinned full-screen and outside the scaled/offset Group below (mirrors
+                // FullScreenImageView): only fades via opacity as the drag progresses. If this
+                // moved/scaled together with the video it would shrink and slide away from
+                // it, exposing a hard black-rectangle edge against the transparent cover
+                // (TransparentFullScreenBackground) partway through the swipe-to-dismiss drag.
+                theme.background.ignoresSafeArea()
+                    .opacity(revealOpacity)
 
+                Group {
                     if let vm = viewModel {
                         if vm.failed {
                             VStack(spacing: 10) {
@@ -250,23 +269,39 @@ struct FullScreenVideoPlayerView: View {
                 .scaleEffect(1 - dismissProgress * 0.15)
                 .offset(dragOffset)
 
+                // Loading spinner while the video buffers (before its first frame /
+                // presentationSize is known). Tinted theme.textPrimary so it reads black in
+                // light mode and white in dark mode — mirrors FullScreenImageView.
+                if let vm = viewModel, !vm.failed, vm.naturalSize == .zero {
+                    ProgressView()
+                        .tint(theme.textPrimary)
+                        .opacity(revealOpacity)
+                }
+
                 if let vm = viewModel, !vm.failed, controlsVisible {
                     centerPlayPauseButton(vm: vm)
                         .position(x: rect.midX, y: rect.midY)
                         .transition(.opacity)
+                        .opacity(revealOpacity)
                 }
 
-                if controlsVisible {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            closeButton
-                        }
+                // Close button stays visible even when the rest of the chrome (center
+                // play/pause + scrubber) is toggled off by a tap, so the user always has an
+                // exit affordance. Only fades out during a swipe-to-dismiss drag, mirroring
+                // FullScreenImageView.
+                VStack {
+                    HStack {
                         Spacer()
+                        closeButton
                     }
-                    .ignoresSafeArea(edges: .bottom)
-                    .transition(.opacity)
+                    Spacer()
                 }
+                // Ignore the top safe area (status bar is hidden here) so the X rides up to
+                // roughly where the detail sheet's ("pullover") close button sat before the
+                // user tapped into full screen, rather than sitting a full inset lower. The
+                // trailing alignment keeps it clear of the centered notch / Dynamic Island.
+                .ignoresSafeArea()
+                .opacity(revealOpacity)
 
                 if let vm = viewModel, !vm.failed, vm.duration > 0, controlsVisible {
                     playbackControlBar(vm: vm)
@@ -278,11 +313,11 @@ struct FullScreenVideoPlayerView: View {
                             y: min(rect.maxY - 48, geo.size.height - 60)
                         )
                         .transition(.opacity)
+                        .opacity(revealOpacity)
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: controlsVisible)
         }
-        .opacity(contentOpacity)
         .background(TransparentFullScreenBackground())
         .onAppear {
             viewModel = URLLoopingPlayerViewModel(url: videoUrl, generationId: generationId)
@@ -386,12 +421,24 @@ struct FullScreenVideoPlayerView: View {
     }
 
     private func performDismiss(exitOffset: CGSize) {
+        // Snapshot the live drag-based fade into contentOpacity (no animation — this is just
+        // a baseline handoff) before switching revealOpacity over to it, so there's no visual
+        // jump at the moment of release.
+        var noAnimation = Transaction()
+        noAnimation.disablesAnimations = true
+        withTransaction(noAnimation) { contentOpacity = 1 - dismissProgress }
+        isDismissing = true
+
+        // Fly-out (position) stays quick; the reveal fade runs slower and independently so
+        // the background doesn't finish fading before the video has visibly moved.
         withAnimation(.easeOut(duration: 0.22)) {
             dragOffset = exitOffset
+        }
+        withAnimation(.easeOut(duration: 0.45)) {
             contentOpacity = 0
         }
         Task {
-            try? await Task.sleep(for: .seconds(0.22))
+            try? await Task.sleep(for: .seconds(0.45))
             dismiss()
         }
     }

@@ -135,16 +135,35 @@ struct PresetText: Codable, Equatable {
     let required: Bool
 }
 
+// Client-side filter only (PresetInputSheet's "Feminine / Masculine / All" chip) — never
+// affects generation. Unrecognized/missing values decode to nil so a style with no tag
+// (or a future tag value) just never gets filtered out.
+enum PresetStyleGenderTag: String, Codable, Equatable {
+    case feminine
+    case masculine
+    case unisex
+}
+
 // One entry in an optional style grid (e.g. Hairstyle's named styles).
 struct PresetStyle: Codable, Equatable {
     let id: String
     let label: String
     let thumbUrlString: String?
+    let genderTag: PresetStyleGenderTag?
 
     enum CodingKeys: String, CodingKey {
         case id
         case label
         case thumbUrlString = "thumb_url"
+        case genderTag = "gender_tag"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        thumbUrlString = try container.decodeIfPresent(String.self, forKey: .thumbUrlString)
+        genderTag = try? container.decodeIfPresent(PresetStyleGenderTag.self, forKey: .genderTag)
     }
 
     var thumbURL: URL? {
