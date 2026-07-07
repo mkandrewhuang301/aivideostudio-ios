@@ -12,7 +12,7 @@ struct Preset: Codable, Identifiable, Equatable {
     let presetId: String
     let title: String
     let subtitle: String?
-    let section: String            // "hero" | "photo_tools" | "effects" | "avatar_center" | "shows_vlogs"
+    let section: String            // "hero" | "video_effects" | "photo_effects" | "avatar_center" | "shows_vlogs"
     let sortOrder: Int
     let status: String             // "live" | "soon"
     let badge: String?             // "NEW" | "HOT"
@@ -22,6 +22,9 @@ struct Preset: Codable, Identifiable, Equatable {
     let model: String?
     let inputSchema: PresetInputSchema?
     let cost: PresetCost?
+    // Preset Sheet Redesign: server-driven copy/options for PresetInputSheet — optional, nil for
+    // SOON rows and any preset that hasn't been given sheet copy yet.
+    let sheet: PresetSheetMeta?
 
     var id: String { presetId }
 
@@ -38,10 +41,33 @@ struct Preset: Codable, Identifiable, Equatable {
         case model
         case inputSchema = "input_schema"
         case cost
+        case sheet
     }
 
     /// True when this tile is a not-yet-shipped destination/preset (registry-driven SOON state, D-04).
     var isSoon: Bool { status == "soon" }
+}
+
+// Server-driven copy/options for the redesigned PresetInputSheet (Higgsfield-style layout).
+// Mirrors backend PresetSheetMeta exactly. Every field is optional: a preset declares EITHER
+// `aspectRatios` (+ `defaultAspectRatio`) for a selectable chip row, OR `aspectLabel` (+ optional
+// `durationLabel`/`resolutionLabel`) for a fixed caption row — never both.
+struct PresetSheetMeta: Codable, Equatable {
+    let description: String?
+    let aspectRatios: [String]?
+    let defaultAspectRatio: String?
+    let aspectLabel: String?
+    let durationLabel: String?
+    let resolutionLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case description
+        case aspectRatios = "aspect_ratios"
+        case defaultAspectRatio = "default_aspect_ratio"
+        case aspectLabel = "aspect_label"
+        case durationLabel = "duration_label"
+        case resolutionLabel = "resolution_label"
+    }
 }
 
 // Stable art URLs for a tile — poster shown immediately, loop fades in once cached (D-08).
@@ -78,6 +104,29 @@ struct PresetSlot: Codable, Equatable {
     let kind: String     // "image" | "video"
     let label: String
     let source: String   // "any" | "my_look_default"
+    // 09.1-11/12 (Clothes Swap): absent/false = required (default, preserves every pre-existing
+    // preset's all-required behavior). true = this slot may be submitted empty — see
+    // PresetInputSheet.isValid / generate().
+    let optional: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case kind, label, source, optional
+    }
+
+    init(kind: String, label: String, source: String, optional: Bool = false) {
+        self.kind = kind
+        self.label = label
+        self.source = source
+        self.optional = optional
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        label = try container.decode(String.self, forKey: .label)
+        source = try container.decode(String.self, forKey: .source)
+        optional = try container.decodeIfPresent(Bool.self, forKey: .optional) ?? false
+    }
 }
 
 // Optional free-text field alongside the media slots.

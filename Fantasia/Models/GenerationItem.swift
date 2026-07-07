@@ -45,7 +45,11 @@ struct GenerationParams: Codable, Equatable {
     // Default `= nil` so every existing call site constructing GenerationParams (freeform
     // generations, PresetInputSheet's own placeholder) keeps compiling unchanged.
     let presetId: String?                    // registry preset id — nil for freeform generations
-    let presetInputUploadIds: [String]?      // stored slot upload ids — Remix reopens PresetInputSheet prefilled from these
+    // Stored slot upload ids — Remix reopens PresetInputSheet prefilled from these. Index-aligned
+    // to the preset's input_schema.slots; `nil` entries are empty OPTIONAL slots (09.1-11 Clothes
+    // Swap). MUST stay `[String?]` (not `[String]`) — a `null` JSON element would otherwise throw
+    // a decoding error for the entire GenerationItem.
+    let presetInputUploadIds: [String?]?
 
     enum CodingKeys: String, CodingKey {
         case resolution
@@ -68,7 +72,7 @@ struct GenerationParams: Codable, Equatable {
         width: Int?,
         height: Int?,
         presetId: String? = nil,
-        presetInputUploadIds: [String]? = nil
+        presetInputUploadIds: [String?]? = nil
     ) {
         self.resolution = resolution
         self.duration = duration

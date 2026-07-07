@@ -394,12 +394,22 @@ struct GenerationRequestBody: Encodable {
     // this keeps every existing GenerationRequestBody(...) call site (GenerateView's composer)
     // compiling unchanged while still letting PresetInputSheet pass explicit values.
     var presetId: String? = nil
-    var presetInputUploadIds: [String]? = nil
+    // 09.1-11/12 (Clothes Swap): index-aligned to the preset's input_schema.slots — nil entries
+    // are JSON-encoded as `null`, the server's placeholder for a skipped OPTIONAL slot (never
+    // compact this array; a shorter array would misalign every slot after the first gap).
+    var presetInputUploadIds: [String?]? = nil
+    // Real picked-media duration for per-second presets (Motion Transfer, AI Influencer — D-18,
+    // D-23). Distinct from `duration` above (that field is video-mode-only and unrelated to
+    // presets). The server reads this exact wire key as a starting point only — it always
+    // clamps to the preset's own `max_seconds` before billing (D-16), so this value is never
+    // trusted beyond suggesting where to start. nil on every non-per-second submission.
+    var estimatedDurationSeconds: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
         case mediaType = "media_type"
         case duration, resolution
+        case estimatedDurationSeconds = "estimated_duration_seconds"
         case aspectRatio = "aspect_ratio"
         case audioEnabled = "audio_enabled"
         case imageAspectRatio = "image_aspect_ratio"

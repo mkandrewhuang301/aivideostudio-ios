@@ -37,6 +37,13 @@ struct GenerationCardView: View {
 
     @Environment(ThemeManager.self) private var theme
     @Environment(GenerationManager.self) private var generationManager
+    // Perf: preset-input thumbnails (both here and in the remix fork below) resolve
+    // preset_input_upload_ids against the shared upload library instead of calling
+    // APIClient.fetchMyUploads() directly — that hit GET /api/uploads once PER preset card on
+    // every appear (feed with N preset cards = N duplicate fetches of the same list on load).
+    // MediaLibraryManager already caches this (hasLoadedOnce + 300s staleness window, snapshot-
+    // hydrated), so .load() below is a no-op network call on cache hits.
+    @Environment(MediaLibraryManager.self) private var mediaLibrary
 
     @State private var animatedProgress: Double = 0
     @State private var jitterTask: Task<Void, Never>? = nil
@@ -45,6 +52,7 @@ struct GenerationCardView: View {
     @State private var showPlayer = false
     @State private var revealCompleted = false    // gates media reveal after fill-to-100 animation
     @State private var cachedImage: UIImage? = nil  // for image generations
+    @State private var isMediaPreviewActive = false  // hides the media while the long-press lift is on screen (no duplicate)
 
     // D-11/T-09.1-03: preset badge + Remix-into-sheet fork. Local registry instance mirrors
     // HomeView's own `@State private var registry = PresetRegistryManager()` — registry rows are
@@ -56,6 +64,9 @@ struct GenerationCardView: View {
     @State private var isPreparingRemix = false
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
+    /// Extra tap target below the prompt row — taps that land on the top of the media still
+    /// open the detail sheet instead of fullscreen preview.
+    private let promptTapExtension: CGFloat = 56
     private var isActive: Bool { item.status == .pending || item.status == .processing }
 
     /// The registry row matching this generation's stamped preset_id, if any.
@@ -111,42 +122,62 @@ struct GenerationCardView: View {
             // Aspect-ratio box (D-06: sized to requested aspect ratio)
             Color.clear
                 .aspectRatio(cardAspectRatio, contentMode: .fit)
-                .overlay { mediaContent }
+                // Hidden while the long-press preview is lifted so the lifted copy is the only
+                // visible image (avoids the "two images" duplicate look).
+                .overlay { mediaContent.opacity(isMediaPreviewActive ? 0 : 1) }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                // Tap-triggered Menu, not .contextMenu — a long-press context menu installs a
-                // recognizer over the WHOLE media box that has to hold every touch to decide
-                // whether it's becoming a menu preview, which eats fast swipes starting on media
-                // (confirmed regression: fixed once by removing .contextMenu, reintroduced later,
-                // never re-verified for scroll feel). A Menu confines that to the small button.
-                .overlay(alignment: .topTrailing) {
-                    if item.status == .completed {
-                        Menu {
-                            Button { onNameAsReference() } label: { Label("Name as Reference", systemImage: "tag") }
-                            Button(role: .destructive) { onRequestDelete() } label: { Label("Delete", systemImage: "trash") }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 24, height: 24)
-                                .background(.black.opacity(0.35), in: Circle())
-                        }
-                        .menuOrder(.fixed)
-                        .padding(8)
-                    }
+                // Long-press context menu (user request 2026-07-06). ⚠️ MUST stay UIKit-backed:
+                // SwiftUI's .contextMenu here ate fast scroll flicks starting from rest on media
+                // (confirmed regression, twice — see ScrollFriendlyContextMenu's header for the
+                // full arbitration explanation). This overlay hit-tests the whole media box, so
+                // it also owns the plain tap → fullscreen preview (the onTapGesture inside
+                // mediaContent is now unreachable through it and kept only as documentation).
+                .overlay {
+                    ScrollFriendlyContextMenu(
+                        menu: { mediaContextMenu },
+                        previewImage: item.isImage ? cachedImage : thumbnail,
+                        onTap: {
+                            guard item.status == .completed, revealCompleted else { return }
+                            showPlayer = true
+                        },
+                        onPreviewingChanged: { active in isMediaPreviewActive = active },
+                        showsPlayIcon: !item.isImage
+                    )
+                }
+                // Extend prompt tap target into the top of the media — users often tap slightly
+                // below the truncated prompt and hit the image instead. Placed AFTER the menu
+                // overlay so this band keeps winning hit-testing for taps.
+                .overlay(alignment: .top) {
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .frame(height: promptTapExtension)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: onTapDetail)
                 }
                 .padding(.horizontal, 14)
 
 
             // Action buttons (D-09: always visible; disabled/greyed while active). Delete lives
-            // on swipe-to-delete + the detail sheet only — a destructive accent on every card's
-            // action row was unwarranted given those two paths already exist.
+            // on swipe-to-delete + the detail sheet for completed cards — a destructive accent on
+            // every card's action row was unwarranted given those two paths already exist. Failed
+            // cards have no output to reference, so "Reference" is replaced with a real Delete
+            // button here (D-38: Remix/Regenerate/Delete are the active actions on a failed card) —
+            // swipe-to-delete alone wasn't a discoverable enough affordance for clearing errors.
             HStack(spacing: 8) {
                 actionButton("arrow.2.squarepath", "Remix", action: handleRemixTap)
                 actionButton("arrow.clockwise", "Regen", action: onRegenerate)
-                actionButton("paperclip", "Reference", action: onReference)
+                if item.status == .failed {
+                    actionButton("trash", "Delete", action: onRequestDelete, destructive: true)
+                } else {
+                    actionButton("paperclip", "Reference", action: onReference)
+                }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            // Top padding only (gap to the media above) is smaller than the bottom padding
+            // (gap to the card's own bottom edge) — user request to tighten the media-to-actions
+            // gap specifically, not the whole row's vertical breathing room.
+            .padding(.top, 2)
+            .padding(.bottom, 10)
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 1))
@@ -202,6 +233,21 @@ struct GenerationCardView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Media context menu (long-press)
+    // nil while a generation is in flight/failed — the interaction stays inert so a held press
+    // does nothing and no empty preview platter is lifted.
+    private var mediaContextMenu: UIMenu? {
+        guard item.status == .completed else { return nil }
+        return UIMenu(children: [
+            UIAction(title: "Name as Reference", image: UIImage(systemName: "tag")) { _ in
+                onNameAsReference()
+            },
+            UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                onRequestDelete()
+            }
+        ])
     }
 
     // MARK: - Preset badge thumbnails (D-11/T-09.1-03)
@@ -418,16 +464,20 @@ struct GenerationCardView: View {
     // MARK: - Preset Remix fork (D-11/T-09.1-03)
 
     /// Loads this row's preset input thumbnails once, if this is a preset run. Re-signs the
-    /// stored `preset_input_upload_ids` against GET /api/uploads (existing reference machinery —
-    /// same endpoint the composer's reference picker already uses) rather than trusting any
-    /// stale URL, since presigned URLs rotate per fetch (documented project landmine).
+    /// stored `preset_input_upload_ids` against the shared MediaLibraryManager cache (same list
+    /// GET /api/uploads returns, same reference machinery the composer's reference picker
+    /// already uses) rather than trusting any stale URL, since presigned URLs rotate per fetch
+    /// (documented project landmine) — .load() is cache-first, so this is a no-op network call
+    /// once the library has been fetched (within its 300s staleness window).
     private func loadPresetInputThumbnails() {
         guard item.isPreset, let ids = item.params.presetInputUploadIds, !ids.isEmpty,
               presetInputThumbs.isEmpty else { return }
         Task {
-            guard let uploads = try? await APIClient.shared.fetchMyUploads() else { return }
-            let map = Dictionary(uploads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            presetInputThumbs = ids.compactMap { map[$0] }
+            await mediaLibrary.load()
+            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // 09.1-11: `ids` may contain nil (empty optional slot) — compactMap drops those before
+            // the lookup, so only actually-filled slots produce a thumbnail.
+            presetInputThumbs = ids.compactMap { $0 }.compactMap { map[$0] }
         }
     }
 
@@ -451,18 +501,19 @@ struct GenerationCardView: View {
         Task {
             defer { isPreparingRemix = false }
             var slots: [PresetSlotInput?] = Array(repeating: nil, count: ids.count)
-            if let uploads = try? await APIClient.shared.fetchMyUploads() {
-                let map = Dictionary(uploads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                for (index, id) in ids.enumerated() {
-                    guard let match = map[id] else { continue }
-                    slots[index] = PresetSlotInput(
-                        uploadId: match.id,
-                        url: match.url,
-                        thumbnail: nil,
-                        isUploading: false,
-                        durationSeconds: nil
-                    )
-                }
+            await mediaLibrary.load()
+            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // 09.1-11: `id` may be nil (empty optional slot) — leave that slot's entry nil in
+            // `slots` so PresetInputSheet reopens with it correctly blank, not misaligned.
+            for (index, id) in ids.enumerated() {
+                guard let id, let match = map[id] else { continue }
+                slots[index] = PresetSlotInput(
+                    uploadId: match.id,
+                    url: match.url,
+                    thumbnail: nil,
+                    isUploading: false,
+                    durationSeconds: nil
+                )
             }
             remixPrefillSlots = slots
             presetForRemix = preset   // triggers .fullScreenCover(item:) above
@@ -470,10 +521,10 @@ struct GenerationCardView: View {
     }
 
     // MARK: - Action Button Helper
-    private func actionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        let fg: Color = isActive ? theme.textTertiary : theme.textPrimary.opacity(0.8)
-        let bg: Color = isActive ? theme.surface.opacity(0.6) : theme.surface
-        let border: Color = isActive ? theme.divider : theme.surfaceBorder
+    private func actionButton(_ icon: String, _ label: String, action: @escaping () -> Void, destructive: Bool = false) -> some View {
+        let fg: Color = destructive ? Color.red.opacity(0.85) : (isActive ? theme.textTertiary : theme.textPrimary.opacity(0.8))
+        let bg: Color = destructive ? Color.red.opacity(theme.isLight ? 0.07 : 0.10) : (isActive ? theme.surface.opacity(0.6) : theme.surface)
+        let border: Color = destructive ? Color.red.opacity(0.12) : (isActive ? theme.divider : theme.surfaceBorder)
 
         return Button(action: action) {
             HStack(spacing: 5) {
