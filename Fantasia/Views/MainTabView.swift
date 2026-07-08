@@ -147,10 +147,12 @@ struct MainTabView: View {
                             Text("\(creditManager.creditsBalance)")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(theme.textSecondary)
-                            // Emphasized separator — heavier weight + primary (vs. secondary)
-                            // text color so current/total reads as a clear ratio, not one blob.
-                            + Text("/")
-                                .font(.system(size: 13, weight: .heavy))
+                            // Emphasized separator — bold + primary (vs. secondary) text color so
+                            // current/total reads as a clear ratio, not one cramped blob. Thin
+                            // spaces (U+2009) either side give the numbers breathing room without
+                            // the width of a full space; .heavy read as too chunky at this size.
+                            + Text("\u{2009}/\u{2009}")
+                                .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(theme.textPrimary)
                             + Text("\(creditManager.totalCreditsPossible)")
                                 .font(.system(size: 13, weight: .semibold))

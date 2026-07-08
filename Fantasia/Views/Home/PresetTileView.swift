@@ -23,9 +23,27 @@ struct PresetLoopBackground: View {
     // nil = center vertically — the historical default, preserved for the hero / Avatar Center /
     // Shows & Vlogs cards, whose wide/square boxes want the subject's FACE centered, not its top.
     var focalTop: CGFloat? = nil
+    // true (default) = draw a player from the shared LoopPlayerPool, exactly like every Home grid/
+    // hero/avatar/shows caller. false = own a fully independent AVQueuePlayer+looper, never
+    // touching the pool's `entries`/`assignments` at all — used ONLY by PresetInputSheet's cover.
+    //
+    // Why this exists (2026-07-08 bug): the pool keys purely by `preset.id`, assuming one owner
+    // per preset at a time. But opening a preset's pull-up sheet shows a SECOND
+    // PresetLoopBackground for the SAME preset.id while the Home grid tile behind it is still
+    // mounted (sheets don't tear down the presenting view). The sheet's cover would `acquire()`
+    // the SAME pool slot (harmless), but on dismiss its `.onDisappear` would `release()` that
+    // slot — unconditionally pausing the player and marking it idle, with no idea the Home tile
+    // behind it still needs it playing. Result: the exact tile you just opened freezes the moment
+    // you exit the pull-up. Standalone playback for the sheet's cover sidesteps this entirely —
+    // the modal never touches shared pool state, so dismissing it can't disrupt Home.
+    var usesPool: Bool = true
 
     @State private var poster: UIImage?
     @State private var loopState = LoopTileState()
+    // Retains the AVPlayerLooper for the STANDALONE (usesPool == false) path — must be kept alive
+    // alongside its player or looping silently stops, same requirement as the pool's own
+    // PoolEntry.looper.
+    @State private var standaloneLooper: AVPlayerLooper?
 
     // All registry loop assets are ingested at native portrait 9:16 (uploadPresetArt.ts's
     // transcodeLoop only ever downscales within a portrait bounding box, preserving source AR) —
@@ -71,19 +89,39 @@ struct PresetLoopBackground: View {
             loadPoster()
         }
         // Keyed on availabilityGeneration (not a plain onAppear Task): runs immediately when the
-        // tile appears (covers the original acquire-on-appear), AND re-runs every time the pool
+        // view appears (covers the original acquire-on-appear), AND re-runs every time the pool
         // frees a slot elsewhere — the only way a tile that was denied a player (pool full of
         // active slots, see LoopPlayerPool) later upgrades from poster-only to actually playing.
         // Guarded on `loopState.player == nil` so tiles that already have a player don't
-        // needlessly re-acquire on every unrelated release() elsewhere (2026-07-08).
-        .task(id: LoopPlayerPool.shared.availabilityGeneration) {
+        // needlessly re-acquire on every unrelated release() elsewhere (2026-07-08). Standalone
+        // callers (usesPool == false) don't depend on the pool at all, so this id is simply
+        // constant for them — the task still runs once on appear, just never re-triggers.
+        .task(id: usesPool ? LoopPlayerPool.shared.availabilityGeneration : -1) {
             guard loopState.player == nil, let url = preset.tile.loopURL else { return }
-            if let player = await LoopPlayerPool.shared.acquire(presetId: preset.id, loopURL: url) {
+            if usesPool {
+                if let player = await LoopPlayerPool.shared.acquire(presetId: preset.id, loopURL: url) {
+                    loopState.attach(player)
+                }
+            } else {
+                // Standalone: own player+looper, never touching LoopPlayerPool's shared state
+                // (see `usesPool` doc comment for why — sharing a pool slot with the Home grid
+                // tile behind this modal caused that tile to freeze on dismiss).
+                guard let localURL = try? await LoopFileCache.shared.ensureCached(presetId: preset.id, remoteURL: url) else { return }
+                let player = AVQueuePlayer()
+                player.isMuted = true
+                let item = AVPlayerItem(url: localURL)
+                standaloneLooper = AVPlayerLooper(player: player, templateItem: item)
+                player.play()
                 loopState.attach(player)
             }
         }
         .onDisappear {
-            LoopPlayerPool.shared.release(presetId: preset.id)
+            if usesPool {
+                LoopPlayerPool.shared.release(presetId: preset.id)
+            } else {
+                loopState.player?.pause()
+                standaloneLooper = nil
+            }
             loopState.detach()
         }
     }

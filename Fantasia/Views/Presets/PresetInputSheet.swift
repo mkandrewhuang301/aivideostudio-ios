@@ -68,11 +68,18 @@ struct PresetInputSheet: View {
 
     // Slot-picker plumbing — one shared picker set, targeted at `activeSlotIndex`.
     @State private var activeSlotIndex: Int?
-    // Source chooser as a confirmationDialog (not a Menu) — a Menu lifts its label into the menu
-    // presentation, dimming/hiding the rest of the sheet (the "Upload media" box appeared to
-    // vanish, user-reported 2026-07-08). The dialog dims everything OVER the sheet content
-    // instead, so the box/cover/header all stay visible behind it.
-    @State private var showSourceDialog = false
+    // Source chooser as a nested .sheet (not a Menu, not a confirmationDialog) — a Menu lifts its
+    // label into the menu presentation, dimming/hiding the rest of the sheet (the "Upload media"
+    // box appeared to vanish, user-reported 2026-07-08); a confirmationDialog fixed that but is
+    // the utilitarian system action sheet, not the smooth native bottom-sheet slide-up requested
+    // (2026-07-08). A small-detent .sheet gives the rounded-card spring animation while still
+    // dimming (not hiding) the sheet content behind it.
+    private enum MediaSource { case photos, camera, files }
+    @State private var showSourceSheet = false
+    // Set when a source row is tapped, consumed in the source sheet's onDismiss — presenting the
+    // chosen picker only AFTER this sheet is fully dismissed avoids two presentations racing off
+    // the same view (presenting the picker while this sheet is still animating away conflicts).
+    @State private var pendingSource: MediaSource?
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
@@ -168,13 +175,22 @@ struct PresetInputSheet: View {
             guard case .success(let url) = result, let index = activeSlotIndex else { return }
             Task { await handleImportedFile(url, forSlot: index) }
         }
-        .confirmationDialog("Add media", isPresented: $showSourceDialog, titleVisibility: .visible) {
-            Button("Photo Library") { showPhotosPicker = true }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button(activeSlotKind == "video" ? "Record Video" : "Take Photo") { showCameraPicker = true }
+        .sheet(isPresented: $showSourceSheet, onDismiss: {
+            // Present the chosen picker only AFTER the source sheet is fully dismissed —
+            // presenting it while the sheet is still up/animating conflicts (both are
+            // presentations off this same view).
+            switch pendingSource {
+            case .photos: showPhotosPicker = true
+            case .camera: showCameraPicker = true
+            case .files:  showFileImporter = true
+            case nil:     break
             }
-            Button("Choose File") { showFileImporter = true }
-            Button("Cancel", role: .cancel) {}
+            pendingSource = nil
+        }) {
+            sourceChooserSheet
+                .presentationDetents([.height(UIImagePickerController.isSourceTypeAvailable(.camera) ? 300 : 240)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(theme.background)
         }
         .confirmationDialog(
             "This video is longer than 30 seconds",
@@ -211,7 +227,13 @@ struct PresetInputSheet: View {
         // header/background below it (2026-07-08 "blur between the image and the effect, I want
         // a hard line"), not the old [.clear, .clear, theme.background] fade. The .clipped()
         // frame edge gives that clean cut.
-        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.0)
+        //
+        // usesPool: false — this sheet shows the SAME preset.id's video as the Home grid tile
+        // behind it (sheets don't tear down the presenting view). Sharing the pool's slot meant
+        // dismissing this sheet released+paused the tile's player too, freezing it (2026-07-08,
+        // see PresetLoopBackground's usesPool doc comment). Standalone playback here can't
+        // disrupt Home no matter when it mounts/dismisses.
+        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.0, usesPool: false)
             .allowsHitTesting(false)
             .frame(height: UIScreen.main.bounds.height * 0.42)
             .clipped()
@@ -351,7 +373,7 @@ struct PresetInputSheet: View {
 
         return Button {
             activeSlotIndex = index
-            showSourceDialog = true
+            showSourceSheet = true
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 16)
@@ -436,6 +458,52 @@ struct PresetInputSheet: View {
         return slots[activeSlotIndex].kind
     }
 
+    // MARK: - Source chooser (nested small-detent .sheet — native bottom-sheet slide-up)
+
+    private var sourceChooserSheet: some View {
+        VStack(spacing: 8) {
+            Text("Add media")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+                .padding(.top, 20)
+                .padding(.bottom, 6)
+            sourceRow(icon: "photo.on.rectangle", label: "Photo Library") {
+                pendingSource = .photos
+                showSourceSheet = false
+            }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                sourceRow(icon: "camera", label: activeSlotKind == "video" ? "Record Video" : "Take Photo") {
+                    pendingSource = .camera
+                    showSourceSheet = false
+                }
+            }
+            sourceRow(icon: "folder", label: "Choose File") {
+                pendingSource = .files
+                showSourceSheet = false
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private func sourceRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(width: 26)
+                Text(label)
+                    .font(.body.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(theme.textPrimary)
+            .padding(.horizontal, 16)
+            .frame(height: 54)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
     // MARK: - Optional text
 
     @ViewBuilder
@@ -499,39 +567,61 @@ struct PresetInputSheet: View {
                     }
                 }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
-                    ForEach(filteredStyles(styles), id: \.id) { style in
-                        Button {
-                            selectedStyleId = (selectedStyleId == style.id) ? nil : style.id
-                        } label: {
-                            VStack(spacing: 6) {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(theme.surface)
-                                    .frame(height: 72)
-                                    .overlay {
-                                        if let thumbURL = style.thumbURL {
-                                            CachedThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)", url: thumbURL)
-                                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        }
-                                    }
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                selectedStyleId == style.id ? theme.textPrimary : theme.surfaceBorder,
-                                                lineWidth: selectedStyleId == style.id ? 2 : 1
-                                            )
-                                    )
-                                Text(style.label)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(theme.textSecondary)
-                                    .lineLimit(1)
+                let visibleStyles = filteredStyles(styles)
+                if visibleStyles.count > 6 {
+                    // Two fixed rows, horizontal scroll — compact when a category has many
+                    // styles (hairstyle has 12; user-requested 2026-07-08).
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHGrid(rows: [GridItem(.fixed(94), spacing: 10), GridItem(.fixed(94), spacing: 10)], spacing: 10) {
+                            ForEach(visibleStyles, id: \.id) { style in
+                                styleCell(style)
                             }
                         }
-                        .buttonStyle(PressableButtonStyle())
+                        .padding(.horizontal, 2)   // keeps the selection stroke from clipping at the edges
+                    }
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
+                        ForEach(visibleStyles, id: \.id) { style in
+                            styleCell(style)
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// One style-grid cell (thumbnail + selection stroke + label). Fixed width so it lays out
+    /// identically whether hosted in the vertical LazyVGrid (≤6 styles) or the horizontal
+    /// 2-row LazyHGrid (>6 styles) above.
+    private func styleCell(_ style: PresetStyle) -> some View {
+        Button {
+            selectedStyleId = (selectedStyleId == style.id) ? nil : style.id
+        } label: {
+            VStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(theme.surface)
+                    .frame(height: 72)
+                    .overlay {
+                        if let thumbURL = style.thumbURL {
+                            CachedThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)", url: thumbURL)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                selectedStyleId == style.id ? theme.textPrimary : theme.surfaceBorder,
+                                lineWidth: selectedStyleId == style.id ? 2 : 1
+                            )
+                    )
+                Text(style.label)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 90)
+        }
+        .buttonStyle(PressableButtonStyle())
     }
 
     private func genderFilterChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
