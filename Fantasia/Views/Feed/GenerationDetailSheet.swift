@@ -34,6 +34,11 @@ struct GenerationDetailSheet: View {
     @State private var showAnimateConfirm = false
     @State private var isAnimating = false
     @State private var animateError: String? = nil
+    // Magic Editor entry point (09.2-10, SC4): "Edit" opens MaskEditorView on this image's
+    // completed media URL. Bool + stored URL (not fullScreenCover(item:)) since the source is a
+    // plain String, not an Identifiable model.
+    @State private var editSourceURLString: String?
+    @State private var showMaskEditor = false
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -191,6 +196,14 @@ struct GenerationDetailSheet: View {
                                     }
                                     .disabled(isAnimating)
                                 }
+                                // Magic Editor (09.2-10, SC4): image items only, deliberately not
+                                // on every feed card (Home "Magic Editor" card is the other entry).
+                                if item.isImage, let src = item.completedMediaUrl {
+                                    circleActionButton("paintbrush.pointed", "Edit") {
+                                        editSourceURLString = src
+                                        showMaskEditor = true
+                                    }
+                                }
                                 circleActionButton(isFavorite ? "heart.fill" : "heart", isFavorite ? "Favorited" : "Favorite") {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     isFavorite.toggle()                      // optimistic local icon flip
@@ -311,6 +324,15 @@ struct GenerationDetailSheet: View {
                 FullScreenImageView(item: item)
             } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
+            }
+        }
+        // Magic Editor (09.2-10, SC4) — "Edit" action above.
+        .fullScreenCover(isPresented: $showMaskEditor) {
+            if let urlString = editSourceURLString {
+                MaskEditorView(source: .url(urlString))
+                    .environment(generationManager)
+                    .environment(creditManager)
+                    .environment(theme)
             }
         }
         .alert("Delete this \(item.isImage ? "image" : "video")?", isPresented: $showDeleteAlert) {

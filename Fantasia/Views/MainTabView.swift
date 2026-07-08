@@ -17,6 +17,11 @@ struct MainTabView: View {
     // `has_face_consent` flag (T-09.2-21 — server also enforces this; the flag here is UX only).
     @AppStorage("hasFaceConsent") private var hasFaceConsent = false
     @State private var pendingFacePreset: Preset?
+    // Magic Editor (09.2-10, SC4): the Home "Magic Editor" card routes to MaskEditorView (source
+    // photo picker mode) instead of PresetInputSheet — its schema-driven slot UI doesn't apply to
+    // a freehand mask paint. Preset identity only drives presentation; MaskEditorView.Source.pick
+    // starts its own PhotosPicker.
+    @State private var magicEditorPreset: Preset?
 
     /// Face-input presets require the one-time consent attestation before their PresetInputSheet
     /// ever opens — faceswap and motion-transfer ("avatar") both animate/composite an uploaded face.
@@ -36,7 +41,9 @@ struct MainTabView: View {
                     HomeView(
                         onNavigateToGenerate: { selectedTab = 1 },
                         onSelectPreset: { preset in
-                            if isFaceInput(preset) && !hasFaceConsent {
+                            if preset.presetId == "magic-editor" {
+                                magicEditorPreset = preset
+                            } else if isFaceInput(preset) && !hasFaceConsent {
                                 pendingFacePreset = preset
                             } else {
                                 selectedPreset = preset
@@ -117,6 +124,14 @@ struct MainTabView: View {
                 .presentationBackground(theme.background)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
+        }
+        // Magic Editor (09.2-10, SC4): "pick a source photo" mode — MaskEditorView owns its own
+        // PhotosPicker + paint canvas, unlike every other preset's schema-driven PresetInputSheet.
+        .fullScreenCover(item: $magicEditorPreset) { _ in
+            MaskEditorView(source: .pick)
+                .environment(creditManager)
+                .environment(generationManager)
+                .environment(theme)
         }
         // SC2: first-use face-input consent hard gate — shown once per user in front of
         // faceswap/motion-transfer presets (see isFaceInput/onSelectPreset above).
