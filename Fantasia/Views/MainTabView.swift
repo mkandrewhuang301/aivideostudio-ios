@@ -13,6 +13,16 @@ struct MainTabView: View {
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
     @State private var selectedPreset: Preset?
+    // SC2: first-use face-input consent hard gate. Local mirror of the server's authoritative
+    // `has_face_consent` flag (T-09.2-21 — server also enforces this; the flag here is UX only).
+    @AppStorage("hasFaceConsent") private var hasFaceConsent = false
+    @State private var pendingFacePreset: Preset?
+
+    /// Face-input presets require the one-time consent attestation before their PresetInputSheet
+    /// ever opens — faceswap and motion-transfer ("avatar") both animate/composite an uploaded face.
+    private func isFaceInput(_ preset: Preset) -> Bool {
+        preset.mediaType == "faceswap" || preset.mediaType == "avatar"
+    }
 
     private let tabBarHeight: CGFloat = 74
     private let bottomLift: CGFloat = 16
@@ -25,7 +35,13 @@ struct MainTabView: View {
                 TabView(selection: $selectedTab) {
                     HomeView(
                         onNavigateToGenerate: { selectedTab = 1 },
-                        onSelectPreset: { selectedPreset = $0 }
+                        onSelectPreset: { preset in
+                            if isFaceInput(preset) && !hasFaceConsent {
+                                pendingFacePreset = preset
+                            } else {
+                                selectedPreset = preset
+                            }
+                        }
                     )
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
@@ -101,6 +117,27 @@ struct MainTabView: View {
                 .presentationBackground(theme.background)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
+        }
+        // SC2: first-use face-input consent hard gate — shown once per user in front of
+        // faceswap/motion-transfer presets (see isFaceInput/onSelectPreset above).
+        .fullScreenCover(item: $pendingFacePreset) { preset in
+            ConsentAttestationView(
+                onAgree: {
+                    try? await APIClient.shared.updateConsent()
+                    hasFaceConsent = true
+                    pendingFacePreset = nil
+                    selectedPreset = preset   // proceed into the preset sheet
+                },
+                onCancel: { pendingFacePreset = nil }
+            )
+            .environment(theme)
+        }
+        .task {
+            // Best-effort sync of server truth on launch, so consent granted on another device
+            // (or a prior install) is respected without re-prompting.
+            if let me = try? await APIClient.shared.fetchMe() {
+                hasFaceConsent = me.hasFaceConsent
+            }
         }
     }
 
