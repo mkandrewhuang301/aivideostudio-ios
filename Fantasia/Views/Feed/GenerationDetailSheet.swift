@@ -16,6 +16,9 @@ struct GenerationDetailSheet: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(RatesManager.self) private var ratesManager
     @Environment(CreditManager.self) private var creditManager
+    // D-4 (09.2-10 Task 3): needed to re-sign preset_input_upload_ids for the preset Remix fork
+    // below, exactly like GenerationCardView's own presetInputThumbnailRow/presentPresetRemixSheet.
+    @Environment(MediaLibraryManager.self) private var mediaLibrary
 
     @State private var showPlayer = false
     @State private var showDeleteAlert = false
@@ -39,6 +42,22 @@ struct GenerationDetailSheet: View {
     // plain String, not an Identifiable model.
     @State private var editSourceURLString: String?
     @State private var showMaskEditor = false
+
+    // D-4 (09.2-10 Task 3): preset Remix/Regen fork — mirrors GenerationCardView's own
+    // presetRegistry/presetForRemix/remixPrefillSlots/matchedPreset exactly, so a preset row's
+    // Remix/Regen here reopens the prefilled PresetInputSheet instead of dumping the user into
+    // the freeform composer with a blank prompt (the backend nulls item.prompt on preset rows —
+    // the 9.1 gap left by 09.1-08, which only forked GenerationCardView's own Remix action).
+    @State private var presetRegistry = PresetRegistryManager()
+    @State private var presetForRemix: Preset?
+    @State private var remixPrefillSlots: [PresetSlotInput?] = []
+    @State private var isPreparingRemix = false
+
+    /// The registry row matching this generation's stamped preset_id, if any.
+    private var matchedPreset: Preset? {
+        guard let presetId = item.params.presetId else { return nil }
+        return presetRegistry.presets.first { $0.presetId == presetId }
+    }
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -335,6 +354,19 @@ struct GenerationDetailSheet: View {
                     .environment(theme)
             }
         }
+        // D-4 (09.2-10 Task 3): preset Remix/Regen reopens PresetInputSheet prefilled from this
+        // row's stored preset_input_upload_ids — never the composer. Mirrors GenerationCardView's
+        // own `.sheet(item: $presetForRemix)` exactly (same prefill contract).
+        .sheet(item: $presetForRemix) { preset in
+            PresetInputSheet(preset: preset, prefillSlots: remixPrefillSlots)
+                .environment(generationManager)
+                .environment(creditManager)
+                .environment(ratesManager)
+                .environment(theme)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+        }
         .alert("Delete this \(item.isImage ? "image" : "video")?", isPresented: $showDeleteAlert) {
             Button("Delete", role: .destructive) { Task { await handleDelete() } }
             Button("Cancel", role: .cancel) {}
@@ -406,16 +438,61 @@ struct GenerationDetailSheet: View {
     // MARK: - Generation actions
 
     private func handleRemix() {
+        // D-4: preset rows fork into the preset's own prefilled input sheet — never the
+        // freeform composer (which would open blank; the backend nulls item.prompt on preset
+        // runs). Freeform rows are completely unaffected below.
+        if item.isPreset, matchedPreset != nil {
+            presentPresetRemixSheet()
+            return
+        }
         generationManager.pendingRemix = item
         NotificationCenter.default.post(name: .remixGenerationRequested, object: nil)
         isPresented = false
     }
 
     private func handleRegenerate() {
+        // D-4: same preset fork as handleRemix() above — Regen on a preset row also reopens the
+        // prefilled PresetInputSheet, not the composer.
+        if item.isPreset, matchedPreset != nil {
+            presentPresetRemixSheet()
+            return
+        }
         // Pre-fill Generate tab with same settings; user can submit immediately or tweak
         generationManager.pendingRemix = item
         NotificationCenter.default.post(name: .remixGenerationRequested, object: nil)
         isPresented = false
+    }
+
+    // MARK: - Preset Remix/Regen fork (D-4, 09.2-10 Task 3)
+    // Re-signs this row's stored preset_input_upload_ids against the shared MediaLibraryManager
+    // cache — same re-signing routine as GenerationCardView.presentPresetRemixSheet(), since
+    // presigned URLs rotate per fetch (documented project landmine) and can't be trusted stale.
+    private func presentPresetRemixSheet() {
+        guard !isPreparingRemix,
+              let presetId = item.params.presetId,
+              let preset = presetRegistry.presets.first(where: { $0.presetId == presetId }) else { return }
+        isPreparingRemix = true
+        let ids = item.params.presetInputUploadIds ?? []
+        Task {
+            defer { isPreparingRemix = false }
+            var slots: [PresetSlotInput?] = Array(repeating: nil, count: ids.count)
+            await mediaLibrary.load()
+            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // `id` may be nil (empty optional slot, 09.1-11 Clothes Swap) — leave that slot's
+            // entry nil so PresetInputSheet reopens with it correctly blank, not misaligned.
+            for (index, id) in ids.enumerated() {
+                guard let id, let match = map[id] else { continue }
+                slots[index] = PresetSlotInput(
+                    uploadId: match.id,
+                    url: match.url,
+                    thumbnail: nil,
+                    isUploading: false,
+                    durationSeconds: nil
+                )
+            }
+            remixPrefillSlots = slots
+            presetForRemix = preset   // triggers .sheet(item:) above
+        }
     }
 
     // Attach this generation's own output as a reference input on the Generate tab.
