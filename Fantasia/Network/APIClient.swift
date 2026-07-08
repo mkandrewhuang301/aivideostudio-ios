@@ -108,6 +108,11 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/me/preferences", body: body)
     }
 
+    // PATCH /api/me/consent — SC2: records first-use face-input consent attestation (204, no body)
+    func updateConsent() async throws {
+        try await authorizedRequestNoContent(path: "api/me/consent", method: "PATCH")
+    }
+
     // MARK: - Generation API
 
     // D-31: GET /api/generations with optional cursor parameter
@@ -285,6 +290,7 @@ struct MeResponse: Decodable {
     let subscriptionAllotment: Int
     let activeTopupBalance: Int
     let entitlementLevel: String?
+    let hasFaceConsent: Bool
 
     enum CodingKeys: String, CodingKey {
         case user
@@ -292,6 +298,18 @@ struct MeResponse: Decodable {
         case subscriptionAllotment = "subscription_allotment"
         case activeTopupBalance = "active_topup_balance"
         case entitlementLevel = "entitlement_level"
+        case hasFaceConsent = "has_face_consent"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user = try container.decode(UserInfo.self, forKey: .user)
+        creditsBalance = try container.decode(Int.self, forKey: .creditsBalance)
+        subscriptionAllotment = try container.decode(Int.self, forKey: .subscriptionAllotment)
+        activeTopupBalance = try container.decode(Int.self, forKey: .activeTopupBalance)
+        entitlementLevel = try container.decodeIfPresent(String.self, forKey: .entitlementLevel)
+        // Backend always sends has_face_consent (09.2-03), but decode defensively for older responses.
+        hasFaceConsent = try container.decodeIfPresent(Bool.self, forKey: .hasFaceConsent) ?? false
     }
 }
 
