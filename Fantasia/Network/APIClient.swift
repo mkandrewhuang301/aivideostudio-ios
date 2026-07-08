@@ -422,6 +422,12 @@ struct GenerationRequestBody: Encodable {
     // clamps to the preset's own `max_seconds` before billing (D-16), so this value is never
     // trusted beyond suggesting where to start. nil on every non-per-second submission.
     var estimatedDurationSeconds: Double? = nil
+    // Magic Editor (09.2-10, SC4): the uploaded alpha-mask PNG's reference_uploads id. Set only
+    // on preset_id="magic-editor" submissions — nil for every other request (image/video
+    // freeform, every other preset). The backend's presetResolver/prepareCost reads this
+    // alongside preset_input_upload_ids[0] (the source image) to dispatch the inline OpenAI
+    // gpt-image-2 mask-edit path (09.2-08).
+    var maskUploadId: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
@@ -441,5 +447,6 @@ struct GenerationRequestBody: Encodable {
         case referenceVideoGenerationIds = "reference_video_generation_ids"
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
+        case maskUploadId = "mask_upload_id"
     }
 }

@@ -54,6 +54,34 @@ actor MediaPrepService {
         generator.appliesPreferredTrackTransform = true
         return (try? generator.copyCGImage(at: .zero, actualTime: nil)).map(UIImage.init)
     }
+
+    // MARK: - Magic Editor alpha-mask export (09.2-10, SC4)
+    //
+    // A pure, testable helper (no view/actor-state dependency) — a plain `static func` on an
+    // actor type is NOT actor-isolated (only instance members are), so this is callable directly
+    // as `MediaPrepService.alphaMaskPNG(...)` from any context, including MaskEditorView's
+    // MainActor-isolated submit path, without an `await` hop.
+    //
+    // RESEARCH Pitfall 3 (mask alpha convention is inverted from intuition): OpenAI's gpt-image-2
+    // `/v1/images/edits` convention is TRANSPARENT (alpha=0) = edit, OPAQUE (alpha=255) = preserve.
+    // A naive "painted = white/opaque" export inverts the edit. This fills the whole canvas
+    // opaque white first (preserve), then draws the painted-stroke image on top with
+    // `.destinationOut`, which punches the painted region's alpha down to 0 (edit) wherever the
+    // stroke image has any alpha — leaving everywhere else at the initial opaque fill.
+    //
+    // RESEARCH Pitfall 2/7 (dimension + size constraints): must render at the SOURCE image's
+    // exact pixel size — mismatched dims between image/mask → undefined behavior server-side.
+    // Callers (MaskEditorView) are responsible for resizing the source to satisfy gpt-image-2's
+    // own constraints (edges multiple of 16, total px bounds) BEFORE calling this, and must pass
+    // that same (possibly resized) pixel size here so image and mask stay dimension-matched.
+    static func alphaMaskPNG(strokeImage: UIImage, sourcePixelSize: CGSize) -> Data {
+        let renderer = UIGraphicsImageRenderer(size: sourcePixelSize)
+        return renderer.pngData { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: sourcePixelSize)) // opaque = preserve
+            strokeImage.draw(in: CGRect(origin: .zero, size: sourcePixelSize), blendMode: .destinationOut, alpha: 1) // painted → alpha 0 = edit
+        }
+    }
 }
 
 // MARK: - HEVC transcoding helper
