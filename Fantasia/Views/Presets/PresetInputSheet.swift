@@ -1039,12 +1039,16 @@ struct PresetInputSheet: View {
 
         // Optimistic UI (mirrors GenerateView.dispatchGeneration): drop a pending placeholder
         // into GenerationManager immediately — the run then rides the existing pending-card
-        // machinery (polling, GenerationCardView) in the Generate feed (D-11), no tab switch.
+        // machinery (polling, GenerationCardView) in the Generate feed (D-11). On success we post
+        // .generationSubmitted so MainTabView switches to the Generate feed (D-D, 09.2-13).
         let placeholderId = "local-" + UUID().uuidString
         let placeholder = GenerationItem(
             localPlaceholderId: placeholderId,
             model: preset.model ?? "",
-            mediaType: (preset.mediaType == "image") ? .image : .video,
+            // Image-OUTPUT presets (plain image AND faceswap) render as a still. Faceswap's DB
+            // media_type is 'faceswap' server-side, but its output is an image (09.2-13, D-F) —
+            // without this the optimistic placeholder would show a video card that never loads.
+            mediaType: (preset.mediaType == "image" || preset.mediaType == "faceswap") ? .image : .video,
             prompt: nil,
             params: GenerationParams(
                 resolution: nil,
@@ -1066,6 +1070,9 @@ struct PresetInputSheet: View {
             generationManager.removeLocalPlaceholder(id: placeholderId)
             generationManager.startPolling(forceRefresh: true)
             await creditManager.fetchBalance()
+            // D-D: on ANY preset submit, switch to the Generate feed (tab 1) so the user sees the
+            // loading card. MainTabView observes this and sets selectedTab = 1.
+            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
             dismiss()
         } catch let apiError as APIError {
             generationManager.removeLocalPlaceholder(id: placeholderId)

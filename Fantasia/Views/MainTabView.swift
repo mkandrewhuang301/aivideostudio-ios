@@ -106,6 +106,10 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
             selectedTab = 1
         }
+        // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
+        .onReceive(NotificationCenter.default.publisher(for: .generationSubmitted)) { _ in
+            selectedTab = 1
+        }
         .nameAsReferenceAlert()
         .sheet(isPresented: $showProfileSheet) {
             ProfileCreditSheet(isPresented: $showProfileSheet)

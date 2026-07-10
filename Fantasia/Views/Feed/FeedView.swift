@@ -194,4 +194,7 @@ struct FeedView: View {
 extension Notification.Name {
     static let remixGenerationRequested = Notification.Name("remixGenerationRequested")
     static let referenceGenerationRequested = Notification.Name("referenceGenerationRequested")
+    // Posted by PresetInputSheet after a successful preset submit (09.2-13, D-D) — MainTabView
+    // observes it and switches to the Generate feed so the loading card is visible.
+    static let generationSubmitted = Notification.Name("generationSubmitted")
 }
