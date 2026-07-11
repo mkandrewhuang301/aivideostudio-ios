@@ -221,13 +221,22 @@ struct MaskEditorView: View {
                         .allowsHitTesting(false)
                 }
 
-                // While the keyboard is up, the whole upper (image) area becomes a dismiss zone:
-                // a tap anywhere here dismisses instead of painting. Only present when focused, so
-                // it never interferes with painting/zoom once the keyboard is down.
+                // While the keyboard is up, the whole upper (image) area above the text box becomes
+                // a dismiss zone: a tap OR a small downward swipe anywhere here dismisses instead of
+                // painting (same flick-to-dismiss feel as the Generate composer). Only present when
+                // focused, so it never interferes with painting/zoom once the keyboard is down.
                 if isTextFocused {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { isTextFocused = false }
+                        .gesture(
+                            DragGesture(minimumDistance: 10)
+                                .onChanged { value in
+                                    if value.translation.height > 14 && abs(value.translation.width) < 80 {
+                                        isTextFocused = false
+                                    }
+                                }
+                        )
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: hasStrokes)
