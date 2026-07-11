@@ -123,7 +123,11 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        model = try container.decode(String.self, forKey: .model)
+        // model is null for preset rows (backend hides the underlying model — D-G, 09.2-13). Decode
+        // defensively so a null never throws and kills the WHOLE list fetch (that froze the feed:
+        // no completion updates, no delete reconciliation). Empty string is a safe default — the
+        // only readers are `.contains("mini"/"grok")` checks, which correctly yield false.
+        model = (try? container.decodeIfPresent(String.self, forKey: .model)) ?? ""
         status = try container.decode(GenerationStatus.self, forKey: .status)
         mediaType = (try? container.decode(MediaType.self, forKey: .mediaType)) ?? .video
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
