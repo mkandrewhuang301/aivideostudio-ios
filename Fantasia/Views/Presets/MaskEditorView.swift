@@ -537,14 +537,12 @@ struct MaskEditorView: View {
     // MARK: - Submit (D-10/D-11 pattern, mirrors PresetInputSheet.generate())
 
     private func submit(sourceImage: UIImage?) async {
-        // Prompt is required (in addition to a painted region).
+        // Prompt + a painted region are required.
         guard let sourceImage, hasStrokes, !trimmedPrompt.isEmpty, !isSubmitting else { return }
-        isSubmitting = true
-        defer { isSubmitting = false }
 
-        // The canvas's own bounds are the on-screen FITTED frame (points) — see editorContent's
-        // AVMakeRect. Scale maps points → the source's exact pixel size (Pitfall 2: mismatched
-        // dims → undefined behavior), since the fitted frame preserves the source's aspect ratio.
+        // Render the mask + source synchronously (local, fast) BEFORE going optimistic. Export reads
+        // the canvas's FIXED bounds — unaffected by zoom (the outer scroll view scales the container,
+        // not the canvas), so the mask matches exactly what was painted at any zoom.
         let sourcePixelSize = sourceImage.size
         let canvasBoundsSize = canvasView.bounds.size
         guard canvasBoundsSize.width > 0, canvasBoundsSize.height > 0, sourcePixelSize.width > 0 else {
@@ -562,57 +560,26 @@ struct MaskEditorView: View {
             return
         }
 
-        let sourceUpload: UploadResponse
-        let maskUpload: UploadResponse
-        do {
-            async let sourceUploadTask = APIClient.shared.uploadReferenceMedia(
-                data: sourceData, mimeType: "image/png", fileName: "magic-editor-source.png"
-            )
-            async let maskUploadTask = APIClient.shared.uploadReferenceMedia(
-                data: maskData, mimeType: "image/png", fileName: "magic-editor-mask.png"
-            )
-            (sourceUpload, maskUpload) = try await (sourceUploadTask, maskUploadTask)
-        } catch {
-            errorMessage = "Couldn't upload this image. Try again."
+        // Catch the most common pre-dispatch failure (no credits) WHILE the modal is still up, so we
+        // show it here instead of flashing a card that immediately vanishes.
+        if let cost = magicEditorCost, creditManager.creditsBalance < cost {
+            errorMessage = "Insufficient credits."
             return
         }
 
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // D-11: only preset_id + slot upload ids + mask_upload_id are sent — the server's
-        // presetResolver owns model/media_type/prompt expansion for the magic-editor preset,
-        // exactly like every other preset submission.
-        let body = GenerationRequestBody(
-            prompt: trimmedText,
-            model: "",
-            mediaType: "image",
-            duration: nil,
-            resolution: nil,
-            aspectRatio: nil,
-            audioEnabled: nil,
-            imageAspectRatio: nil,
-            imageQuality: nil,
-            referenceImages: nil,
-            referenceVideos: nil,
-            referenceUploadIds: nil,
-            referenceImageUploadIds: nil,
-            referenceVideoUploadIds: nil,
-            referenceImageGenerationIds: nil,
-            referenceVideoGenerationIds: nil,
-            presetId: "magic-editor",
-            presetInputUploadIds: [sourceUpload.id],
-            maskUploadId: maskUpload.id
-        )
+        let promptText = trimmedPrompt
+        isSubmitting = true
 
-        // Optimistic UI (mirrors PresetInputSheet.generate()): drop a pending placeholder into
-        // GenerationManager immediately — the run then rides the existing pending-card machinery
-        // in the Generate feed, no tab switch required.
+        // Optimistic: drop a pending "Edit" card into the feed and jump to the Generate feed
+        // IMMEDIATELY. Presenters close this modal on .generationSubmitted (no self-dismiss → no
+        // double-dismiss bounce). Upload + submit then run in the background, so a cold backend
+        // (Railway) never blocks the UI — the user is already on the feed watching the loading card.
         let placeholderId = "local-" + UUID().uuidString
         let placeholder = GenerationItem(
             localPlaceholderId: placeholderId,
             model: "gpt-image-2",
             mediaType: .image,
-            // Carry the user's description so the pending "Edit" card shows the prompt immediately.
-            prompt: trimmedText,
+            prompt: promptText,   // shows in the pending "Edit" card
             params: GenerationParams(
                 resolution: nil,
                 duration: nil,
@@ -622,40 +589,61 @@ struct MaskEditorView: View {
                 width: nil,
                 height: nil,
                 presetId: "magic-editor",
-                presetInputUploadIds: [sourceUpload.id]
+                presetInputUploadIds: nil   // upload ids not known yet; the server row carries them
             ),
             costCredits: magicEditorCost ?? 0,
             referenceUrls: nil,
             createdAt: Date()
         )
         generationManager.insertLocalPlaceholder(placeholder)
+        NotificationCenter.default.post(name: .generationSubmitted, object: nil)
 
+        // Background network — this Task is unstructured (created in the Generate button's action)
+        // and captures generationManager, so it keeps running after the modal closes.
         do {
+            async let sourceUploadTask = APIClient.shared.uploadReferenceMedia(
+                data: sourceData, mimeType: "image/png", fileName: "magic-editor-source.png"
+            )
+            async let maskUploadTask = APIClient.shared.uploadReferenceMedia(
+                data: maskData, mimeType: "image/png", fileName: "magic-editor-mask.png"
+            )
+            let (sourceUpload, maskUpload) = try await (sourceUploadTask, maskUploadTask)
+
+            // D-11: only preset_id + upload ids + mask_upload_id are sent — the server's
+            // presetResolver owns model/media_type/prompt expansion for the magic-editor preset.
+            let body = GenerationRequestBody(
+                prompt: promptText,
+                model: "",
+                mediaType: "image",
+                duration: nil,
+                resolution: nil,
+                aspectRatio: nil,
+                audioEnabled: nil,
+                imageAspectRatio: nil,
+                imageQuality: nil,
+                referenceImages: nil,
+                referenceVideos: nil,
+                referenceUploadIds: nil,
+                referenceImageUploadIds: nil,
+                referenceVideoUploadIds: nil,
+                referenceImageGenerationIds: nil,
+                referenceVideoGenerationIds: nil,
+                presetId: "magic-editor",
+                presetInputUploadIds: [sourceUpload.id],
+                maskUploadId: maskUpload.id
+            )
             let submitted = try await APIClient.shared.submitGeneration(body: body)
-            // Promote the optimistic placeholder to the real server id (NOT remove-and-hope) so the
-            // pending card stays put and polling updates it in place — otherwise the card vanishes
-            // when an immediate re-fetch misses the just-created row (replica lag). Mirrors
-            // PresetInputSheet.generate().
+            // Promote (NOT remove-and-hope) so the pending card stays put and polling updates it in
+            // place through to completion, robust to read-replica lag.
             generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
             generationManager.startPolling(forceRefresh: true)
             await creditManager.fetchBalance()
-            // Switch to the Generate feed (tab 1) so the user lands on the loading "Edit" card,
-            // matching every other preset submit (D-D). MainTabView observes .generationSubmitted.
-            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
-            dismiss()
-        } catch let apiError as APIError {
-            generationManager.removeLocalPlaceholder(id: placeholderId)
-            if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
-                errorMessage = "Insufficient credits."
-                await creditManager.fetchBalance()
-            } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
-                errorMessage = "This may not adhere to our community guidelines. Please try again."
-            } else {
-                errorMessage = "An error has occurred. Please try again."
-            }
         } catch {
+            // The modal is already closed, so we can't show an alert — remove the pending card
+            // (the server refunds any deduction on failure). A dedicated failed-card state is a
+            // future improvement.
             generationManager.removeLocalPlaceholder(id: placeholderId)
-            errorMessage = "An error has occurred. Please try again."
+            await creditManager.fetchBalance()
         }
     }
 }
