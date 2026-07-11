@@ -74,6 +74,9 @@ struct MaskEditorView: View {
     @State private var text: String = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    // Standalone modal's OWN plain TextField (NOT GenerateView's frozen composer) — a focus flag
+    // drives the down-chevron dismiss affordance below.
+    @FocusState private var isTextFocused: Bool
 
     // Item 4: live cost for the Generate button. Own instance (like HomeView/GenerationDetailSheet)
     // — the registry has a bundled/snapshot fallback so a cost is available immediately.
@@ -190,39 +193,30 @@ struct MaskEditorView: View {
     @ViewBuilder
     private func editorContent(_ image: UIImage) -> some View {
         VStack(spacing: 0) {
-            GeometryReader { geo in
-                // AVMakeRect gives the EXACT `.scaledToFit()` frame (accounting for letterboxing
-                // when the container's aspect ratio differs from the image's) — the canvas must
-                // sit exactly on top of that fitted rect, not the full container, or painted
-                // strokes would register at the wrong on-screen position relative to the image.
-                let fitRect = AVMakeRect(
-                    aspectRatio: image.size,
-                    insideRect: CGRect(origin: .zero, size: geo.size)
-                )
-                ZStack(alignment: .top) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                    MaskCanvasRepresentable(
-                        canvasView: canvasView,
-                        penWidth: penWidth,
-                        maskColor: maskColor,
-                        isErasing: isErasing
-                    ) { changed in
-                        hasStrokes = changed
-                    }
-                    .frame(width: fitRect.width, height: fitRect.height)
-                    .position(x: fitRect.midX, y: fitRect.midY)
-
-                    if !hasStrokes {
-                        hintPill
-                            .padding(.top, 10)
-                            .transition(.opacity)
-                            .allowsHitTesting(false)
-                    }
+            ZStack(alignment: .top) {
+                // Two-finger pinch/pan zoom; the image + mask live in ONE container so they scale
+                // 1:1 together (user-requested). One finger is left free to draw. The canvas keeps
+                // a FIXED coordinate space (its own bounds never change — the outer scroll view's
+                // transform does the scaling), so mask export in submit() stays zoom-independent
+                // and unchanged.
+                ZoomableMaskCanvas(
+                    canvasView: canvasView,
+                    image: image,
+                    penWidth: penWidth,
+                    maskColor: maskColor,
+                    isErasing: isErasing
+                ) { changed in
+                    hasStrokes = changed
                 }
-                .animation(.easeInOut(duration: 0.2), value: hasStrokes)
+
+                if !hasStrokes {
+                    hintPill
+                        .padding(.top, 10)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: hasStrokes)
             .padding(.top, 56)
             .padding(.horizontal, 12)
 
@@ -249,6 +243,25 @@ struct MaskEditorView: View {
         VStack(spacing: 12) {
             toolRow
 
+            // Down-chevron to dismiss the keyboard, centered above the text box — appears only
+            // while the field is focused. This is MaskEditorView's OWN plain TextField, entirely
+            // separate from GenerateView's frozen composer/keyboard machinery.
+            if isTextFocused {
+                Button {
+                    isTextFocused = false
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 44, height: 30)
+                        .background(theme.surface, in: Capsule())
+                        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 0.75))
+                }
+                .buttonStyle(PressableButtonStyle())
+                .transition(.opacity.combined(with: .scale))
+                .accessibilityLabel("Dismiss keyboard")
+            }
+
             TextField(
                 "",
                 text: $text,
@@ -258,50 +271,55 @@ struct MaskEditorView: View {
             .font(.body)
             .foregroundStyle(theme.textPrimary)
             .lineLimit(1...3)
+            .focused($isTextFocused)
             .padding(12)
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
 
-            // Live cost (Item 4) — magic-editor is a flat-cost preset; mirrors PresetInputSheet's
-            // "✦ N credits" label. Hidden until the registry has a cost (never show "0 credits").
-            if let magicEditorCost {
-                HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(accent)
-                    Text("\(magicEditorCost)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(theme.textPrimary)
-                    Text("credits")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(theme.textSecondary)
+            // Generate bar — button fills, live "✦ N credits" cost sits on the RIGHT (user-
+            // requested). Cost hidden until the registry provides one (never show "0 credits").
+            HStack(spacing: 14) {
+                Button {
+                    Task { await submit(sourceImage: sourceImage) }
+                } label: {
+                    Group {
+                        if isSubmitting {
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Text("Generate")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .foregroundStyle(.white)
+                    .background {
+                        if hasStrokes && !isSubmitting {
+                            Capsule().fill(LinearGradient.brandPrimary)
+                        } else {
+                            Capsule().fill(theme.surfaceStrong)
+                        }
+                    }
                 }
-            }
+                .buttonStyle(PressableButtonStyle())
+                .disabled(!hasStrokes || isSubmitting)
 
-            Button {
-                Task { await submit(sourceImage: sourceImage) }
-            } label: {
-                Group {
-                    if isSubmitting {
-                        ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
-                        Text("Generate")
-                            .font(.subheadline.weight(.semibold))
+                if let magicEditorCost {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(accent)
+                        Text("\(magicEditorCost)")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(theme.textPrimary)
+                        Text("credits")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(theme.textSecondary)
                     }
-                }
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .foregroundStyle(.white)
-                .background {
-                    if hasStrokes && !isSubmitting {
-                        Capsule().fill(LinearGradient.brandPrimary)
-                    } else {
-                        Capsule().fill(theme.surfaceStrong)
-                    }
+                    .fixedSize()
                 }
             }
-            .buttonStyle(PressableButtonStyle())
-            .disabled(!hasStrokes || isSubmitting)
         }
+        .animation(.easeInOut(duration: 0.2), value: isTextFocused)
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 24)
@@ -625,34 +643,70 @@ struct MaskEditorView: View {
     }
 }
 
-// MARK: - PencilKit canvas (UIViewRepresentable)
+// MARK: - Zoomable mask canvas (image + PencilKit mask in one zoomable container)
 
-/// A thin `PKCanvasView` wrapper. `drawingPolicy = .anyInput` allows finger drawing (not every
-/// user has an Apple Pencil); a crisp, semi-transparent pen tool lets the user see what they've
-/// painted against the source image underneath (visible feedback, not opaque cover — color is
-/// cosmetic, see `MaskPalette`). Undo/eraser come for free via `PKCanvasView`/PencilKit (RESEARCH
-/// "Don't Hand-Roll": PencilKit gives pressure/eraser/undo for free).
-private struct MaskCanvasRepresentable: UIViewRepresentable {
+/// Two-finger pinch/pan zoom with the source image and the PencilKit mask living in ONE container,
+/// so they scale 1:1 together (Photos-markup style, user-requested). One finger is left free to
+/// draw. The OUTER `UIScrollView` owns zooming (its transform scales the container); the
+/// `PKCanvasView` keeps a FIXED coordinate space — its own `bounds` never change with zoom — so
+/// `MaskEditorView.submit()`'s mask export (which reads `canvasView.bounds`) stays correct at any
+/// zoom level, unchanged. `drawingPolicy = .anyInput` allows finger drawing; pen color is cosmetic
+/// visibility only (see `MaskPalette`) — the exported mask thresholds on stroke coverage, not hue.
+private struct ZoomableMaskCanvas: UIViewRepresentable {
     let canvasView: PKCanvasView
+    let image: UIImage
     var penWidth: CGFloat
     var maskColor: UIColor
     var isErasing: Bool
+    var maxZoom: CGFloat = 4.0
     var onStrokesChanged: (Bool) -> Void
 
-    func makeUIView(context: Context) -> PKCanvasView {
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = LayoutReportingScrollView()
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = maxZoom
+        scrollView.bouncesZoom = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.backgroundColor = .clear
+        scrollView.decelerationRate = .fast
+        // Two fingers to pan/zoom → one finger stays free for drawing on the canvas.
+        scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
+
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleToFill
+        container.addSubview(imageView)
+
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.drawingPolicy = .anyInput
+        canvasView.isScrollEnabled = false          // outer scroll view owns scrolling/zooming
         canvasView.delegate = context.coordinator
+        container.addSubview(canvasView)
+
+        scrollView.addSubview(container)
+
+        let c = context.coordinator
+        c.scrollView = scrollView
+        c.container = container
+        c.imageView = imageView
+        c.canvasView = canvasView
+        c.imageSize = image.size
+        scrollView.onLayout = { [weak c] in c?.layoutContent() }
+
         applyTool(to: canvasView)
-        return canvasView
+        return scrollView
     }
 
-    // Re-applied on every SwiftUI update so Pen/Eraser toggle, size dots, and color-well
-    // selections (all plain @State on MaskEditorView) propagate to the stored PKCanvasView
-    // reference — the idiom for a UIViewRepresentable backed by a reference-type view.
-    func updateUIView(_ uiView: PKCanvasView, context: Context) {
-        applyTool(to: uiView)
+    // Re-applied on every SwiftUI update so Pen/Eraser toggle, size dots, and color-well selections
+    // (plain @State on MaskEditorView) propagate to the stored PKCanvasView reference.
+    func updateUIView(_ uiView: UIScrollView, context: Context) {
+        applyTool(to: canvasView)
     }
 
     private func applyTool(to canvasView: PKCanvasView) {
@@ -661,17 +715,64 @@ private struct MaskCanvasRepresentable: UIViewRepresentable {
             : PKInkingTool(.pen, color: maskColor.withAlphaComponent(0.55), width: penWidth)
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onChange: onStrokesChanged)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(onChange: onStrokesChanged) }
 
-    final class Coordinator: NSObject, PKCanvasViewDelegate {
+    final class Coordinator: NSObject, UIScrollViewDelegate, PKCanvasViewDelegate {
+        weak var scrollView: UIScrollView?
+        weak var container: UIView?
+        weak var imageView: UIImageView?
+        weak var canvasView: PKCanvasView?
+        var imageSize: CGSize = .zero
+        private var configured = false
         let onChange: (Bool) -> Void
-        init(onChange: @escaping (Bool) -> Void) {
-            self.onChange = onChange
+
+        init(onChange: @escaping (Bool) -> Void) { self.onChange = onChange }
+
+        // Fit the container to the image's aspect inside the scroll view ONCE (bounds are zero
+        // until SwiftUI lays the view out). After that, only re-center on zoom. The canvas frame is
+        // pinned to this fitted size and never changes — that fixed size is what submit() exports.
+        func layoutContent() {
+            guard let scrollView, let container, let imageView, let canvasView else { return }
+            let bounds = scrollView.bounds.size
+            guard bounds.width > 0, bounds.height > 0, imageSize.width > 0 else { return }
+            if !configured {
+                let fitted = AVMakeRect(aspectRatio: imageSize, insideRect: CGRect(origin: .zero, size: bounds)).size
+                container.frame = CGRect(origin: .zero, size: fitted)
+                imageView.frame = container.bounds
+                canvasView.frame = container.bounds
+                scrollView.contentSize = fitted
+                scrollView.zoomScale = 1
+                configured = true
+            }
+            centerContent()
         }
+
+        // Center the (possibly-zoomed) content within the scroll view via symmetric insets.
+        func centerContent() {
+            guard let scrollView, let container else { return }
+            let boundsSize = scrollView.bounds.size
+            let contentSize = container.frame.size   // reflects the current zoom transform
+            let insetX = max(0, (boundsSize.width - contentSize.width) / 2)
+            let insetY = max(0, (boundsSize.height - contentSize.height) / 2)
+            scrollView.contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { container }
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { centerContent() }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             onChange(!canvasView.drawing.strokes.isEmpty)
         }
+    }
+}
+
+/// UIScrollView that reports each layout pass — `makeUIView` runs before SwiftUI assigns a real
+/// frame, so the fit/centering math must run in `layoutSubviews` (the one hook guaranteed to fire
+/// with a valid bounds), mirroring the app's existing `ZoomPanScrollView`.
+private final class LayoutReportingScrollView: UIScrollView {
+    var onLayout: (() -> Void)?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
     }
 }
