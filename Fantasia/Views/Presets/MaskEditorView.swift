@@ -243,25 +243,6 @@ struct MaskEditorView: View {
         VStack(spacing: 12) {
             toolRow
 
-            // Down-chevron to dismiss the keyboard, centered above the text box — appears only
-            // while the field is focused. This is MaskEditorView's OWN plain TextField, entirely
-            // separate from GenerateView's frozen composer/keyboard machinery.
-            if isTextFocused {
-                Button {
-                    isTextFocused = false
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.textSecondary)
-                        .frame(width: 44, height: 30)
-                        .background(theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 0.75))
-                }
-                .buttonStyle(PressableButtonStyle())
-                .transition(.opacity.combined(with: .scale))
-                .accessibilityLabel("Dismiss keyboard")
-            }
-
             TextField(
                 "",
                 text: $text,
@@ -276,50 +257,43 @@ struct MaskEditorView: View {
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
 
-            // Generate bar — button fills, live "✦ N credits" cost sits on the RIGHT (user-
-            // requested). Cost hidden until the registry provides one (never show "0 credits").
-            HStack(spacing: 14) {
-                Button {
-                    Task { await submit(sourceImage: sourceImage) }
-                } label: {
-                    Group {
-                        if isSubmitting {
-                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
+            // Generate — full width; credit cost shown INSIDE the button, centered next to the
+            // label (user-requested). Cost hidden until the registry provides one (never "0").
+            Button {
+                Task { await submit(sourceImage: sourceImage) }
+            } label: {
+                Group {
+                    if isSubmitting {
+                        ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        HStack(spacing: 7) {
                             Text("Generate")
                                 .font(.subheadline.weight(.semibold))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .foregroundStyle(.white)
-                    .background {
-                        if hasStrokes && !isSubmitting {
-                            Capsule().fill(LinearGradient.brandPrimary)
-                        } else {
-                            Capsule().fill(theme.surfaceStrong)
+                            if let magicEditorCost {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("\(magicEditorCost)")
+                                        .font(.subheadline.weight(.bold))
+                                }
+                                .opacity(0.92)
+                            }
                         }
                     }
                 }
-                .buttonStyle(PressableButtonStyle())
-                .disabled(!hasStrokes || isSubmitting)
-
-                if let magicEditorCost {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(accent)
-                        Text("\(magicEditorCost)")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(theme.textPrimary)
-                        Text("credits")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(theme.textSecondary)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .foregroundStyle(.white)
+                .background {
+                    if hasStrokes && !isSubmitting {
+                        Capsule().fill(LinearGradient.brandPrimary)
+                    } else {
+                        Capsule().fill(theme.surfaceStrong)
                     }
-                    .fixedSize()
                 }
             }
+            .buttonStyle(PressableButtonStyle())
+            .disabled(!hasStrokes || isSubmitting)
         }
-        .animation(.easeInOut(duration: 0.2), value: isTextFocused)
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 24)
@@ -327,6 +301,17 @@ struct MaskEditorView: View {
             theme.elevatedBackground
                 .shadow(color: .black.opacity(0.12), radius: 12, y: -4)
                 .ignoresSafeArea(edges: .bottom)
+        )
+        // Small downward swipe over the controls dismisses the keyboard — same feel as the Generate
+        // composer's flick-to-dismiss (replicated locally; this never touches GenerateView's frozen
+        // keyboard machinery). simultaneousGesture so button taps still register.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    if value.translation.height > 14 && abs(value.translation.width) < 70 {
+                        isTextFocused = false
+                    }
+                }
         )
     }
 
