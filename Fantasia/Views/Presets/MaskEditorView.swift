@@ -89,6 +89,11 @@ struct MaskEditorView: View {
         return nil
     }
 
+    private var trimmedPrompt: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Generate requires BOTH a painted region AND a non-empty description (prompt is required).
+    private var canGenerate: Bool { hasStrokes && !trimmedPrompt.isEmpty && !isSubmitting }
+
     // Home "pick a source photo" mode only.
     @State private var showPhotosPicker = false
     @State private var selectedPickerItem: PhotosPickerItem?
@@ -215,6 +220,15 @@ struct MaskEditorView: View {
                         .transition(.opacity)
                         .allowsHitTesting(false)
                 }
+
+                // While the keyboard is up, the whole upper (image) area becomes a dismiss zone:
+                // a tap anywhere here dismisses instead of painting. Only present when focused, so
+                // it never interferes with painting/zoom once the keyboard is down.
+                if isTextFocused {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { isTextFocused = false }
+                }
             }
             .animation(.easeInOut(duration: 0.2), value: hasStrokes)
             .padding(.top, 56)
@@ -246,7 +260,7 @@ struct MaskEditorView: View {
             TextField(
                 "",
                 text: $text,
-                prompt: Text("Describe the change (optional)").foregroundStyle(theme.textTertiary),
+                prompt: Text("Describe the change").foregroundStyle(theme.textTertiary),
                 axis: .vertical
             )
             .font(.body)
@@ -284,7 +298,7 @@ struct MaskEditorView: View {
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .foregroundStyle(.white)
                 .background {
-                    if hasStrokes && !isSubmitting {
+                    if canGenerate {
                         Capsule().fill(LinearGradient.brandPrimary)
                     } else {
                         Capsule().fill(theme.surfaceStrong)
@@ -292,7 +306,7 @@ struct MaskEditorView: View {
                 }
             }
             .buttonStyle(PressableButtonStyle())
-            .disabled(!hasStrokes || isSubmitting)
+            .disabled(!canGenerate)
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
@@ -514,7 +528,8 @@ struct MaskEditorView: View {
     // MARK: - Submit (D-10/D-11 pattern, mirrors PresetInputSheet.generate())
 
     private func submit(sourceImage: UIImage?) async {
-        guard let sourceImage, hasStrokes, !isSubmitting else { return }
+        // Prompt is required (in addition to a painted region).
+        guard let sourceImage, hasStrokes, !trimmedPrompt.isEmpty, !isSubmitting else { return }
         isSubmitting = true
         defer { isSubmitting = false }
 
