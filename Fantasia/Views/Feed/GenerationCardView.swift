@@ -598,7 +598,7 @@ struct GenerationCardView: View {
         if item.isImage {
             guard let urlString = item.completedMediaUrl, let url = URL(string: urlString),
                   cachedImage == nil else { return }
-            let gridKey = item.id + "-grid"
+            let gridKey = item.id + "-grid2"  // bumped: bypass stale 400px disk-cached thumbs
             if let cached = await ThumbnailCache.shared.image(for: gridKey) { cachedImage = cached; return }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = UIImage(data: data) else { return }
@@ -650,7 +650,7 @@ struct GenerationCardView: View {
         guard item.isImage, item.status == .completed,
               let urlString = item.completedMediaUrl, let url = URL(string: urlString),
               cachedImage == nil else { return }
-        let gridKey = item.id + "-grid"
+        let gridKey = item.id + "-grid2"  // bumped: bypass stale 400px disk-cached thumbs
         Task {
             if let cached = await ThumbnailCache.shared.image(for: gridKey) { cachedImage = cached; return }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
