@@ -611,7 +611,8 @@ struct MaskEditorView: View {
             localPlaceholderId: placeholderId,
             model: "gpt-image-2",
             mediaType: .image,
-            prompt: nil,
+            // Carry the user's description so the pending "Edit" card shows the prompt immediately.
+            prompt: trimmedText,
             params: GenerationParams(
                 resolution: nil,
                 duration: nil,
@@ -630,10 +631,17 @@ struct MaskEditorView: View {
         generationManager.insertLocalPlaceholder(placeholder)
 
         do {
-            _ = try await APIClient.shared.submitGeneration(body: body)
-            generationManager.removeLocalPlaceholder(id: placeholderId)
+            let submitted = try await APIClient.shared.submitGeneration(body: body)
+            // Promote the optimistic placeholder to the real server id (NOT remove-and-hope) so the
+            // pending card stays put and polling updates it in place — otherwise the card vanishes
+            // when an immediate re-fetch misses the just-created row (replica lag). Mirrors
+            // PresetInputSheet.generate().
+            generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
             generationManager.startPolling(forceRefresh: true)
             await creditManager.fetchBalance()
+            // Switch to the Generate feed (tab 1) so the user lands on the loading "Edit" card,
+            // matching every other preset submit (D-D). MainTabView observes .generationSubmitted.
+            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
             dismiss()
         } catch let apiError as APIError {
             generationManager.removeLocalPlaceholder(id: placeholderId)
