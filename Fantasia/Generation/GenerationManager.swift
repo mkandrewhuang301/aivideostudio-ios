@@ -217,7 +217,7 @@ final class GenerationManager {
         do {
             // fetchGenerations() handles iso8601 date decoding for createdAt/completedAt
             let response = try await APIClient.shared.fetchGenerations()
-            mergeLatest(response.items)
+            mergeLatest(response.items, reconcileDeletions: true)
             nextCursor = response.nextCursor
             lastRefreshDate = Date() // only on success — a failed fetch shouldn't count as "fresh"
             persistSnapshot()
@@ -234,7 +234,19 @@ final class GenerationManager {
     // active item's updatedAt bumps it), which reflows card positions mid-tap
     // and can route a tap to the wrong card's button. It also silently dropped
     // pages appended by loadNextPage(). Preserving existing indices avoids both.
-    private func mergeLatest(_ freshItems: [GenerationItem]) {
+    // reconcileDeletions: true only for a cursor-less first-page refresh() — prunes items that
+    // fall within the freshly-fetched page's createdAt window but are no longer present in the
+    // server's response (deleted/quarantined server-side), so they don't resurrect via
+    // persistSnapshot() on relaunch (Bug A). Paginated loadNextPage() merges must never prune,
+    // since older items simply not present in a given page are NOT deletions.
+    private func mergeLatest(_ freshItems: [GenerationItem], reconcileDeletions: Bool = false) {
+        if reconcileDeletions, let oldestFresh = freshItems.map({ $0.createdAt }).min() {
+            let freshIDs = Set(freshItems.map { $0.id })
+            generations.removeAll { item in
+                !item.isLocalPlaceholder && !freshIDs.contains(item.id) && item.createdAt >= oldestFresh
+            }
+        }
+
         var indexByID: [String: Int] = [:]
         for (index, item) in generations.enumerated() {
             indexByID[item.id] = index
