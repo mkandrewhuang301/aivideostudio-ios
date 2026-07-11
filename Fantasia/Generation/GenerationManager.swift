@@ -124,6 +124,14 @@ final class GenerationManager {
     // forceRefresh: true right after a submit, where the just-created item genuinely isn't
     // in the cached array yet and a fetch is required regardless of staleness.
     func startPolling(forceRefresh: Bool = false) {
+        if forceRefresh {
+            // Fire an immediate one-off refresh regardless of the existing polling loop, so a
+            // just-submitted item enters the feed without waiting for the next 3s tick (Bug B).
+            // refresh() itself guards `!isLoading`, so this is a no-op if a fetch is already
+            // in flight — no double-fetch risk.
+            Task { [weak self] in await self?.refresh() }
+        }
+
         guard pollingTask == nil else { return }
 
         guard forceRefresh || !hasLoadedOnce || isStale || hasActiveJobs else {
