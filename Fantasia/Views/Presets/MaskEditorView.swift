@@ -23,6 +23,21 @@ import PencilKit
 import AVFoundation
 import UIKit
 
+/// Preset mask-visibility swatches, Preview-markup style (2026-07-11 polish, Item 6). Color is
+/// purely cosmetic feedback so the paint reads against any photo (dark image needs a bright
+/// mask) — it never affects the exported mask. `MediaPrepService.alphaMaskPNG` thresholds on
+/// stroke COVERAGE, not hue/alpha value, so swapping colors here is safe by construction.
+enum MaskPalette {
+    static let colors: [UIColor] = [
+        .magenta,
+        .systemRed,
+        .systemBlue,
+        .systemGreen,
+        .systemYellow,
+        .white
+    ]
+}
+
 struct MaskEditorView: View {
     enum Source {
         case url(String)   // detail-sheet entry — an existing generation's completed media URL
@@ -47,9 +62,29 @@ struct MaskEditorView: View {
     @State private var canvasView = PKCanvasView()
     @State private var hasStrokes = false
 
+    // Tool row state (Items 3/6): pen width + color are user-adjustable, visibility-only —
+    // see MaskPalette doc comment. Defaults: pen selected, first swatch, width 20.
+    @State private var penWidth: CGFloat = 20
+    @State private var maskColorIndex: Int = 0
+    @State private var isErasing = false
+    @State private var showColorPalette = false
+    private var maskColor: UIColor { MaskPalette.colors[maskColorIndex] }
+    private static let penSizes: [CGFloat] = [12, 20, 34]
+
     @State private var text: String = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+
+    // Item 4: live cost for the Generate button. Own instance (like HomeView/GenerationDetailSheet)
+    // — the registry has a bundled/snapshot fallback so a cost is available immediately.
+    @State private var registry = PresetRegistryManager()
+
+    /// The magic-editor preset's flat credit cost, or nil until the registry provides one.
+    private var magicEditorCost: Int? {
+        guard let cost = registry.presets.first(where: { $0.presetId == "magic-editor" })?.cost else { return nil }
+        if case .flat(let credits) = cost { return credits }
+        return nil
+    }
 
     // Home "pick a source photo" mode only.
     @State private var showPhotosPicker = false
@@ -84,6 +119,7 @@ struct MaskEditorView: View {
                 await loadSourceFromURL(urlString)
             }
         }
+        .task { await registry.loadIfNeeded() }
         .photosPicker(isPresented: $showPhotosPicker, selection: $selectedPickerItem, matching: .images)
         .onChange(of: selectedPickerItem) { _, newValue in
             Task { await loadSourceFromPicker(newValue) }
@@ -142,7 +178,7 @@ struct MaskEditorView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 190, height: 48)
-                    .background(accent, in: Capsule())
+                    .background { Capsule().fill(LinearGradient.brandPrimary) }
             }
             .buttonStyle(PressableButtonStyle())
             .padding(.top, 6)
@@ -163,16 +199,29 @@ struct MaskEditorView: View {
                     aspectRatio: image.size,
                     insideRect: CGRect(origin: .zero, size: geo.size)
                 )
-                ZStack {
+                ZStack(alignment: .top) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                    MaskCanvasRepresentable(canvasView: canvasView) { changed in
+                    MaskCanvasRepresentable(
+                        canvasView: canvasView,
+                        penWidth: penWidth,
+                        maskColor: maskColor,
+                        isErasing: isErasing
+                    ) { changed in
                         hasStrokes = changed
                     }
                     .frame(width: fitRect.width, height: fitRect.height)
                     .position(x: fitRect.midX, y: fitRect.midY)
+
+                    if !hasStrokes {
+                        hintPill
+                            .padding(.top, 10)
+                            .transition(.opacity)
+                            .allowsHitTesting(false)
+                    }
                 }
+                .animation(.easeInOut(duration: 0.2), value: hasStrokes)
             }
             .padding(.top, 56)
             .padding(.horizontal, 12)
@@ -181,29 +230,24 @@ struct MaskEditorView: View {
         }
     }
 
+    // First-use discoverability pill (Item 6.4): tells the user to paint, auto-hides on first
+    // stroke. allowsHitTesting(false) so it never blocks painting underneath it.
+    private var hintPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pencil.tip")
+                .font(.system(size: 12, weight: .semibold))
+            Text("Draw over what you want to change")
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.55), in: Capsule())
+    }
+
     private var controlsBar: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 24) {
-                Button {
-                    canvasView.undoManager?.undo()
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                        .font(.subheadline.weight(.medium))
-                }
-                .disabled(canvasView.undoManager?.canUndo != true)
-
-                Button {
-                    canvasView.drawing = PKDrawing()
-                    hasStrokes = false
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                        .font(.subheadline.weight(.medium))
-                }
-                .disabled(!hasStrokes)
-
-                Spacer()
-            }
-            .foregroundStyle(theme.textPrimary)
+            toolRow
 
             TextField(
                 "",
@@ -218,6 +262,22 @@ struct MaskEditorView: View {
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
 
+            // Live cost (Item 4) — magic-editor is a flat-cost preset; mirrors PresetInputSheet's
+            // "✦ N credits" label. Hidden until the registry has a cost (never show "0 credits").
+            if let magicEditorCost {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(accent)
+                    Text("\(magicEditorCost)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(theme.textPrimary)
+                    Text("credits")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+
             Button {
                 Task { await submit(sourceImage: sourceImage) }
             } label: {
@@ -231,7 +291,13 @@ struct MaskEditorView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .foregroundStyle(.white)
-                .background((hasStrokes && !isSubmitting) ? accent : theme.surfaceStrong, in: Capsule())
+                .background {
+                    if hasStrokes && !isSubmitting {
+                        Capsule().fill(LinearGradient.brandPrimary)
+                    } else {
+                        Capsule().fill(theme.surfaceStrong)
+                    }
+                }
             }
             .buttonStyle(PressableButtonStyle())
             .disabled(!hasStrokes || isSubmitting)
@@ -244,6 +310,144 @@ struct MaskEditorView: View {
                 .shadow(color: .black.opacity(0.12), radius: 12, y: -4)
                 .ignoresSafeArea(edges: .bottom)
         )
+    }
+
+    // MARK: - Tool row (Item 6): Pen/Eraser toggle, size dots, color well, Undo/Clear
+
+    private var toolRow: some View {
+        HStack(spacing: 10) {
+            toolChip(systemImage: "pencil.tip", isSelected: !isErasing, accessibilityLabel: "Pen") {
+                isErasing = false
+            }
+            toolChip(systemImage: "eraser", isSelected: isErasing, accessibilityLabel: "Eraser") {
+                isErasing = true
+            }
+
+            Spacer(minLength: 2)
+
+            HStack(spacing: 8) {
+                ForEach(Self.penSizes, id: \.self) { size in
+                    sizeDot(size)
+                }
+            }
+
+            Spacer(minLength: 2)
+
+            colorWellButton
+
+            Spacer(minLength: 2)
+
+            Button {
+                canvasView.undoManager?.undo()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .disabled(canvasView.undoManager?.canUndo != true)
+            .accessibilityLabel("Undo")
+
+            Button {
+                canvasView.drawing = PKDrawing()
+                hasStrokes = false
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .disabled(!hasStrokes)
+            .accessibilityLabel("Clear")
+        }
+        .foregroundStyle(theme.textPrimary)
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    private func toolChip(
+        systemImage: String,
+        isSelected: Bool,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isSelected ? .white : theme.textPrimary)
+                .frame(width: 34, height: 34)
+                .background {
+                    if isSelected {
+                        Circle().fill(LinearGradient.brandPrimary)
+                    } else {
+                        Circle().fill(theme.surface)
+                    }
+                }
+                .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: isSelected ? 0 : 0.75))
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func sizeDot(_ size: CGFloat) -> some View {
+        let diameter = min(max(size * 0.55, 10), 22)
+        return Button {
+            penWidth = size
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(theme.surface)
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Circle().stroke(
+                            penWidth == size ? Color(maskColor) : theme.surfaceBorder,
+                            lineWidth: penWidth == size ? 1.5 : 0.75
+                        )
+                    )
+                Circle()
+                    .fill(theme.textPrimary)
+                    .frame(width: diameter, height: diameter)
+            }
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel("Pen size \(Int(size))")
+    }
+
+    // Preview-markup-style color well: a filled circle showing the current mask color; tapping
+    // opens a small popover palette. Color is visibility-only (MaskPalette doc comment) — never
+    // sent to the server, never affects the exported mask.
+    private var colorWellButton: some View {
+        Button {
+            showColorPalette = true
+        } label: {
+            Circle()
+                .fill(Color(maskColor))
+                .frame(width: 26, height: 26)
+                .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 1))
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel("Mask color")
+        .popover(isPresented: $showColorPalette, arrowEdge: .bottom) {
+            colorPalettePopover
+        }
+    }
+
+    private var colorPalettePopover: some View {
+        HStack(spacing: 14) {
+            ForEach(Array(MaskPalette.colors.enumerated()), id: \.offset) { index, color in
+                Button {
+                    maskColorIndex = index
+                    showColorPalette = false
+                } label: {
+                    Circle()
+                        .fill(Color(color))
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            Circle().stroke(theme.textPrimary, lineWidth: maskColorIndex == index ? 2 : 0)
+                        )
+                }
+                .buttonStyle(PressableButtonStyle())
+            }
+        }
+        .padding(16)
+        .presentationCompactAdaptation(.popover)
     }
 
     // MARK: - Source loading
@@ -392,7 +596,7 @@ struct MaskEditorView: View {
                 presetId: "magic-editor",
                 presetInputUploadIds: [sourceUpload.id]
             ),
-            costCredits: 0,
+            costCredits: magicEditorCost ?? 0,
             referenceUrls: nil,
             createdAt: Date()
         )
@@ -424,23 +628,38 @@ struct MaskEditorView: View {
 // MARK: - PencilKit canvas (UIViewRepresentable)
 
 /// A thin `PKCanvasView` wrapper. `drawingPolicy = .anyInput` allows finger drawing (not every
-/// user has an Apple Pencil); a semi-transparent marker tool lets the user see what they've
-/// painted against the source image underneath. Undo comes for free via `PKCanvasView`'s own
-/// `undoManager` (RESEARCH "Don't Hand-Roll": PencilKit gives pressure/eraser/undo for free).
+/// user has an Apple Pencil); a crisp, semi-transparent pen tool lets the user see what they've
+/// painted against the source image underneath (visible feedback, not opaque cover — color is
+/// cosmetic, see `MaskPalette`). Undo/eraser come for free via `PKCanvasView`/PencilKit (RESEARCH
+/// "Don't Hand-Roll": PencilKit gives pressure/eraser/undo for free).
 private struct MaskCanvasRepresentable: UIViewRepresentable {
     let canvasView: PKCanvasView
+    var penWidth: CGFloat
+    var maskColor: UIColor
+    var isErasing: Bool
     var onStrokesChanged: (Bool) -> Void
 
     func makeUIView(context: Context) -> PKCanvasView {
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.drawingPolicy = .anyInput
-        canvasView.tool = PKInkingTool(.marker, color: UIColor(red: 0.545, green: 0.427, blue: 0.839, alpha: 0.55), width: 44)
         canvasView.delegate = context.coordinator
+        applyTool(to: canvasView)
         return canvasView
     }
 
-    func updateUIView(_ uiView: PKCanvasView, context: Context) {}
+    // Re-applied on every SwiftUI update so Pen/Eraser toggle, size dots, and color-well
+    // selections (all plain @State on MaskEditorView) propagate to the stored PKCanvasView
+    // reference — the idiom for a UIViewRepresentable backed by a reference-type view.
+    func updateUIView(_ uiView: PKCanvasView, context: Context) {
+        applyTool(to: uiView)
+    }
+
+    private func applyTool(to canvasView: PKCanvasView) {
+        canvasView.tool = isErasing
+            ? PKEraserTool(.vector)
+            : PKInkingTool(.pen, color: maskColor.withAlphaComponent(0.55), width: penWidth)
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onChange: onStrokesChanged)
