@@ -309,10 +309,12 @@ struct GenerationDetailSheet: View {
                                 Task { await reportGeneration() }
                             } label: {
                                 HStack(spacing: 5) {
-                                    Image(systemName: "flag").font(.caption2)
+                                    Image(systemName: "flag.fill")               // filled reads as a clearer signal at caption2
+                                        .font(.caption2)
+                                        .foregroundStyle(Color(red: 0.90, green: 0.26, blue: 0.24))   // report red
                                     Text(isReporting ? "Reported" : "Report an issue").font(.caption)
+                                        .foregroundStyle(theme.textSecondary.opacity(0.7))
                                 }
-                                .foregroundStyle(theme.textSecondary.opacity(0.7))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 6)
                             }
