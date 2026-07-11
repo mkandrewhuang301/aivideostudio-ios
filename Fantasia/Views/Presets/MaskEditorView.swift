@@ -569,11 +569,15 @@ struct MaskEditorView: View {
 
         let promptText = trimmedPrompt
         isSubmitting = true
+        defer { isSubmitting = false }
 
-        // Optimistic: drop a pending "Edit" card into the feed and jump to the Generate feed
-        // IMMEDIATELY. Presenters close this modal on .generationSubmitted (no self-dismiss → no
-        // double-dismiss bounce). Upload + submit then run in the background, so a cold backend
-        // (Railway) never blocks the UI — the user is already on the feed watching the loading card.
+        // Drop a pending "Edit" card into the feed (behind the still-open modal). The modal stays
+        // OPEN through the whole network round-trip — this is deliberate: doing the uploads/submit
+        // after closing tears down this Task mid-flight (CancellationError), which used to hit the
+        // catch and silently remove the card (the "loads then disappears" bug). On success we
+        // promote to the real id + post .generationSubmitted; presenters close the modal (no
+        // self-dismiss → no double-dismiss bounce). On failure the modal is still up, so the user
+        // sees WHY instead of the card just vanishing.
         let placeholderId = "local-" + UUID().uuidString
         let placeholder = GenerationItem(
             localPlaceholderId: placeholderId,
@@ -596,10 +600,7 @@ struct MaskEditorView: View {
             createdAt: Date()
         )
         generationManager.insertLocalPlaceholder(placeholder)
-        NotificationCenter.default.post(name: .generationSubmitted, object: nil)
 
-        // Background network — this Task is unstructured (created in the Generate button's action)
-        // and captures generationManager, so it keeps running after the modal closes.
         do {
             async let sourceUploadTask = APIClient.shared.uploadReferenceMedia(
                 data: sourceData, mimeType: "image/png", fileName: "magic-editor-source.png"
@@ -637,13 +638,22 @@ struct MaskEditorView: View {
             // place through to completion, robust to read-replica lag.
             generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
             generationManager.startPolling(forceRefresh: true)
+            // Close the modal → Generate feed. Presenter-driven (no self-dismiss → no bounce).
+            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
             await creditManager.fetchBalance()
-        } catch {
-            // The modal is already closed, so we can't show an alert — remove the pending card
-            // (the server refunds any deduction on failure). A dedicated failed-card state is a
-            // future improvement.
+        } catch let apiError as APIError {
             generationManager.removeLocalPlaceholder(id: placeholderId)
-            await creditManager.fetchBalance()
+            if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
+                errorMessage = "Insufficient credits."
+                await creditManager.fetchBalance()
+            } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
+                errorMessage = "This may not adhere to our community guidelines. Please try again."
+            } else {
+                errorMessage = "An error has occurred. Please try again."
+            }
+        } catch {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            errorMessage = "An error has occurred. Please try again."
         }
     }
 }
