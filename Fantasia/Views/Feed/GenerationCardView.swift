@@ -655,7 +655,12 @@ struct GenerationCardView: View {
             if let cached = await ThumbnailCache.shared.image(for: gridKey) { cachedImage = cached; return }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = UIImage(data: data) else { return }
-            let thumb = image.preparingThumbnail(of: CGSize(width: 400, height: 400)) ?? image
+            // Image cards render full-width, so a fixed 400px thumbnail was upscaled ~3x on a
+            // modern phone (≈1179px @3x) and looked blurry. Size the downscale to the card's real
+            // pixel width instead — crisp on-screen, still bounded (never larger than the source).
+            let targetWidth = min(image.size.width * image.scale,
+                                  UIScreen.main.bounds.width * UIScreen.main.scale)
+            let thumb = image.preparingThumbnail(of: CGSize(width: targetWidth, height: targetWidth)) ?? image
             ThumbnailCache.shared[gridKey] = thumb
             cachedImage = thumb
         }
