@@ -1066,8 +1066,12 @@ struct PresetInputSheet: View {
         generationManager.insertLocalPlaceholder(placeholder)
 
         do {
-            _ = try await APIClient.shared.submitGeneration(body: body)
-            generationManager.removeLocalPlaceholder(id: placeholderId)
+            let submitted = try await APIClient.shared.submitGeneration(body: body)
+            // Promote the optimistic placeholder to the real server id instead of removing it and
+            // hoping the next poll re-fetches the row (that race left the feed empty when the
+            // fetch missed the just-created row — replica lag). The pending card now carries the
+            // real id, so polling updates it in place through to completion.
+            generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
             generationManager.startPolling(forceRefresh: true)
             await creditManager.fetchBalance()
             // D-D: on ANY preset submit, switch to the Generate feed (tab 1) so the user sees the

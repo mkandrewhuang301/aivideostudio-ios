@@ -1825,12 +1825,14 @@ struct GenerateView: View {
         generationManager.insertLocalPlaceholder(placeholder)
 
         do {
-            _ = try await APIClient.shared.submitGeneration(body: body)
+            let submitted = try await APIClient.shared.submitGeneration(body: body)
 
-            generationManager.removeLocalPlaceholder(id: placeholderId)
-            // forceRefresh: the just-created item isn't in the cached array yet, so the
-            // staleness guard in startPolling() must be bypassed here regardless of how
-            // recently the list was last fetched (was a separate explicit refresh() call before).
+            // Promote the optimistic placeholder to the real server id rather than removing it and
+            // relying on the next poll re-fetching the row — an immediate re-fetch can miss the
+            // just-created row (read-replica lag), leaving the feed empty. The pending card now
+            // carries the real id, so polling updates it in place through to completion.
+            generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
+            // forceRefresh: kick the polling loop immediately so status transitions are picked up.
             generationManager.startPolling(forceRefresh: true)
             await creditManager.fetchBalance()
 

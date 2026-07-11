@@ -242,8 +242,16 @@ final class GenerationManager {
     private func mergeLatest(_ freshItems: [GenerationItem], reconcileDeletions: Bool = false) {
         if reconcileDeletions, let oldestFresh = freshItems.map({ $0.createdAt }).min() {
             let freshIDs = Set(freshItems.map { $0.id })
+            // Recent-write guard: a just-submitted card (promoted to its real id) may not yet be
+            // visible to a read replica when a poll returns — it would be absent from freshItems
+            // and wrongly pruned as "deleted". Exempt items created within the last 30s so a
+            // fresh submission is never reconciled away before the server has caught up.
+            let recentCutoff = Date().addingTimeInterval(-30)
             generations.removeAll { item in
-                !item.isLocalPlaceholder && !freshIDs.contains(item.id) && item.createdAt >= oldestFresh
+                !item.isLocalPlaceholder
+                    && !freshIDs.contains(item.id)
+                    && item.createdAt >= oldestFresh
+                    && item.createdAt < recentCutoff
             }
         }
 
@@ -324,6 +332,28 @@ final class GenerationManager {
 
     func removeLocalPlaceholder(id: String) {
         generations.removeAll { $0.id == id }
+    }
+
+    /// Promote an optimistic local placeholder to the real server id returned by submitGeneration,
+    /// instead of removing it and hoping the next poll re-fetches the row. Keeping a pending card
+    /// carrying the REAL id means mergeLatest matches it by id and updates it in place
+    /// (pending → processing → completed) — no visible gap, and robust to read-replica lag where an
+    /// immediate re-fetch might not yet see the just-created row.
+    func promoteLocalPlaceholder(localId: String, toRealId realId: String) {
+        guard let i = generations.firstIndex(where: { $0.id == localId }) else { return }
+        let old = generations[i]
+        // Reuse the placeholder init (sets status = .pending); the real UUID id has no "local-"
+        // prefix, so isLocalPlaceholder becomes false — it's now a real pending card.
+        generations[i] = GenerationItem(
+            localPlaceholderId: realId,
+            model: old.model,
+            mediaType: old.mediaType,
+            prompt: old.prompt,
+            params: old.params,
+            costCredits: old.costCredits,
+            referenceUrls: old.referenceUrls,
+            createdAt: old.createdAt
+        )
     }
 
     private var hasActiveJobs: Bool {
