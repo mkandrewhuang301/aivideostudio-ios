@@ -649,6 +649,7 @@ struct MaskEditorView: View {
             } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
                 errorMessage = "This may not adhere to our community guidelines. Please try again."
             } else {
+                print("[MaskEditorView] submit rejected: \(apiError)")
                 errorMessage = "An error has occurred. Please try again."
             }
         } catch {

@@ -781,10 +781,13 @@ struct PresetInputSheet: View {
                 }
                 .frame(width: 120, height: 44)
                 .foregroundStyle(.white)
-                .background(
-                    (isValid && !isSubmitting) ? presetAccent : theme.surfaceStrong,
-                    in: Capsule()
-                )
+                .background {
+                    if isValid && !isSubmitting {
+                        Capsule().fill(LinearGradient.brandPrimary)
+                    } else {
+                        Capsule().fill(theme.surfaceStrong)
+                    }
+                }
             }
             .buttonStyle(PressableButtonStyle())
             .disabled(!isValid || isSubmitting)
@@ -1057,7 +1060,12 @@ struct PresetInputSheet: View {
                 audioEnabled: nil,
                 hasReference: hasAnyUpload ? true : nil,
                 width: nil,
-                height: nil
+                height: nil,
+                // Stamp preset identity so the pending card renders as the preset ("Faceswap")
+                // with its badge/thumbnails immediately, instead of flashing "No prompt" + the
+                // raw model until the authoritative server row (which carries preset_id) lands.
+                presetId: preset.presetId,
+                presetInputUploadIds: hasAnyUpload ? uploadIds : nil
             ),
             costCredits: displayCost,
             referenceUrls: nil,
@@ -1088,6 +1096,7 @@ struct PresetInputSheet: View {
             } else if case .unexpectedResponse(_, let code) = apiError, code == "celebrity_likeness_blocked" {
                 errorMessage = "This image looks like a real public figure. To protect against unauthorized likenesses, we can't animate it. You weren't charged."
             } else {
+                print("[PresetInputSheet] submit rejected: \(apiError)")
                 errorMessage = "An error has occurred. Please try again."
             }
         } catch {

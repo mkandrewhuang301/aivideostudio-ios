@@ -618,17 +618,9 @@ struct GenerateView: View {
             Button {
                 showProfileSheet = true
             } label: {
-                HStack(spacing: 12) {
-                    Text(creditManager.totalCreditsPossible > 0
-                         ? "\(creditManager.creditsBalance)/\(creditManager.totalCreditsPossible)"
-                         : "\(creditManager.creditsBalance)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(theme.textSecondary)
-                        .contentTransition(.numericText())
-                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
-                }
-                .frame(height: 44)
-                .contentShape(Rectangle())
+                CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
         }
@@ -1849,6 +1841,7 @@ struct GenerateView: View {
                 showError("Insufficient credits")
                 await creditManager.fetchBalance()
             } else {
+                print("[GenerateView] submit rejected: \(apiError)")
                 showError("An error has occurred. Please try again.")
             }
             await generationManager.refresh()
