@@ -285,6 +285,12 @@ struct GenerateView: View {
                         // drops the keyboard right away while the content keeps scrolling in the
                         // same gesture, rather than needing to drag all the way past the keyboard.
                         .scrollDismissesKeyboard(.immediately)
+                        // Pull-to-refresh: manual fallback for server state (Bug C). SwiftUI
+                        // supplies the spinner + haptic; refresh() reconciles deletions and adds
+                        // any new items via mergeLatest. Does not touch keyboard/composer.
+                        .refreshable {
+                            await generationManager.refresh()
+                        }
                         .onChange(of: generationManager.generations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
