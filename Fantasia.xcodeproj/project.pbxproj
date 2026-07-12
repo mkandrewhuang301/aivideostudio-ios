@@ -43,6 +43,7 @@
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
 		5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */; };
+		E1A7EB703EF6426F941CDF12 /* GenerationPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960259514C974AA1AAC3131B /* GenerationPickerSheet.swift */; };
 		421FC658C049AF8415591264 /* ConsentAttestationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65084B98DC8AC46367DDBDE1 /* ConsentAttestationView.swift */; };
 		4854F0AC21FF48FB8DC8DA8E /* MaskEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A40CA82FA94D559ACC25CD /* MaskEditorView.swift */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
@@ -108,6 +109,7 @@
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
 		140F93AD2C9DA08A3241C3DC /* onboarding-sample.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "onboarding-sample.mp4"; sourceTree = "<group>"; };
 		1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInputSheet.swift; sourceTree = "<group>"; };
+		960259514C974AA1AAC3131B /* GenerationPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationPickerSheet.swift; sourceTree = "<group>"; };
 		A9A40CA82FA94D559ACC25CD /* MaskEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorView.swift; sourceTree = "<group>"; };
 		65084B98DC8AC46367DDBDE1 /* ConsentAttestationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsentAttestationView.swift; sourceTree = "<group>"; };
 		237303656EFC3D6EFF8E850F /* PresetTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetTileView.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 				1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */,
 				65084B98DC8AC46367DDBDE1 /* ConsentAttestationView.swift */,
 				A9A40CA82FA94D559ACC25CD /* MaskEditorView.swift */,
+				960259514C974AA1AAC3131B /* GenerationPickerSheet.swift */,
 			);
 			path = Presets;
 			sourceTree = "<group>";
@@ -634,6 +637,7 @@
 				B622ACBB68150822FA0175A8 /* PlanCatalog.swift in Sources */,
 				EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */,
 				5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */,
+				E1A7EB703EF6426F941CDF12 /* GenerationPickerSheet.swift in Sources */,
 				421FC658C049AF8415591264 /* ConsentAttestationView.swift in Sources */,
 				4854F0AC21FF48FB8DC8DA8E /* MaskEditorView.swift in Sources */,
 				F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */,

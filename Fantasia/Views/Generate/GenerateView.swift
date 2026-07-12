@@ -2413,8 +2413,9 @@ struct CachedThumbnailImage: View {
 /// Poster-frame counterpart to `CachedThumbnailImage`, for mention candidates whose media is a
 /// video (e.g. the "Last Generation" synthetic entry) rather than a stored image URL. Extracts
 /// a frame directly from the video via `MediaPrepService` (works for both remote and local
-/// URLs) instead of downloading + decoding the whole clip.
-private struct CachedVideoFrameThumbnail: View {
+/// URLs) instead of downloading + decoding the whole clip. Internal (not private) — also used by
+/// GenerationPickerSheet's video cells.
+struct CachedVideoFrameThumbnail: View {
     let cacheKey: String
     let videoURL: URL
     @State private var image: UIImage?

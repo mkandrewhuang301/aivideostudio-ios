@@ -74,12 +74,15 @@ struct PresetInputSheet: View {
     // the utilitarian system action sheet, not the smooth native bottom-sheet slide-up requested
     // (2026-07-08). A small-detent .sheet gives the rounded-card spring animation while still
     // dimming (not hiding) the sheet content behind it.
-    private enum MediaSource { case photos, camera, files }
+    // .myGenerations added 2026-07-12 — lets a slot be filled from a past completed generation
+    // instead of only a fresh device pick; see GenerationPickerSheet.
+    private enum MediaSource { case photos, camera, files, myGenerations }
     @State private var showSourceSheet = false
     // Set when a source row is tapped, consumed in the source sheet's onDismiss — presenting the
     // chosen picker only AFTER this sheet is fully dismissed avoids two presentations racing off
     // the same view (presenting the picker while this sheet is still animating away conflicts).
     @State private var pendingSource: MediaSource?
+    @State private var showGenerationPicker = false
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
     @State private var showFileImporter = false
@@ -180,17 +183,25 @@ struct PresetInputSheet: View {
             // presenting it while the sheet is still up/animating conflicts (both are
             // presentations off this same view).
             switch pendingSource {
-            case .photos: showPhotosPicker = true
-            case .camera: showCameraPicker = true
-            case .files:  showFileImporter = true
-            case nil:     break
+            case .photos:        showPhotosPicker = true
+            case .camera:        showCameraPicker = true
+            case .files:         showFileImporter = true
+            case .myGenerations: showGenerationPicker = true
+            case nil:            break
             }
             pendingSource = nil
         }) {
             sourceChooserSheet
-                .presentationDetents([.height(UIImagePickerController.isSourceTypeAvailable(.camera) ? 300 : 240)])
+                .presentationDetents([.height(UIImagePickerController.isSourceTypeAvailable(.camera) ? 360 : 300)])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(theme.background)
+        }
+        .sheet(isPresented: $showGenerationPicker) {
+            if let index = activeSlotIndex, let kind = activeSlotKind {
+                GenerationPickerSheet(mediaKind: kind) { item in
+                    Task { await handleGenerationPicked(item, forSlot: index) }
+                }
+            }
         }
         .confirmationDialog(
             "This video is longer than 30 seconds",
@@ -479,6 +490,10 @@ struct PresetInputSheet: View {
             }
             sourceRow(icon: "folder", label: "Choose File") {
                 pendingSource = .files
+                showSourceSheet = false
+            }
+            sourceRow(icon: "clock.arrow.circlepath", label: "My Generations") {
+                pendingSource = .myGenerations
                 showSourceSheet = false
             }
             Spacer(minLength: 0)
@@ -910,6 +925,25 @@ struct PresetInputSheet: View {
         let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
         let isVideo = contentType?.conforms(to: .movie) ?? false
         await handlePickedMedia(data, isVideo: isVideo, forSlot: index)
+    }
+
+    // "My Generations" source (2026-07-12) — downloads the picked generation's own presigned
+    // media URL, then routes through the exact same handlePickedMedia pipeline as every other
+    // source (see GenerationPickerSheet's doc comment for why: per-second presets need real
+    // client-side trimming, not just a billing-duration cap, and only handlePickedMedia's video
+    // branch does that).
+    private func handleGenerationPicked(_ item: GenerationItem, forSlot index: Int) async {
+        guard let slots = preset.inputSchema?.slots, index < slots.count else { return }
+        while slotInputs.count <= index { slotInputs.append(nil) }
+        slotInputs[index] = PresetSlotInput(isUploading: true)
+
+        guard let urlString = item.completedMediaUrl, let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url) else {
+            slotInputs[index] = nil
+            errorMessage = "Couldn't load this generation. Try again."
+            return
+        }
+        await handlePickedMedia(data, isVideo: !item.isImage, forSlot: index)
     }
 
     /// Shared entry point for all three slot-picker sources (Photos / Camera / Files, D-19).
