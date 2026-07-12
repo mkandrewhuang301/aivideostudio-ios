@@ -1451,6 +1451,28 @@ struct GenerateView: View {
         await handleAttachedData(data, isVideo: isVideo)
     }
 
+    /// Snaps a measured pixel size to the closest of the app's 5 supported aspect ratios (matches
+    /// the backend's VALID_VIDEO_ASPECT_RATIOS and ImageResolution's cases exactly) — used when we
+    /// only have a raw attachment's pixel dimensions, not a known/declared ratio.
+    private func closestAspectRatio(for size: CGSize) -> String {
+        guard size.width > 0, size.height > 0 else { return selectedAspectRatio }
+        let measured = size.width / size.height
+        let candidates: [(String, CGFloat)] = [
+            ("16:9", 16.0 / 9.0), ("9:16", 9.0 / 16.0), ("1:1", 1.0),
+            ("4:3", 4.0 / 3.0), ("3:4", 3.0 / 4.0),
+        ]
+        return candidates.min { abs($0.1 - measured) < abs($1.1 - measured) }!.0
+    }
+
+    /// Applies a resolved aspect ratio to both mode's state so it carries over if the user
+    /// switches between AI Video / AI Image afterward. Callers only invoke this for the FIRST
+    /// reference attached in a fresh draft — later references (or a manual change the user made
+    /// in between) are never overridden.
+    private func applyAspectRatioFromReference(_ ratio: String) {
+        selectedAspectRatio = ratio
+        selectedImageResolution = ImageResolution.allCases.first { $0.rawValue == ratio } ?? selectedImageResolution
+    }
+
     /// Uploads a raw attachment and adds its reference card + prompt token. Shared by the
     /// photo library, camera, and file import sources behind the paperclip menu.
     private func handleAttachedData(_ data: Data, isVideo: Bool) async {
@@ -1459,6 +1481,9 @@ struct GenerateView: View {
             showError("You can attach up to \(maxReferences) references.")
             return
         }
+        // Captured before any append below — only the first reference in a fresh draft should
+        // set the generation's aspect ratio (see applyAspectRatioFromReference).
+        let isFirstReference = attachedReferences.isEmpty
         // Compute slot before appending
         let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
         let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
@@ -1486,6 +1511,13 @@ struct GenerateView: View {
             let prepared = await MediaPrepService.shared.prepareForUpload(inputURL: written.url, fallbackData: data)
             let finalData = prepared.data
             let thumbnail = prepared.thumbnail
+
+            // The extracted poster frame is already correctly oriented (extractThumbnail sets
+            // appliesPreferredTrackTransform), so its .size is the video's true display aspect —
+            // no separate natural-size probe needed.
+            if isFirstReference, let size = thumbnail?.size {
+                applyAspectRatioFromReference(closestAspectRatio(for: size))
+            }
 
             // Add card in uploading state
             let token = "[Video\(videoSlot)]"
@@ -1517,6 +1549,9 @@ struct GenerateView: View {
             }
         } else {
             let thumbnail = UIImage(data: data)
+            if isFirstReference, let size = thumbnail?.size {
+                applyAspectRatioFromReference(closestAspectRatio(for: size))
+            }
             let token = "[Image\(imageSlot)]"
             let ref = AttachedReference(mimeType: "image/jpeg", thumbnail: thumbnail, isUploading: true)
             let tempId = ref.id
@@ -1909,9 +1944,13 @@ struct GenerateView: View {
     }
 
     // Reference — attach this generation's own output as a new reference input,
-    // without touching the current prompt or settings. Unlike Remix (which
+    // without touching the current prompt or other settings. Unlike Remix (which
     // reloads the original prompt/settings/references for editing), this lets
-    // the user build on the *result* of a past generation.
+    // the user build on the *result* of a past generation. The one setting this DOES
+    // touch: if this is the first reference in an otherwise-fresh draft, the new
+    // generation's aspect ratio defaults to match it exactly (item.params.aspectRatio is
+    // already one of the 5 supported values — no measuring/snapping needed, unlike a raw
+    // picked attachment in handleAttachedData). Still freely changeable afterward.
     private func handleReference(item: GenerationItem) {
         attachReference(from: item)
     }
@@ -1921,6 +1960,7 @@ struct GenerateView: View {
         let urlString = item.isImage ? item.completedMediaUrl : item.videoUrl
         guard let urlString, !urlString.isEmpty else { return }
         let isVideo = !item.isImage
+        let isFirstReference = attachedReferences.isEmpty
         let imageSlot = attachedReferences.filter { !$0.isVideo }.count + 1
         let videoSlot = attachedReferences.filter { $0.isVideo }.count + 1
         let token = isVideo ? "[Video\(videoSlot)]" : "[Image\(imageSlot)]"
@@ -1935,6 +1975,9 @@ struct GenerateView: View {
         )
         attachedReferences.append(attached)
         insertToken(token)
+        if isFirstReference, let ratio = item.params.aspectRatio {
+            applyAspectRatioFromReference(ratio)
+        }
         promptFocused = true
     }
 
