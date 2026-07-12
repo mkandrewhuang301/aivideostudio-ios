@@ -31,6 +31,13 @@ struct GenerationPickerSheet: View {
     @Environment(GenerationManager.self) private var generationManager
 
     private let columns = [GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3), GridItem(.flexible(), spacing: 3)]
+    // "Load more until we have at least this many matches (or run out of history)" — without a
+    // target like this, a single auto-fetch that happens to land on a page skewed toward the
+    // OTHER media type would leave the grid looking stuck with too few results and no visible way
+    // to trigger another fetch (see isAutoPaginating doc comment below).
+    private let minimumDesiredCount = 15
+
+    @State private var isAutoPaginating = false
 
     private var matchingGenerations: [GenerationItem] {
         generationManager.generations.filter { item in
@@ -43,20 +50,34 @@ struct GenerationPickerSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if matchingGenerations.isEmpty && !generationManager.isLoading {
+                if matchingGenerations.isEmpty && !generationManager.isLoading && !isAutoPaginating {
                     emptyState
                 } else {
                     LazyVGrid(columns: columns, spacing: 3) {
                         ForEach(matchingGenerations) { item in
                             cell(for: item)
+                                .onAppear {
+                                    // Standard infinite-scroll trigger: fires as this cell scrolls
+                                    // into view, which (unlike a static trailing view) genuinely
+                                    // re-fires as the user scrolls further, since LazyVGrid
+                                    // recycles cells based on scroll position.
+                                    if item.id == matchingGenerations.last?.id {
+                                        Task { await loadMoreIfNeeded() }
+                                    }
+                                }
                         }
                     }
                     .padding(3)
 
-                    if generationManager.nextCursor != nil {
+                    // Tied to an ACTUAL fetch in flight, not just "more raw history could exist"
+                    // (nextCursor != nil is true even once matching content is exhausted, since
+                    // there can be plenty of non-matching-type history left) — otherwise this
+                    // would sit permanently visible once loadMoreIfNeeded's bounded attempts run
+                    // out on an account with very little of the requested media type, which is
+                    // exactly the misleading "always loading, nothing happens" look being fixed.
+                    if generationManager.isLoading || isAutoPaginating {
                         ProgressView()
                             .padding(.vertical, 20)
-                            .onAppear { Task { await generationManager.loadNextPage() } }
                     }
                 }
             }
@@ -70,9 +91,36 @@ struct GenerationPickerSheet: View {
             }
         }
         .task {
-            // Same cached-list-first pattern GenerationManager already uses everywhere else —
-            // startPolling() no-ops if the list is already fresh, so this is cheap on repeat opens.
-            generationManager.startPolling()
+            // FIX (2026-07-12): this used to call generationManager.startPolling() — wrong tool.
+            // startPolling() is for screens watching an ACTIVE job's status live (Generate feed):
+            // if any job anywhere in the account is pending/processing, it starts a recurring
+            // fetch every 3s for as long as this sheet is open, and each of those fetches
+            // unconditionally resets nextCursor back to page 1's value (GenerationManager.refresh()
+            // always re-fetches page 1). That fights with and undoes this picker's own
+            // loadNextPage() progress in a loop — the reported "keeps loading, stuck at a few
+            // images" bug. refreshIfStale() is the one-shot version Library already uses for
+            // exactly this "browse a list, don't continuously poll it" case.
+            await generationManager.refreshIfStale()
+            await loadMoreIfNeeded()
+        }
+    }
+
+    // Keeps fetching pages while the filtered result set is thin and more history exists,
+    // bounded so an account with very little of the requested media type (e.g. almost all video,
+    // slot wants images) can't spin through its entire history in one burst. isAutoPaginating
+    // gates emptyState so a legitimately-empty FIRST page (e.g. account's very first images are
+    // several pages back) doesn't flash "No completed images yet" before this loop has had a
+    // chance to look further.
+    private func loadMoreIfNeeded() async {
+        guard !isAutoPaginating else { return }
+        isAutoPaginating = true
+        defer { isAutoPaginating = false }
+        var attempts = 0
+        while matchingGenerations.count < minimumDesiredCount,
+              generationManager.nextCursor != nil,
+              attempts < 10 {
+            await generationManager.loadNextPage()
+            attempts += 1
         }
     }
 
