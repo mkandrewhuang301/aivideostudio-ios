@@ -751,46 +751,58 @@ struct PresetInputSheet: View {
     }
 
     private var generateBar: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(presetAccent)
-                Text("\(displayCost)")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(theme.textPrimary)
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: displayCost)
-                Text("credits")
-                    .font(.caption.weight(.medium))
+        VStack(spacing: 6) {
+            // Script-expansion presets (e.g. gorilla-vlogs) take an extra LLM hop before dispatch —
+            // surface the server-provided caption while submitting instead of a second screen/modal
+            // (UI-SPEC "Loading — gorilla script-expansion"). Purely additive to the existing
+            // spinner-in-capsule submitting state below; no new sheet architecture.
+            if isSubmitting, let preparingLabel = preset.sheet?.preparingLabel, !preparingLabel.isEmpty {
+                Text(preparingLabel)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(theme.textSecondary)
             }
 
-            Spacer()
+            HStack(spacing: 14) {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(presetAccent)
+                    Text("\(displayCost)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(theme.textPrimary)
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: displayCost)
+                    Text("credits")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(theme.textSecondary)
+                }
 
-            Button {
-                Task { await generate() }
-            } label: {
-                Group {
-                    if isSubmitting {
-                        ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
-                        Text("Generate")
-                            .font(.subheadline.weight(.semibold))
+                Spacer()
+
+                Button {
+                    Task { await generate() }
+                } label: {
+                    Group {
+                        if isSubmitting {
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Text("Generate")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .frame(width: 120, height: 44)
+                    .foregroundStyle(.white)
+                    .background {
+                        if isValid && !isSubmitting {
+                            Capsule().fill(LinearGradient.brandPrimary)
+                        } else {
+                            Capsule().fill(theme.surfaceStrong)
+                        }
                     }
                 }
-                .frame(width: 120, height: 44)
-                .foregroundStyle(.white)
-                .background {
-                    if isValid && !isSubmitting {
-                        Capsule().fill(LinearGradient.brandPrimary)
-                    } else {
-                        Capsule().fill(theme.surfaceStrong)
-                    }
-                }
+                .buttonStyle(PressableButtonStyle())
+                .disabled(!isValid || isSubmitting)
             }
-            .buttonStyle(PressableButtonStyle())
-            .disabled(!isValid || isSubmitting)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)

@@ -59,6 +59,10 @@ struct PresetSheetMeta: Codable, Equatable {
     let aspectLabel: String?
     let durationLabel: String?
     let resolutionLabel: String?
+    // Script-expansion presets only (e.g. gorilla-vlogs): server-provided caption shown above the
+    // Generate bar while isSubmitting, communicating the extra LLM hop (09.3-05/06 backend;
+    // 09.3-07 iOS). Optional/backward-compatible — nil for every preset that doesn't set it.
+    let preparingLabel: String?
 
     enum CodingKeys: String, CodingKey {
         case description
@@ -67,6 +71,7 @@ struct PresetSheetMeta: Codable, Equatable {
         case aspectLabel = "aspect_label"
         case durationLabel = "duration_label"
         case resolutionLabel = "resolution_label"
+        case preparingLabel = "preparing_label"
     }
 }
 
