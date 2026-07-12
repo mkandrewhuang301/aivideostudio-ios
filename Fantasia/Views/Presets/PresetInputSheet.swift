@@ -74,14 +74,21 @@ struct PresetInputSheet: View {
     // the utilitarian system action sheet, not the smooth native bottom-sheet slide-up requested
     // (2026-07-08). A small-detent .sheet gives the rounded-card spring animation while still
     // dimming (not hiding) the sheet content behind it.
-    // .myGenerations added 2026-07-12 — lets a slot be filled from a past completed generation
-    // instead of only a fresh device pick; see GenerationPickerSheet.
-    private enum MediaSource { case photos, camera, files, myGenerations }
+    // .seeAllGenerations added 2026-07-12 (todo: add-previous-generations-to-add-media-picker) —
+    // the sheet also shows a horizontal strip of recent generations above these 3 rows; "See All"
+    // at the end of that strip opens GenerationPickerSheet's full grid. A past generation tapped
+    // DIRECTLY in the strip doesn't go through this enum at all — see pendingGenerationPick below.
+    private enum MediaSource { case photos, camera, files, seeAllGenerations }
     @State private var showSourceSheet = false
-    // Set when a source row is tapped, consumed in the source sheet's onDismiss — presenting the
-    // chosen picker only AFTER this sheet is fully dismissed avoids two presentations racing off
-    // the same view (presenting the picker while this sheet is still animating away conflicts).
+    // Set when a source row (or the strip's "See All" tile) is tapped, consumed in the source
+    // sheet's onDismiss — presenting the chosen picker only AFTER this sheet is fully dismissed
+    // avoids two presentations racing off the same view (presenting the picker while this sheet
+    // is still animating away conflicts).
     @State private var pendingSource: MediaSource?
+    // Set when a strip thumbnail is tapped directly — same one-tap-and-dismiss behavior as the 3
+    // existing rows (mirrors pendingSource's dismiss-then-act handoff, but carries a specific
+    // generation instead of routing through a picker sheet).
+    @State private var pendingGenerationPick: GenerationItem?
     @State private var showGenerationPicker = false
     @State private var showPhotosPicker = false
     @State private var showCameraPicker = false
@@ -150,6 +157,15 @@ struct PresetInputSheet: View {
             // sleeping instance (same pattern as CreditStoreView.swift's pingHealth on open).
             await APIClient.shared.pingHealth()
         }
+        .task {
+            // So the "Add media" sheet's recent-generations strip has real data the FIRST time a
+            // user opens it (e.g. straight from Home, before ever visiting Library/Generate) —
+            // refreshIfStale(), NOT startPolling(): the latter starts a recurring 3s fetch loop
+            // whenever any job anywhere is active, which fights with GenerationPickerSheet's own
+            // pagination (see that file's 2026-07-12 fix). This is a one-shot staleness check,
+            // same pattern Library uses.
+            await generationManager.refreshIfStale()
+        }
         .photosPicker(
             isPresented: $showPhotosPicker,
             selection: $selectedPickerItem,
@@ -179,20 +195,26 @@ struct PresetInputSheet: View {
             Task { await handleImportedFile(url, forSlot: index) }
         }
         .sheet(isPresented: $showSourceSheet, onDismiss: {
-            // Present the chosen picker only AFTER the source sheet is fully dismissed —
-            // presenting it while the sheet is still up/animating conflicts (both are
-            // presentations off this same view).
+            // Present the chosen picker (or resume the picked generation's slot-fill) only AFTER
+            // the source sheet is fully dismissed — doing either while this sheet is still
+            // up/animating conflicts (both are presentations off this same view).
             switch pendingSource {
-            case .photos:        showPhotosPicker = true
-            case .camera:        showCameraPicker = true
-            case .files:         showFileImporter = true
-            case .myGenerations: showGenerationPicker = true
-            case nil:            break
+            case .photos:            showPhotosPicker = true
+            case .camera:            showCameraPicker = true
+            case .files:             showFileImporter = true
+            case .seeAllGenerations: showGenerationPicker = true
+            case nil:                break
             }
             pendingSource = nil
+            if let picked = pendingGenerationPick, let index = activeSlotIndex {
+                Task { await handleGenerationPicked(picked, forSlot: index) }
+            }
+            pendingGenerationPick = nil
         }) {
             sourceChooserSheet
-                .presentationDetents([.height(UIImagePickerController.isSourceTypeAvailable(.camera) ? 360 : 300)])
+                .presentationDetents([.height(recentMatchingGenerations.isEmpty
+                    ? (UIImagePickerController.isSourceTypeAvailable(.camera) ? 360 : 300)
+                    : (UIImagePickerController.isSourceTypeAvailable(.camera) ? 480 : 420))])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(theme.background)
         }
@@ -469,54 +491,198 @@ struct PresetInputSheet: View {
         return slots[activeSlotIndex].kind
     }
 
-    // MARK: - Source chooser (nested small-detent .sheet — native bottom-sheet slide-up)
+    // 2026-07-12 (todo: add-previous-generations-to-add-media-picker) — completed generations
+    // matching the active slot's media type, newest first, capped for the strip (tapping "See
+    // All" opens GenerationPickerSheet's full paginated grid for anything beyond this).
+    private var recentMatchingGenerations: [GenerationItem] {
+        guard let kind = activeSlotKind else { return [] }
+        return Array(generationManager.generations.filter { item in
+            item.status == .completed
+                && !(item.completedMediaUrl ?? "").isEmpty
+                && (kind == "video" ? !item.isImage : item.isImage)
+        }.prefix(10))
+    }
 
+    // MARK: - Source chooser (nested small-detent .sheet — native bottom-sheet slide-up)
+    //
+    // Redesigned 2026-07-12 per .planning/sketches/002-add-media-sheet (winner: Variant D) +
+    // the add-previous-generations-to-add-media-picker todo:
+    //  1. A horizontal strip of recent past generations (matching the slot's media type) sits
+    //     ABOVE the 3 device-source rows — tapping a thumbnail selects it immediately (one tap,
+    //     same as "Take Photo"), no separate screen for the common case. "See All" at the strip's
+    //     end opens the full GenerationPickerSheet grid for anything further back.
+    //  2. The 3 rows themselves adopt Variant D's treatment: single-hue (purple only) layered
+    //     badges instead of 3 unrelated flat-tint colors, and one deliberate size/weight
+    //     asymmetry (Photo Library — most-used — is a larger "primary" row with an elevated
+    //     background; Take Photo/Choose File are smaller "secondary" rows, no elevated fill).
+    //     This is what the sketch's research flagged as the fix for the "reads as AI-generated
+    //     template" look a uniform 3-equal-rows list has.
     private var sourceChooserSheet: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Add media")
                 .font(.headline)
                 .foregroundStyle(theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 20)
-                .padding(.bottom, 6)
-            sourceRow(icon: "photo.on.rectangle", label: "Photo Library") {
-                pendingSource = .photos
-                showSourceSheet = false
-            }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                sourceRow(icon: "camera", label: activeSlotKind == "video" ? "Record Video" : "Take Photo") {
-                    pendingSource = .camera
+
+            recentGenerationsStrip
+
+            VStack(spacing: 8) {
+                sourceRow(
+                    icon: "photo.on.rectangle",
+                    label: "Photo Library",
+                    subtitle: "Choose from your camera roll",
+                    isPrimary: true
+                ) {
+                    pendingSource = .photos
+                    showSourceSheet = false
+                }
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    sourceRow(
+                        icon: "camera",
+                        label: activeSlotKind == "video" ? "Record Video" : "Take Photo",
+                        subtitle: "Use your camera right now",
+                        isPrimary: false
+                    ) {
+                        pendingSource = .camera
+                        showSourceSheet = false
+                    }
+                }
+                sourceRow(
+                    icon: "folder",
+                    label: "Choose File",
+                    subtitle: "Browse files on your device",
+                    isPrimary: false
+                ) {
+                    pendingSource = .files
                     showSourceSheet = false
                 }
             }
-            sourceRow(icon: "folder", label: "Choose File") {
-                pendingSource = .files
-                showSourceSheet = false
-            }
-            sourceRow(icon: "clock.arrow.circlepath", label: "My Generations") {
-                pendingSource = .myGenerations
-                showSourceSheet = false
-            }
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 18)
+        .padding(.bottom, 8)
     }
 
-    private func sourceRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 17, weight: .medium))
-                    .frame(width: 26)
-                Text(label)
-                    .font(.body.weight(.medium))
-                Spacer()
+    @ViewBuilder
+    private var recentGenerationsStrip: some View {
+        if !recentMatchingGenerations.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Recent")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.textTertiary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(recentMatchingGenerations) { item in
+                            stripThumbnail(item)
+                        }
+                        seeAllTile
+                    }
+                    .padding(.vertical, 1)   // keeps the selection/hairline border from clipping
+                }
             }
-            .foregroundStyle(theme.textPrimary)
-            .padding(.horizontal, 16)
-            .frame(height: 54)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func stripThumbnail(_ item: GenerationItem) -> some View {
+        Button {
+            // Same one-tap-and-dismiss behavior as the 3 rows below — no extra confirmation step.
+            pendingGenerationPick = item
+            showSourceSheet = false
+        } label: {
+            ZStack {
+                if item.isImage, let urlString = item.completedMediaUrl, let url = URL(string: urlString) {
+                    CachedThumbnailImage(cacheKey: "addmedia-strip-\(item.id)", url: url)
+                } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
+                    CachedVideoFrameThumbnail(cacheKey: "addmedia-strip-\(item.id)", videoURL: url)
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
+    }
+
+    private var seeAllTile: some View {
+        Button {
+            pendingSource = .seeAllGenerations
+            showSourceSheet = false
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("See All")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(theme.textSecondary)
+            .frame(width: 64, height: 64)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    private func sourceRow(
+        icon: String, label: String, subtitle: String, isPrimary: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                sourceBadge(icon: icon, size: isPrimary ? 46 : 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(isPrimary ? .system(size: 16, weight: .bold) : .system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, isPrimary ? 16 : 14)
+            .padding(.vertical, isPrimary ? 15 : 10)
+            .background {
+                if isPrimary {
+                    RoundedRectangle(cornerRadius: 14).fill(theme.surfaceStrong)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    // Single-hue "hierarchical" badge (sketch Variant D) — a radial gradient within ONE color
+    // family (the app's real purple accent only) approximating SF Symbol .hierarchical rendering
+    // depth, instead of a flat tint fill or 3 unrelated hues across the row set (the sketch's
+    // research flagged the latter as a documented "AI slop" tell).
+    private func sourceBadge(icon: String, size: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: size * 0.28)
+            .fill(
+                RadialGradient(
+                    colors: [
+                        Color(red: 178 / 255, green: 155 / 255, blue: 232 / 255).opacity(0.95),
+                        presetAccent.opacity(0.85),
+                        presetAccent.opacity(0.55),
+                    ],
+                    center: UnitPoint(x: 0.34, y: 0.28),
+                    startRadius: 0,
+                    endRadius: size * 0.75
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.28)
+                    .strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.3), .clear], startPoint: .topLeading, endPoint: .center),
+                        lineWidth: 1
+                    )
+            )
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
     }
 
     // MARK: - Optional text
