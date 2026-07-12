@@ -212,9 +212,11 @@ struct PresetInputSheet: View {
             pendingGenerationPick = nil
         }) {
             sourceChooserSheet
+                // Bumped 2026-07-12 alongside the rows/strip growing larger (54/44pt badges,
+                // 80pt strip thumbnails vs. the previous 46/36 and 64).
                 .presentationDetents([.height(recentMatchingGenerations.isEmpty
-                    ? (UIImagePickerController.isSourceTypeAvailable(.camera) ? 360 : 300)
-                    : (UIImagePickerController.isSourceTypeAvailable(.camera) ? 480 : 420))])
+                    ? (UIImagePickerController.isSourceTypeAvailable(.camera) ? 400 : 340)
+                    : (UIImagePickerController.isSourceTypeAvailable(.camera) ? 520 : 460))])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(theme.background)
         }
@@ -276,12 +278,17 @@ struct PresetInputSheet: View {
         Button {
             dismiss()
         } label: {
+            // 2026-07-12 (user-requested): visible circle grown 32x32 → 40x40, with a comfortably
+            // larger 46x46 tap frame around it (was previously untouched — no separate hit-target
+            // expansion existed at this commit).
             Image(systemName: "xmark")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
+                .frame(width: 40, height: 40)
                 .background(.black.opacity(0.35), in: Circle())
                 .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                .frame(width: 46, height: 46)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
     }
@@ -403,80 +410,104 @@ struct PresetInputSheet: View {
     private func slotTile(index: Int, slot: PresetSlot, style: SlotTileStyle) -> some View {
         let input = index < slotInputs.count ? slotInputs[index] : nil
         let height: CGFloat = style == .large ? 220 : 160
+        let hasFilledMedia = input?.thumbnail != nil
 
-        return Button {
-            activeSlotIndex = index
-            showSourceSheet = true
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(theme.surface)
-                    .overlay(
-                        // Dashed border for the empty state (Higgsfield "Upload media" look) —
-                        // a filled thumbnail switches to a plain hairline border instead.
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(
-                                theme.surfaceBorder,
-                                style: input?.thumbnail == nil
-                                    ? StrokeStyle(lineWidth: 1.25, dash: [6, 5])
-                                    : StrokeStyle(lineWidth: 1)
-                            )
-                    )
+        // ZStack, not a single Button: the 2026-07-12 remove (x) button below must be a SIBLING
+        // to the main tap-to-reopen-picker Button, not nested inside its label — a Button nested
+        // inside another Button's label has ambiguous/unreliable tap routing in SwiftUI. Two
+        // independent Buttons at the same ZStack level avoids that entirely.
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                activeSlotIndex = index
+                showSourceSheet = true
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(theme.surface)
+                        .overlay(
+                            // Dashed border for the empty state (Higgsfield "Upload media" look) —
+                            // a filled thumbnail switches to a plain hairline border instead.
+                            RoundedRectangle(cornerRadius: 16)
+                                .strokeBorder(
+                                    theme.surfaceBorder,
+                                    style: input?.thumbnail == nil
+                                        ? StrokeStyle(lineWidth: 1.25, dash: [6, 5])
+                                        : StrokeStyle(lineWidth: 1)
+                                )
+                        )
 
-                if let thumbnail = input?.thumbnail {
-                    // Constrain BOTH dimensions (not just height) before scaledToFill, so the
-                    // image zoom-crops to fill the entire tile regardless of its aspect ratio —
-                    // height-only constraint left the width intrinsic, leaving side gaps on
-                    // portrait images / overflow past the rounded corners on landscape ones
-                    // (user-reported 2026-07-08). Color.clear sets the layout frame; the image is
-                    // an overlay so scaledToFill's oversized intrinsic size can't affect layout
-                    // (documented scaledToFill hit-test landmine).
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                        .frame(height: height)
-                        .overlay {
-                            Image(uiImage: thumbnail)
-                                .resizable()
-                                .scaledToFill()
-                                .allowsHitTesting(false)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .overlay(alignment: .topTrailing) {
-                            if slot.kind == "video", let duration = input?.durationSeconds {
-                                Text(durationLabel(duration))
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 3)
-                                    .background(Color.black.opacity(0.55), in: Capsule())
-                                    .padding(8)
+                    if let thumbnail = input?.thumbnail {
+                        // Constrain BOTH dimensions (not just height) before scaledToFill, so the
+                        // image zoom-crops to fill the entire tile regardless of its aspect ratio —
+                        // height-only constraint left the width intrinsic, leaving side gaps on
+                        // portrait images / overflow past the rounded corners on landscape ones
+                        // (user-reported 2026-07-08). Color.clear sets the layout frame; the image is
+                        // an overlay so scaledToFill's oversized intrinsic size can't affect layout
+                        // (documented scaledToFill hit-test landmine).
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: height)
+                            .overlay {
+                                Image(uiImage: thumbnail)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .allowsHitTesting(false)
                             }
-                        }
-                } else if input?.isUploading == true {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: theme.textPrimary))
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: slot.kind == "video" ? "video.badge.plus" : "photo.badge.plus")
-                            .font(.system(size: style == .large ? 30 : 24, weight: .medium))
-                            .foregroundStyle(theme.textSecondary)
-                        Text(style == .large ? "Upload media" : "Tap to add")
-                            .font((style == .large ? Font.subheadline : .caption).weight(.medium))
-                            .foregroundStyle(theme.textSecondary)
-                        if style == .large {
-                            Text("Tap to upload \(slot.label.lowercased())")
-                                .font(.caption)
-                                .foregroundStyle(theme.textTertiary)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(alignment: .topTrailing) {
+                                if slot.kind == "video", let duration = input?.durationSeconds {
+                                    Text(durationLabel(duration))
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.black.opacity(0.55), in: Capsule())
+                                        .padding(8)
+                                }
+                            }
+                    } else if input?.isUploading == true {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.textPrimary))
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: slot.kind == "video" ? "video.badge.plus" : "photo.badge.plus")
+                                .font(.system(size: style == .large ? 30 : 24, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(style == .large ? "Upload media" : "Tap to add")
+                                .font((style == .large ? Font.subheadline : .caption).weight(.medium))
+                                .foregroundStyle(theme.textSecondary)
+                            if style == .large {
+                                Text("Tap to upload \(slot.label.lowercased())")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.textTertiary)
+                            }
                         }
                     }
                 }
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
             }
-            .frame(height: height)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(PressableButtonStyle())
+            // Hit-test containment pattern for scaledToFill media (documented project landmine).
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+
+            // 2026-07-12 (user-requested): a small remove (x) on any FILLED slot, not just
+            // optional ones — previously the only "clear" affordance was slotLabel's x, which
+            // only ever showed for slot.optional (Faceswap's two slots are both required, so it
+            // never appeared there at all — the exact preset the user was testing).
+            if hasFilledMedia {
+                Button {
+                    slotInputs[index] = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .background(Color.black.opacity(0.55), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+            }
         }
-        .buttonStyle(PressableButtonStyle())
-        // Hit-test containment pattern for scaledToFill media (documented project landmine).
-        .contentShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func durationLabel(_ seconds: Double) -> String {
@@ -493,14 +524,16 @@ struct PresetInputSheet: View {
 
     // 2026-07-12 (todo: add-previous-generations-to-add-media-picker) — completed generations
     // matching the active slot's media type, newest first, capped for the strip (tapping "See
-    // All" opens GenerationPickerSheet's full paginated grid for anything beyond this).
+    // All" opens GenerationPickerSheet's full paginated grid for anything beyond this). Cap
+    // dropped 10 → 5 (2026-07-12, user-requested "fewer images before See All") — pairs with the
+    // strip's thumbnails also growing, since fewer, larger thumbnails fit the same strip width.
     private var recentMatchingGenerations: [GenerationItem] {
         guard let kind = activeSlotKind else { return [] }
         return Array(generationManager.generations.filter { item in
             item.status == .completed
                 && !(item.completedMediaUrl ?? "").isEmpty
                 && (kind == "video" ? !item.isImage : item.isImage)
-        }.prefix(10))
+        }.prefix(5))
     }
 
     // MARK: - Source chooser (nested small-detent .sheet — native bottom-sheet slide-up)
@@ -598,9 +631,9 @@ struct PresetInputSheet: View {
                     CachedVideoFrameThumbnail(cacheKey: "addmedia-strip-\(item.id)", videoURL: url)
                 }
             }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+            .frame(width: 80, height: 80)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
     }
@@ -610,16 +643,16 @@ struct PresetInputSheet: View {
             pendingSource = .seeAllGenerations
             showSourceSheet = false
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                 Text("See All")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(theme.textSecondary)
-            .frame(width: 64, height: 64)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+            .frame(width: 80, height: 80)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
     }
@@ -628,43 +661,52 @@ struct PresetInputSheet: View {
         icon: String, label: String, subtitle: String, isPrimary: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                sourceBadge(icon: icon, size: isPrimary ? 46 : 36)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 16) {
+                sourceBadge(icon: icon, isPrimary: isPrimary)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(label)
-                        .font(isPrimary ? .system(size: 16, weight: .bold) : .system(size: 14.5, weight: .semibold))
+                        .font(isPrimary ? .system(size: 18, weight: .bold) : .system(size: 16, weight: .semibold))
                         .foregroundStyle(theme.textPrimary)
                     Text(subtitle)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(theme.textSecondary)
                 }
                 Spacer()
             }
-            .padding(.horizontal, isPrimary ? 16 : 14)
-            .padding(.vertical, isPrimary ? 15 : 10)
+            .padding(.horizontal, isPrimary ? 18 : 16)
+            .padding(.vertical, isPrimary ? 18 : 15)
             .background {
                 if isPrimary {
-                    RoundedRectangle(cornerRadius: 14).fill(theme.surfaceStrong)
+                    RoundedRectangle(cornerRadius: 16).fill(theme.surfaceStrong)
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
     }
 
-    // Single-hue "hierarchical" badge (sketch Variant D) — a radial gradient within ONE color
-    // family (the app's real purple accent only) approximating SF Symbol .hierarchical rendering
-    // depth, instead of a flat tint fill or 3 unrelated hues across the row set (the sketch's
-    // research flagged the latter as a documented "AI slop" tell).
-    private func sourceBadge(icon: String, size: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: size * 0.28)
+    // 2026-07-12 (user-requested): moved away from the single-hue purple "hierarchical" badge
+    // (sketch Variant D's original treatment) back to distinct, recognizable colors per source —
+    // user's own words: "SVGs instead of these generic purple icons." True SVG/vector app-icon
+    // assets aren't something to embed here (Apple's real Photos/Camera/Files icons are their own
+    // trademarked artwork, not available to bundle) — this instead gives each row its own
+    // deliberate, distinct system color evoking the matching real app (blue ~ Photos, orange ~
+    // Camera, green ~ Files), which is what actually reads as "distinct icons" rather than "one
+    // generic tint" — while keeping the layered-gradient depth touch (not a flat single-tone
+    // fill) since that part of the sketch's research still holds regardless of hue count.
+    private func sourceBadge(icon: String, isPrimary: Bool) -> some View {
+        let size: CGFloat = isPrimary ? 54 : 44
+        let hue: Color = {
+            switch icon {
+            case "photo.on.rectangle": return Color(red: 0.04, green: 0.52, blue: 1.0)   // Photos-like blue
+            case "camera":             return Color(red: 1.0, green: 0.58, blue: 0.0)    // Camera-like orange
+            default:                   return Color(red: 0.20, green: 0.78, blue: 0.35)  // Files-like green
+            }
+        }()
+        return RoundedRectangle(cornerRadius: size * 0.28)
             .fill(
                 RadialGradient(
-                    colors: [
-                        Color(red: 178 / 255, green: 155 / 255, blue: 232 / 255).opacity(0.95),
-                        presetAccent.opacity(0.85),
-                        presetAccent.opacity(0.55),
-                    ],
+                    colors: [hue.opacity(0.95), hue.opacity(0.85), hue.opacity(0.55)],
                     center: UnitPoint(x: 0.34, y: 0.28),
                     startRadius: 0,
                     endRadius: size * 0.75
