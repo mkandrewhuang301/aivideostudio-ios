@@ -46,6 +46,10 @@ struct SideDrawerView: View {
                         sectionLabel("PREFERENCES")
                         settingsCard
 
+                        sectionLabel("APPEARANCE")
+                            .padding(.top, 8)
+                        appearanceCard
+
                         sectionLabel("ACCOUNT")
                             .padding(.top, 8)
                         accountCard
@@ -127,29 +131,80 @@ struct SideDrawerView: View {
                 label: "Model Selector",
                 value: $modelPickerEnabled
             )
-
-            rowDivider
-
-            // Stacked (label above full-width picker): the drawer is only 65% of the screen
-            // wide, so an inline label + fixed-width segmented picker overflowed and clipped.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Appearance")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.textPrimary)
-                Picker("", selection: Binding(
-                    get: { theme.theme },
-                    set: { theme.theme = $0 }
-                )) {
-                    Text("Dark").tag(AppTheme.dark)
-                    Text("Light").tag(AppTheme.light)
-                }
-                .pickerStyle(.segmented)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+    }
+
+    // MARK: - Appearance card
+    //
+    // Its own section (not folded into PREFERENCES) with Light/Dark as vertically-stacked rows,
+    // each showing a small preview swatch of that mode — same idea as iOS's own Settings >
+    // Display & Brightness picker, laid out as rows instead of side-by-side cards since the
+    // drawer is only 65% of the screen wide (see settingsCard's old comment — the same overflow
+    // problem a segmented control had applies to 3 square cards in a row). No System option
+    // (2026-07-12 decision): the app's colors are computed from a stored enum, not read live
+    // from the system trait collection, so following the OS appearance would be a real
+    // architecture change, not just a third button — revisit if it's ever actually requested.
+    private var appearanceCard: some View {
+        VStack(spacing: 0) {
+            appearanceRow(mode: .light, label: "Light")
+            rowDivider
+            appearanceRow(mode: .dark, label: "Dark")
+        }
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+    }
+
+    private func appearanceRow(mode: AppTheme, label: String) -> some View {
+        let isSelected = theme.theme == mode
+        return Button {
+            theme.theme = mode
+        } label: {
+            HStack(spacing: 12) {
+                appearancePreviewSwatch(isLight: mode == .light)
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isSelected ? accent : theme.textTertiary.opacity(0.5))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Miniature mock "screen" — two text-line bars + an accent dot, matching the reference
+    // design's preview-card language but sized for a leading-edge swatch in a row instead of a
+    // standalone card, since these are stacked vertically rather than laid out 3-across.
+    private func appearancePreviewSwatch(isLight: Bool) -> some View {
+        let bg = isLight ? Color.white : Color(red: 0.13, green: 0.13, blue: 0.15)
+        let bar = isLight ? Color.black.opacity(0.35) : Color.white.opacity(0.35)
+        return RoundedRectangle(cornerRadius: 8)
+            .fill(bg)
+            .overlay(
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Capsule().fill(bar).frame(width: 22, height: 3)
+                            Capsule().fill(bar).frame(width: 15, height: 3)
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Circle().fill(accent).frame(width: 8, height: 8)
+                    }
+                }
+                .padding(6)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.black.opacity(0.08), lineWidth: 0.5))
+            .frame(width: 52, height: 36)
     }
 
     // MARK: - Account card
