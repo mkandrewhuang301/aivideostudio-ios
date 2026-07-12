@@ -75,7 +75,18 @@ actor MediaPrepService {
     // own constraints (edges multiple of 16, total px bounds) BEFORE calling this, and must pass
     // that same (possibly resized) pixel size here so image and mask stay dimension-matched.
     static func alphaMaskPNG(strokeImage: UIImage, sourcePixelSize: CGSize) -> Data {
-        let renderer = UIGraphicsImageRenderer(size: sourcePixelSize)
+        // BUG FIX (2026-07-12): UIGraphicsImageRenderer(size:)'s convenience init defaults
+        // format.scale to the MAIN SCREEN's scale (2x or 3x on every current device) — the
+        // rendered PNG's actual pixel dimensions were sourcePixelSize * scale, NOT
+        // sourcePixelSize, silently violating the "must render at the source's exact pixel
+        // size" invariant this function's own doc comment describes (caught by
+        // FantasiaTests/MaskEditorExportTests.swift, which asserts the exported mask's pixel
+        // dimensions against sourcePixelSize directly). sourcePixelSize is already in raw
+        // pixels (it comes from a UIImage's .size after prepareSourceImage — see
+        // MaskEditorView — used as a POINT size here), so the renderer must use scale 1.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: sourcePixelSize, format: format)
         return renderer.pngData { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: sourcePixelSize)) // opaque = preserve

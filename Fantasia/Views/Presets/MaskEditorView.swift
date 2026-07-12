@@ -23,19 +23,17 @@ import PencilKit
 import AVFoundation
 import UIKit
 
-/// Preset mask-visibility swatches, Preview-markup style (2026-07-11 polish, Item 6). Color is
-/// purely cosmetic feedback so the paint reads against any photo (dark image needs a bright
-/// mask) — it never affects the exported mask. `MediaPrepService.alphaMaskPNG` thresholds on
-/// stroke COVERAGE, not hue/alpha value, so swapping colors here is safe by construction.
+/// Mask-visibility color, Preview-markup style (2026-07-11 polish, Item 6; single-color 2026-07-12).
+/// Color is purely cosmetic feedback so the paint reads against any photo — it never affects the
+/// exported mask (`MediaPrepService.alphaMaskPNG` thresholds on stroke COVERAGE, not hue/alpha
+/// value). Fixed to magenta only (not user-selectable): a color picker implied different colors
+/// could mean different edit instructions to the model, which isn't true — gpt-image-2's mask
+/// param is alpha-only (verified against OpenAI's API reference), so there is exactly one prompt
+/// and one mask region regardless of paint color. Magenta is the rarest hue in real photo content
+/// (skin/sky/foliage/most objects), so it stays visible against the widest range of photos without
+/// the ambiguity a multi-color palette invited.
 enum MaskPalette {
-    static let colors: [UIColor] = [
-        .magenta,
-        .systemRed,
-        .systemBlue,
-        .systemGreen,
-        .systemYellow,
-        .white
-    ]
+    static let color: UIColor = .magenta
 }
 
 struct MaskEditorView: View {
@@ -62,13 +60,10 @@ struct MaskEditorView: View {
     @State private var canvasView = PKCanvasView()
     @State private var hasStrokes = false
 
-    // Tool row state (Items 3/6): pen width + color are user-adjustable, visibility-only —
-    // see MaskPalette doc comment. Defaults: pen selected, first swatch, width 20.
+    // Tool row state (Item 3): pen width is user-adjustable; color is fixed (MaskPalette doc
+    // comment) — not a per-user choice. Defaults: pen selected, width 20.
     @State private var penWidth: CGFloat = 20
-    @State private var maskColorIndex: Int = 0
     @State private var isErasing = false
-    @State private var showColorPalette = false
-    private var maskColor: UIColor { MaskPalette.colors[maskColorIndex] }
     private static let penSizes: [CGFloat] = [12, 20, 34]
 
     @State private var text: String = ""
@@ -214,7 +209,7 @@ struct MaskEditorView: View {
                     canvasView: canvasView,
                     image: image,
                     penWidth: penWidth,
-                    maskColor: maskColor,
+                    maskColor: MaskPalette.color,
                     isErasing: isErasing
                 ) { changed in
                     hasStrokes = changed
@@ -344,7 +339,7 @@ struct MaskEditorView: View {
         )
     }
 
-    // MARK: - Tool row (Item 6): Pen/Eraser toggle, size dots, color well, Undo/Clear
+    // MARK: - Tool row: Pen/Eraser toggle, size dots, Undo/Clear (color is fixed, no picker)
 
     private var toolRow: some View {
         HStack(spacing: 10) {
@@ -362,10 +357,6 @@ struct MaskEditorView: View {
                     sizeDot(size)
                 }
             }
-
-            Spacer(minLength: 2)
-
-            colorWellButton
 
             Spacer(minLength: 2)
 
@@ -429,7 +420,7 @@ struct MaskEditorView: View {
                     .frame(width: 30, height: 30)
                     .overlay(
                         Circle().stroke(
-                            penWidth == size ? Color(maskColor) : theme.surfaceBorder,
+                            penWidth == size ? Color(MaskPalette.color) : theme.surfaceBorder,
                             lineWidth: penWidth == size ? 1.5 : 0.75
                         )
                     )
@@ -440,46 +431,6 @@ struct MaskEditorView: View {
         }
         .buttonStyle(PressableButtonStyle())
         .accessibilityLabel("Pen size \(Int(size))")
-    }
-
-    // Preview-markup-style color well: a filled circle showing the current mask color; tapping
-    // opens a small popover palette. Color is visibility-only (MaskPalette doc comment) — never
-    // sent to the server, never affects the exported mask.
-    private var colorWellButton: some View {
-        Button {
-            showColorPalette = true
-        } label: {
-            Circle()
-                .fill(Color(maskColor))
-                .frame(width: 26, height: 26)
-                .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 1))
-        }
-        .buttonStyle(PressableButtonStyle())
-        .accessibilityLabel("Mask color")
-        .popover(isPresented: $showColorPalette, arrowEdge: .bottom) {
-            colorPalettePopover
-        }
-    }
-
-    private var colorPalettePopover: some View {
-        HStack(spacing: 14) {
-            ForEach(Array(MaskPalette.colors.enumerated()), id: \.offset) { index, color in
-                Button {
-                    maskColorIndex = index
-                    showColorPalette = false
-                } label: {
-                    Circle()
-                        .fill(Color(color))
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            Circle().stroke(theme.textPrimary, lineWidth: maskColorIndex == index ? 2 : 0)
-                        )
-                }
-                .buttonStyle(PressableButtonStyle())
-            }
-        }
-        .padding(16)
-        .presentationCompactAdaptation(.popover)
     }
 
     // MARK: - Source loading
@@ -524,7 +475,11 @@ struct MaskEditorView: View {
     /// `.size` becomes the single source of truth for "source pixel size", used identically by
     /// both on-screen display (AVMakeRect in `editorContent`) and mask export (`submit` below) —
     /// they must never diverge, or painted strokes would misalign with the uploaded source.
-    private static func prepareSourceImage(_ image: UIImage, maxDimension: CGFloat = 2048) -> UIImage {
+    // Internal (not private), not for any external caller — kept package-visible so
+    // FantasiaTests/MaskEditorExportTests.swift can assert its output's ACTUAL pixel dimensions
+    // (the same UIGraphicsImageRenderer scale bug fixed here also existed in this function; a
+    // test needs real access, not just a same-file exemption, to catch a regression).
+    static func prepareSourceImage(_ image: UIImage, maxDimension: CGFloat = 2048) -> UIImage {
         let w = image.size.width
         let h = image.size.height
         guard w > 0, h > 0 else { return image }
@@ -534,7 +489,18 @@ struct MaskEditorView: View {
         var newH = (h * factor / 16).rounded(.down) * 16
         newW = max(newW, 16)
         newH = max(newH, 16)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: newW, height: newH))
+        // BUG FIX (2026-07-12): same UIGraphicsImageRenderer(size:) screen-scale default bug as
+        // MediaPrepService.alphaMaskPNG — without format.scale = 1, this produced an image whose
+        // REAL pixel buffer was newW*scale x newH*scale (2x/3x too large) even though .size
+        // (points) correctly reported newW x newH. Every downstream consumer of this image's
+        // .size (canvas fitting, mask export sizing) was therefore internally consistent with
+        // itself, but the ACTUAL uploaded photo (sourceImage.jpegData(...) in submit(), which
+        // encodes at the real pixel buffer, not .size) was silently 2-3x larger than intended —
+        // blowing past gpt-image-2's max-dimension constraint this function exists to enforce,
+        // and no longer dimension-matched to the mask once alphaMaskPNG's own scale got fixed.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: newW, height: newH), format: format)
         return renderer.image { _ in
             image.draw(in: CGRect(x: 0, y: 0, width: newW, height: newH))
         }
@@ -740,7 +706,7 @@ private struct ZoomableMaskCanvas: UIViewRepresentable {
     private func applyTool(to canvasView: PKCanvasView) {
         canvasView.tool = isErasing
             ? PKEraserTool(.vector)
-            : PKInkingTool(.pen, color: maskColor.withAlphaComponent(0.55), width: penWidth)
+            : PKInkingTool(.pen, color: maskColor.withAlphaComponent(0.85), width: penWidth)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onChange: onStrokesChanged) }
