@@ -128,6 +128,12 @@ struct MaskEditorView: View {
             }
         }
         .task { await registry.loadIfNeeded() }
+        .task {
+            // Warm the backend as soon as the editor opens — overlaps a cold Railway boot with the
+            // time the user spends painting the mask + typing the prompt, so Generate's own network
+            // round trip isn't racing a sleeping instance (same pattern as PresetInputSheet.swift).
+            await APIClient.shared.pingHealth()
+        }
         .photosPicker(isPresented: $showPhotosPicker, selection: $selectedPickerItem, matching: .images)
         .onChange(of: selectedPickerItem) { _, newValue in
             Task { await loadSourceFromPicker(newValue) }
