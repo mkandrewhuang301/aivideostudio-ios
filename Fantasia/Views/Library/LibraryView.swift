@@ -213,10 +213,9 @@ struct LibraryView: View {
             h += max(columnHeight(left, colWidth: colWidth), columnHeight(right, colWidth: colWidth))
         }
         h += 20 * CGFloat(max(0, groups.count - 1))          // LazyVStack spacing between sections
-        // NOTE: spacing also applies between a section's header and its grid content if they are
-        // separate LazyVStack children. They are inside `Section {} header: {}`, so spacing applies
-        // between header and content too — VERIFY empirically and add
-        // `+ 20 * CGFloat(groups.count)` if the bottom is clipped by exactly that amount.
+        // Confirmed (2026-07-12): spacing ALSO applies between a section's header and its grid
+        // content, since `Section {} header: {}` still produces separate LazyVStack children.
+        h += 20 * CGFloat(groups.count)                       // spacing between each header and its own content
         if generationManager.nextCursor != nil { h += 64 + 20 } // footer + its preceding spacing
         h += 100  // existing .padding(.bottom, 100)
         return h
