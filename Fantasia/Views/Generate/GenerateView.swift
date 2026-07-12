@@ -55,6 +55,12 @@ struct GenerateView: View {
     @State private var audioEnabled = true
     @State private var selectedImageResolution: ImageResolution = .square
 
+    // Preset registry lookup — used only by attachReference(from:) to detect presets whose true
+    // output aspect is data-dependent (sheet.aspect_label "Matches your photo/video") before
+    // trusting their stored params.aspectRatio (see applyAspectRatioFromReference call site).
+    // Bundled fallback + snapshot cache (PresetRegistryManager), so this is instant on cold start.
+    @State private var presetRegistry = PresetRegistryManager()
+
     // Multi-reference attachment state
     @State private var selectedPickerItem: PhotosPickerItem?
     private let maxReferences = 3
@@ -450,6 +456,7 @@ struct GenerateView: View {
         .onChange(of: attachedReferences.map { "\($0.id)|\($0.displayName ?? "")" }, initial: true) { _, _ in
             rebuildTokenThumbnails()
         }
+        .task { await presetRegistry.loadIfNeeded() }
         .onAppear {
             generationManager.startPolling()
             if let remix = generationManager.pendingRemix {
@@ -1975,7 +1982,23 @@ struct GenerateView: View {
         )
         attachedReferences.append(attached)
         insertToken(token)
-        if isFirstReference, let ratio = item.params.aspectRatio {
+        // FIX (2026-07-12): item.params.aspectRatio is NOT reliable for every preset. Presets
+        // whose registry sheet.aspect_label reads "Matches your photo/video" (e.g. Animate Old
+        // Photo) never send an aspect_ratio to the backend, which silently defaults the stored
+        // value to 16:9 (video) / 1:1 (image) regardless of the source media's real orientation
+        // (generations.ts: `aspect_ratio ?? '16:9'` / `imageAspectRatio ?? '1:1'`) — trusting it
+        // here would snap the composer to a known-wrong ratio. Only trust the stored value for
+        // plain composer generations and presets with a genuinely fixed/selected aspect; skip
+        // (leave whatever's already selected) for the data-dependent ones rather than apply a
+        // wrong one — there's no reliable pixel-measurable source at this point (the item's own
+        // completed media would need a full download+decode to measure, unlike a fresh
+        // attachment in handleAttachedData which already has the bytes in hand).
+        let sourceAspectIsDataDependent: Bool = {
+            guard let presetId = item.params.presetId else { return false }
+            let label = presetRegistry.presets.first { $0.presetId == presetId }?.sheet?.aspectLabel ?? ""
+            return label.localizedCaseInsensitiveContains("matches")
+        }()
+        if isFirstReference, !sourceAspectIsDataDependent, let ratio = item.params.aspectRatio {
             applyAspectRatioFromReference(ratio)
         }
         promptFocused = true
@@ -2012,9 +2035,11 @@ struct GenerateView: View {
 
     private func dispatchRegenerate(item: GenerationItem) async {
         guard let prompt = item.prompt else { return }
-        let ref = item.referenceUrls?.first
-        let refImages: [String]? = ref.flatMap { $0.isVideo ? nil : [$0.url] }
-        let refVideos: [String]? = ref.flatMap { $0.isVideo ? [$0.url] : nil }
+        // FIX (2026-07-12): used to send only item.referenceUrls?.first — dropped every reference
+        // past the first while still billing/behaving as if the full set was used. Send all of them,
+        // split by type, same as dispatchGeneration()'s attachedReferences split.
+        let refImages = item.referenceUrls?.filter { !$0.isVideo }.map { $0.url }
+        let refVideos = item.referenceUrls?.filter { $0.isVideo }.map { $0.url }
         let body = GenerationRequestBody(
             prompt: prompt,
             model: item.model,
@@ -2025,19 +2050,53 @@ struct GenerateView: View {
             audioEnabled: item.params.audioEnabled,
             imageAspectRatio: item.isImage ? item.params.aspectRatio : nil,
             imageQuality: nil,
-            referenceImages: refImages,
-            referenceVideos: refVideos,
+            referenceImages: (refImages?.isEmpty ?? true) ? nil : refImages,
+            referenceVideos: (refVideos?.isEmpty ?? true) ? nil : refVideos,
             referenceUploadIds: nil,
             referenceImageUploadIds: nil,
             referenceVideoUploadIds: nil,
             referenceImageGenerationIds: nil,
             referenceVideoGenerationIds: nil
         )
+
+        // FIX (2026-07-12): this used to have no optimistic placeholder and swallow every error
+        // silently (print-only) — a failed or slow regenerate gave the user nothing to look at.
+        // Mirrors dispatchGeneration()'s placeholder/promote/error pattern, but deliberately does
+        // NOT touch promptText/attachedReferences — Regenerate never edits the composer's own
+        // draft, unlike Remix (applyRemix).
+        let placeholderId = "local-" + UUID().uuidString
+        let placeholder = GenerationItem(
+            localPlaceholderId: placeholderId,
+            model: item.model,
+            mediaType: item.isImage ? .image : .video,
+            prompt: prompt,
+            params: item.params,
+            costCredits: 0,
+            referenceUrls: item.referenceUrls,
+            createdAt: Date()
+        )
+        generationManager.insertLocalPlaceholder(placeholder)
+
         do {
-            _ = try await APIClient.shared.submitGeneration(body: body)
+            let submitted = try await APIClient.shared.submitGeneration(body: body)
+            generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
             generationManager.startPolling(forceRefresh: true)
+            await creditManager.fetchBalance()
+        } catch let apiError as APIError {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
+                showError("Insufficient credits")
+                await creditManager.fetchBalance()
+            } else if case .unexpectedResponse(_, let code) = apiError, code == "content_policy_violation" {
+                showError("Prompt may not adhere to our community guidelines. Please try again.")
+            } else {
+                print("[GenerateView] regenerate rejected: \(apiError)")
+                showError("An error has occurred. Please try again.")
+            }
         } catch {
             print("[GenerateView] regenerate error: \(error)")
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            showError("An error has occurred. Please try again.")
         }
     }
 
