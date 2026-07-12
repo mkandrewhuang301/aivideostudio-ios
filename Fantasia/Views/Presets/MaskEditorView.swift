@@ -555,7 +555,13 @@ struct MaskEditorView: View {
             scale: scale
         )
         let maskData = MediaPrepService.alphaMaskPNG(strokeImage: strokeImage, sourcePixelSize: sourcePixelSize)
-        guard let sourceData = sourceImage.pngData() else {
+        // JPEG, not PNG: the source is a photo, and PNG's lossless compression runs several MB at
+        // 2048px for photographic content vs. a few hundred KB as JPEG — that upload was the
+        // dominant cost in the submit-to-Generate-feed delay. OpenAI's /v1/images/edits accepts
+        // JPEG for the base "image" param (only the mask needs PNG's alpha channel, unaffected
+        // here). Backend (openaiImageService.generateImageEditWithMask) reads the real
+        // content-type back off R2 instead of assuming PNG, so this stays correct end-to-end.
+        guard let sourceData = sourceImage.jpegData(compressionQuality: 0.9) else {
             errorMessage = "Couldn't prepare this image. Try again."
             return
         }
@@ -603,7 +609,7 @@ struct MaskEditorView: View {
 
         do {
             async let sourceUploadTask = APIClient.shared.uploadReferenceMedia(
-                data: sourceData, mimeType: "image/png", fileName: "magic-editor-source.png"
+                data: sourceData, mimeType: "image/jpeg", fileName: "magic-editor-source.jpg"
             )
             async let maskUploadTask = APIClient.shared.uploadReferenceMedia(
                 data: maskData, mimeType: "image/png", fileName: "magic-editor-mask.png"
