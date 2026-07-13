@@ -496,13 +496,18 @@ struct PresetInputSheet: View {
             // only ever showed for slot.optional (Faceswap's two slots are both required, so it
             // never appeared there at all — the exact preset the user was testing).
             if hasFilledMedia {
+                // 2026-07-12 (user-requested): grown 15pt -> 19pt, and switched from a black to a
+                // white circle (user: "it should be white background too, I like that") — the x
+                // glyph itself flips to a dark tone so it stays legible on white instead of
+                // disappearing.
                 Button {
                     slotInputs[index] = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .background(Color.black.opacity(0.55), in: Circle())
+                        .symbolRenderingMode(.palette)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.75), .white)
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
                 }
                 .buttonStyle(.plain)
                 .padding(8)
@@ -562,7 +567,7 @@ struct PresetInputSheet: View {
 
             VStack(spacing: 8) {
                 sourceRow(
-                    icon: "photo.on.rectangle",
+                    icon: "photo.on.rectangle.fill",
                     label: "Photo Library",
                     subtitle: "Choose from your camera roll",
                     isPrimary: true
@@ -572,7 +577,7 @@ struct PresetInputSheet: View {
                 }
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     sourceRow(
-                        icon: "camera",
+                        icon: "camera.fill",
                         label: activeSlotKind == "video" ? "Record Video" : "Take Photo",
                         subtitle: "Use your camera right now",
                         isPrimary: false
@@ -582,7 +587,7 @@ struct PresetInputSheet: View {
                     }
                 }
                 sourceRow(
-                    icon: "folder",
+                    icon: "folder.fill",
                     label: "Choose File",
                     subtitle: "Browse files on your device",
                     isPrimary: false
@@ -676,9 +681,12 @@ struct PresetInputSheet: View {
             .padding(.horizontal, isPrimary ? 18 : 16)
             .padding(.vertical, isPrimary ? 18 : 15)
             .background {
-                if isPrimary {
-                    RoundedRectangle(cornerRadius: 16).fill(theme.surfaceStrong)
-                }
+                // 2026-07-12 (user-requested, experimental — "make it more premium... frosty
+                // glass... if it's not good we can remove it"): .ultraThinMaterial on every row
+                // (not just primary) instead of a flat surfaceStrong fill / no fill at all.
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .opacity(isPrimary ? 1 : 0.7)
             }
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 1))
         }
@@ -694,13 +702,16 @@ struct PresetInputSheet: View {
     // Camera, green ~ Files), which is what actually reads as "distinct icons" rather than "one
     // generic tint" — while keeping the layered-gradient depth touch (not a flat single-tone
     // fill) since that part of the sketch's research still holds regardless of hue count.
+    // Icons switched to the FILLED SF Symbol variant (2026-07-12, user-requested "actual Apple
+    // development icons" — SF Symbols IS Apple's official development icon set; the filled/solid
+    // variants read closer to real system-app-icon boldness than the thin outline glyphs did).
     private func sourceBadge(icon: String, isPrimary: Bool) -> some View {
         let size: CGFloat = isPrimary ? 54 : 44
         let hue: Color = {
             switch icon {
-            case "photo.on.rectangle": return Color(red: 0.04, green: 0.52, blue: 1.0)   // Photos-like blue
-            case "camera":             return Color(red: 1.0, green: 0.58, blue: 0.0)    // Camera-like orange
-            default:                   return Color(red: 0.20, green: 0.78, blue: 0.35)  // Files-like green
+            case "photo.on.rectangle.fill": return Color(red: 0.04, green: 0.52, blue: 1.0)   // Photos-like blue
+            case "camera.fill":             return Color(red: 1.0, green: 0.58, blue: 0.0)    // Camera-like orange
+            default:                        return Color(red: 0.20, green: 0.78, blue: 0.35)  // Files-like green
             }
         }()
         return RoundedRectangle(cornerRadius: size * 0.28)
@@ -904,15 +915,20 @@ struct PresetInputSheet: View {
         return Button {
             selectedAspectRatio = ratio
         } label: {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 aspectRatioIcon(ratio)
                     .foregroundStyle(isSelected ? presetAccent : theme.textSecondary)
                 Text(ratio)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            // Fixed height (2026-07-12, user-reported "9:16 chip is a little smaller than the
+            // other two"): aspectRatioIcon's own occupied space used to vary by ratio (a tall 9:16
+            // glyph is taller than a wide 16:9 glyph), so each chip's VStack — and therefore the
+            // whole Button — ended up a different overall height. A fixed height on the outer
+            // content forces every chip to match regardless of which ratios are shown.
+            .frame(height: 78)
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
@@ -924,17 +940,22 @@ struct PresetInputSheet: View {
 
     /// Small rectangle glyph shaped to the chip's own ratio (e.g. tall for "2:3", wide for "3:2")
     /// — a lightweight custom "icon" rather than pulling in SF Symbols that don't exist per-ratio.
+    /// Grown 20 -> 28pt (2026-07-12, user-requested "increase the size of the rectangles"). The
+    /// glyph itself always occupies a FIXED 28x28 bounding box regardless of ratio — only the
+    /// stroked rectangle drawn inside it varies in proportion — so every chip lays out identically
+    /// (see the fixed-height comment on aspectChip above for why that matters).
     private func aspectRatioIcon(_ ratio: String) -> some View {
         let components = ratio.split(separator: ":").compactMap { Double($0) }
         let w = components.count == 2 ? components[0] : 1
         let h = components.count == 2 ? components[1] : 1
-        let maxDim: CGFloat = 20
+        let maxDim: CGFloat = 28
         let size = w >= h
             ? CGSize(width: maxDim, height: maxDim * CGFloat(h / w))
             : CGSize(width: maxDim * CGFloat(w / h), height: maxDim)
-        return RoundedRectangle(cornerRadius: 3)
-            .stroke(lineWidth: 1.5)
+        return RoundedRectangle(cornerRadius: 4)
+            .stroke(lineWidth: 2)
             .frame(width: size.width, height: size.height)
+            .frame(width: maxDim, height: maxDim)
     }
 
     /// Combines the registry's fixed aspect/duration/resolution labels into one caption for
