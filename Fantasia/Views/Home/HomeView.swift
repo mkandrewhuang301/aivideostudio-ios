@@ -1,10 +1,11 @@
 // HomeView.swift
 // Fantasia
 // Registry-driven Home (D-01 replace): one continuous scroll rendering PresetRegistryManager
-// rows in the v10-locked section order — Cinema Studio hero, Video Effects, Photo Effects
-// (split by output media type, D-02 revision 2026-07-06), Avatar Center (full-width feature
-// card), Shows & Vlogs. Every card is a poster-first autoplaying loop (D-08); SOON tiles/pills
-// are registry-driven from `status` alone (D-04) — nothing here is hardcoded per-preset.
+// rows in the section order — Edit Studio hero, Shows & Vlogs (moved up 2026-07-13, first row
+// below hero), Video Effects, Photo Effects (split by output media type, D-02 revision
+// 2026-07-06), Avatar Center (full-width feature card). Every card is a poster-first autoplaying
+// loop (D-08); SOON tiles/pills are registry-driven from `status` alone (D-04) — nothing here is
+// hardcoded per-preset.
 
 import SwiftUI
 
@@ -59,6 +60,11 @@ struct HomeView: View {
                         heroCard(heroPreset)
                     }
 
+                    if !showsPresets.isEmpty {
+                        sectionHeader("Shows & Vlogs")
+                        showsRow
+                    }
+
                     if !videoEffectsPresets.isEmpty {
                         sectionHeader("Video Effects")
                         effectsGrid(videoEffectsPresets)
@@ -72,11 +78,6 @@ struct HomeView: View {
                     if let avatarCenterPreset {
                         sectionHeader("Avatar Center")
                         avatarCenterRow(avatarCenterPreset)
-                    }
-
-                    if !showsPresets.isEmpty {
-                        sectionHeader("Shows & Vlogs")
-                        showsRow
                     }
                 }
                 .padding(.bottom, 110)
