@@ -107,7 +107,10 @@ struct MainTabView: View {
             selectedTab = 1
         }
         // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
+        // Also close the Magic Editor cover here (it no longer self-dismisses — presenter-driven
+        // close avoids a double-dismiss bounce; no-op for other presets whose item is already nil).
         .onReceive(NotificationCenter.default.publisher(for: .generationSubmitted)) { _ in
+            magicEditorPreset = nil
             selectedTab = 1
         }
         .nameAsReferenceAlert()
@@ -197,33 +200,9 @@ struct MainTabView: View {
             Spacer()
 
             Button { showProfileSheet = true } label: {
-                HStack(spacing: 12) {
-                    Group {
-                        if creditManager.totalCreditsPossible > 0 {
-                            Text("\(creditManager.creditsBalance)")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(theme.textSecondary)
-                            // Emphasized separator — bold + primary (vs. secondary) text color so
-                            // current/total reads as a clear ratio, not one cramped blob. Thin
-                            // spaces (U+2009) either side give the numbers breathing room without
-                            // the width of a full space; .heavy read as too chunky at this size.
-                            + Text("\u{2009}/\u{2009}")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(theme.textPrimary)
-                            + Text("\(creditManager.totalCreditsPossible)")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(theme.textSecondary)
-                        } else {
-                            Text("\(creditManager.creditsBalance)")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                    }
-                    .contentTransition(.numericText())
-                    CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
-                }
-                .frame(height: 44)
-                .contentShape(Rectangle())
+                CircularCreditIndicator(fillRatio: creditManager.fillRatio, size: 32)
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Credits — tap to manage")
         }

@@ -13,7 +13,6 @@ struct LibraryView: View {
     @Environment(ThemeManager.self) private var theme
 
     @State private var selectedItem: GenerationItem? = nil
-    @State private var confirmDeleteItem: GenerationItem? = nil
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
     private let tileSpacing: CGFloat = 4
@@ -142,26 +141,6 @@ struct LibraryView: View {
                 )
             )
         }
-        // T12: long-press context menu Delete action — mirrors GenerateView's
-        // SwipeToDeleteRow confirmationDialog (same title/message/destructive pattern).
-        .confirmationDialog(
-            confirmDeleteItem.map { $0.isImage ? "Delete this image?" : "Delete this video?" } ?? "Delete this video?",
-            isPresented: Binding(
-                get: { confirmDeleteItem != nil },
-                set: { if !$0 { confirmDeleteItem = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                if let item = confirmDeleteItem {
-                    Task { await handleDelete(item: item) }
-                }
-                confirmDeleteItem = nil
-            }
-            Button("Cancel", role: .cancel) { confirmDeleteItem = nil }
-        } message: {
-            Text("This cannot be undone.")
-        }
     }
 
     private func handleDelete(item: GenerationItem) async {
@@ -259,7 +238,10 @@ struct LibraryView: View {
                     item: item,
                     onTap: { selectedItem = item },
                     onNameAsReference: { generationManager.pendingNameAsReference = item },
-                    onRequestDelete: { confirmDeleteItem = item }
+                    // T12 follow-up: confirmation now happens inside the cell itself (anchored
+                    // to the pressed tile) — by the time this fires the user has already
+                    // confirmed, so this just performs the delete.
+                    onRequestDelete: { Task { await handleDelete(item: item) } }
                 )
                 .frame(width: colWidth, height: tileHeight(item, colWidth: colWidth))
             }

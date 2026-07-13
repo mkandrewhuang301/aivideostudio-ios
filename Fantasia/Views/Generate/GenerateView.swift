@@ -45,6 +45,11 @@ struct GenerateView: View {
     private let promptFirstLineTopInset: CGFloat = 11
     @State private var showProfileSheet = false
     @State private var promptFocused: Bool = false
+    // Keyboard scroll-to-dismiss: minimum downward drag over the history list before the
+    // keyboard drops (2026-07-12 fix — replaces .scrollDismissesKeyboard(.immediately), which
+    // has no distance threshold and fired on virtually any scroll motion). Tune by feel.
+    private let keyboardDismissSwipeThreshold: CGFloat = 50
+    @State private var keyboardDismissTriggeredThisGesture = false
 
     // D-18: option state with defaults
     @State private var selectedMode = "AI Video"
@@ -79,12 +84,14 @@ struct GenerateView: View {
     @State private var renamingItem: ReferenceUploadItem? = nil
     @State private var renameText = ""
 
-    // Media library + @-mention state
+    // Media library + @-mention state.
+    // showReferencePanel now drives an inline suggestion list pinned ABOVE the composer with the
+    // keyboard STAYING UP (reverted from the T8b bottom keyboard-dismiss grid, commit 735d73d, on
+    // 2026-07-13) — keeping the keyboard up is what lets the user keep typing "@name" so
+    // mentionSuggestions filters live. The bottom-grid version is snapshotted at
+    // ~/.planning/backups/GenerateView.reference-bottom-panel.2026-07-13.swift.
     @State private var mentionQuery: String? = nil
     @State private var showReferencePanel = false
-    // Live downward-drag translation while swiping the reference panel down to dismiss it.
-    // Render-only offset on the PANEL (not the composer) — resting composer position is unaffected.
-    @State private var referencePanelDragOffset: CGFloat = 0
 
     // Paywall and submit state
     @State private var showPaywall = false
@@ -96,6 +103,9 @@ struct GenerateView: View {
     @State private var isLoadingOlderHistory = false
     @State private var confirmDeleteItem: GenerationItem? = nil
     @State private var deletingItemIds: Set<String> = []
+    // Swipe-to-delete confirmation for reference uploads in the @-mention list (parallel to the
+    // GenerationItem card-delete state above, but for ReferenceUploadItem).
+    @State private var confirmDeleteReference: ReferenceUploadItem? = nil
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -105,12 +115,46 @@ struct GenerateView: View {
 
     private var mentionSuggestions: [MentionCandidate] {
         guard let q = mentionQuery, !q.isEmpty else { return defaultMentionSuggestions }
-        // When filtering, unnamed uploads are hidden (nothing to match against); the synthetic
-        // "latest generation" entry has no name either, so it only ever appears in the
-        // unfiltered (just-typed-@) list below.
-        return mediaLibrary.items
-            .filter { ($0.displayName ?? "").localizedCaseInsensitiveContains(q) }
+        // Match against the VISIBLE label (displayLabel), not the raw displayName — an unnamed
+        // upload shows as its positional "Image 1"/"Video 2" label, so typing "i" must match those
+        // rows the user actually sees (the old code matched displayName only, so unnamed items were
+        // invisible to the filter — the "Image 1 disappears when I type i" report, 2026-07-13).
+        //
+        // PREFIX-ONLY (anchored): typing "i" matches "Image 1" but must NOT surface "commercial"
+        // just because it contains an "i" mid-word (the "shows something unrelated" half of the
+        // same report). Results stay in mediaLibrary order (newest-first), which is deterministic —
+        // not the random-looking set the pre-fix substring match produced.
+        let items = mediaLibrary.items
+        return items
+            .filter { item in
+                let label = MentionCandidate.upload(item).displayLabel(in: items)
+                return label.range(of: q, options: [.caseInsensitive, .anchored, .diacriticInsensitive]) != nil
+            }
             .map { .upload($0) }
+    }
+
+    /// The gray inline-completion suffix drawn after the caret: the remaining characters of the
+    /// TOP suggestion's visible label beyond what the user has already typed. Empty when there's no
+    /// active mention, no suggestion, or the query already spans the whole label. Because the filter
+    /// is prefix-only, the top suggestion always starts with the query, so `dropFirst(q.count)` is
+    /// the true remainder (label's own casing preserved). This is what Return commits.
+    private var mentionGhostSuffix: String {
+        guard showReferencePanel,
+              let q = mentionQuery, !q.isEmpty,
+              let top = mentionSuggestions.first else { return "" }
+        let label = top.displayLabel(in: mediaLibrary.items)
+        guard label.count > q.count,
+              label.range(of: q, options: [.caseInsensitive, .anchored, .diacriticInsensitive]) != nil
+        else { return "" }
+        return String(label.dropFirst(q.count))
+    }
+
+    /// Return-key / ghost accept: commit the TOP suggestion (the one the ghost previews), exactly
+    /// as tapping its row would. No-op if the list is empty.
+    private func acceptTopMentionCompletion() {
+        guard showReferencePanel, let top = mentionSuggestions.first else { return }
+        commitMention(top)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
     }
 
     /// Suggestions shown right after typing "@", before any filter text — in priority order:
@@ -195,22 +239,17 @@ struct GenerateView: View {
             // buttons for the touch.
             background
                 .onTapGesture {
+                    // Dismissing the keyboard also closes the inline @-mention list via
+                    // onChange(of: promptFocused) above — no separate panel teardown needed.
                     promptFocused = false
-                    // Escape hatch: if the reference panel ever desyncs from the composer's
-                    // hit-testing (see the panel-open call site's race note), this background
-                    // tap still lands and gives the user a way out even when the textbox/X
-                    // buttons don't respond. Same cleanup as swipe-dismiss: drop the bare "@",
-                    // close the panel, don't refocus.
-                    if showReferencePanel { dismissReferencePanelViaSwipe() }
                 }
                 // Covers the empty-history state (centerContent/chips, no ScrollView present) —
                 // the ScrollView case below has its own copy of this same drag-to-dismiss check
                 // since the ScrollView sits on top of this background and claims the touch there.
-                // See that gesture's comment for why this mirrors .scrollDismissesKeyboard.
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 12)
                         .onChanged { _ in
-                            if showReferencePanel { dismissReferencePanelViaSwipe() }
+                            if promptFocused { promptFocused = false }
                         }
                 )
 
@@ -286,11 +325,52 @@ struct GenerateView: View {
                             guard let minY, minY > 0, minY < 700 else { return }
                             Task { await loadOlderHistory(proxy: proxy) }
                         }
-                        .defaultScrollAnchor(.bottom)
-                        // .immediately (not .interactively): a small swipe outside the composer
-                        // drops the keyboard right away while the content keeps scrolling in the
-                        // same gesture, rather than needing to drag all the way past the keyboard.
-                        .scrollDismissesKeyboard(.immediately)
+                        // FIX (2026-07-12): .defaultScrollAnchor(.bottom) REMOVED — it was the
+                        // actual cause of cards shifting up when focusing the composer at the
+                        // true bottom of the list (confirmed via research: SwiftUI ScrollView
+                        // legitimately observes a sibling's growing safeAreaInset region, and a
+                        // BOTTOM anchor re-pins the last item above that region on every resize,
+                        // including the composer's keyboard-driven growth — not a bug, just the
+                        // wrong anchor choice for this screen. An `.ignoresSafeArea(.keyboard,
+                        // edges: .bottom)` attempt on the list's container did NOT fix this —
+                        // confirmed on-device — because the region being observed isn't tagged
+                        // `.keyboard`, it's the composer's own safeAreaInset region growing for
+                        // any reason). With NO persistent anchor, ScrollView defaults to a TOP
+                        // anchor: a shrinking visible area (keyboard rising) just clips the
+                        // bottom rather than re-pinning everything above it — matches the "list
+                        // stays static, keyboard covers whatever's at the bottom" behavior every
+                        // other app has. The list's own dynamic bottom padding/inset (still
+                        // correctly avoiding the composer's current height at rest) is UNCHANGED
+                        // — only the re-pin-on-resize behavior is gone.
+                        //
+                        // This removes the one thing .defaultScrollAnchor(.bottom) ALSO did:
+                        // set the list's INITIAL scroll position on first appearance (confirmed —
+                        // no other code did this; the existing .onAppear only calls
+                        // startPolling()/remix/reference prefill). Replaced below with a
+                        // one-time, UN-ANIMATED scroll — deliberately NOT scrollToNewest() (that
+                        // helper wraps proxy.scrollTo in withAnimation, which is correct for a
+                        // NEW generation sliding into an already-visible list, but was WRONG here:
+                        // reusing it made every screen appearance visibly slide the whole list up
+                        // from the top on a 0.3s animation — a brand-new, jarring "duplicate
+                        // prompt box sliding down" artifact that didn't exist under the old
+                        // .defaultScrollAnchor(.bottom) (which positioned correctly on frame one,
+                        // silently, with zero visible motion — confirmed as a regression by the
+                        // user 2026-07-13, fixed same day). A bare proxy.scrollTo call outside
+                        // withAnimation jumps instantly, matching that original silent behavior.
+                        .onAppear {
+                            if let id = generationManager.generations.first?.id {
+                                proxy.scrollTo(id, anchor: .bottom)
+                            }
+                        }
+                        // Keyboard dismiss on scroll is handled by the .simultaneousGesture
+                        // DragGesture below (keyboardDismissSwipeThreshold), NOT
+                        // .scrollDismissesKeyboard — that modifier has no distance-threshold knob
+                        // (fires on virtually any scroll motion, felt like a tap) and, per
+                        // .planning/notes/keyboard-composer-architecture.md, was masking a
+                        // separate bug where the composer's own animation never actually ran
+                        // (modifier-order defect, fixed 2026-07-12) — the keyboard was snapping
+                        // down in a single frame regardless of which scrollDismissesKeyboard mode
+                        // was set. Do not re-add .scrollDismissesKeyboard here.
                         // Pull-to-refresh: manual fallback for server state (Bug C). SwiftUI
                         // supplies the spinner + haptic; refresh() reconciles deletions and adds
                         // any new items via mergeLatest. Does not touch keyboard/composer.
@@ -302,25 +382,45 @@ struct GenerateView: View {
                         }
                         // Brackets an active scroll drag with isInteracting so
                         // GenerationManager.mergeLatest() buffers new items instead of
-                        // prepending mid-scroll (ported from the old FeedView pattern).
+                        // prepending mid-scroll (ported from the old FeedView pattern). Also owns
+                        // keyboard-dismiss-on-scroll (2026-07-12, see keyboardDismissSwipeThreshold)
+                        // now that .scrollDismissesKeyboard has been removed above.
                         // minimumDistance MUST stay >= 20: a 0-distance DragGesture on a
                         // ScrollView engages on touch-down and wins arbitration on a quick flick
                         // from rest, blocking the scroll (see LibraryView + GenerationManager
-                        // .isInteracting doc comment). This is the merge-buffering gesture only —
-                        // it does NOT touch the composer/keyboard positioning.
+                        // .isInteracting doc comment).
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 20, coordinateSpace: .global)
-                                .onChanged { _ in
+                                .onChanged { value in
                                     generationManager.isInteracting = true
-                                    // The @-reference panel replaces the keyboard while it's open,
-                                    // so .scrollDismissesKeyboard(.immediately) above has nothing
-                                    // to dismiss then. Mirror that exact behavior for the panel: a
-                                    // drag starting here (outside the composer, over the history)
-                                    // closes it right away, the same way it would drop the
-                                    // keyboard, and the composer settles back down as a result.
-                                    if showReferencePanel { dismissReferencePanelViaSwipe() }
+                                    // The inline @-mention list stays open only while the keyboard
+                                    // is up, so the keyboard-dismiss branch below (which flips
+                                    // promptFocused → false) also closes the list via
+                                    // onChange(of: promptFocused) — no separate teardown needed here.
+
+                                    // Keyboard dismiss: requires a deliberate downward swipe past
+                                    // keyboardDismissSwipeThreshold, not the near-instant trigger
+                                    // .scrollDismissesKeyboard(.immediately) had. Guarded by
+                                    // keyboardDismissTriggeredThisGesture so it fires exactly once
+                                    // per drag, not on every pixel past the threshold. promptFocused
+                                    // is set inside withAnimation so it's explicitly covered
+                                    // regardless of the composer's own .animation(value:) scope —
+                                    // see GenerateView.swift's promptFocused animation modifier and
+                                    // .planning/notes/keyboard-composer-architecture.md.
+                                    if promptFocused,
+                                       !keyboardDismissTriggeredThisGesture,
+                                       value.translation.height > keyboardDismissSwipeThreshold {
+                                        keyboardDismissTriggeredThisGesture = true
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500)) {
+                                            promptFocused = false
+                                        }
+                                    }
                                 }
-                                .onEnded { _ in generationManager.isInteracting = false }
+                                .onEnded { _ in
+                                    generationManager.isInteracting = false
+                                    keyboardDismissTriggeredThisGesture = false
+                                }
                         )
                     }
                 }
@@ -333,6 +433,15 @@ struct GenerateView: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
+                if showReferencePanel && !mentionSuggestions.isEmpty {
+                    // Inline @-mention suggestion list pinned above the composer, shown WHILE the
+                    // keyboard is up so typing "@name" filters mentionSuggestions live. Opacity-only
+                    // transition (not .move) so the ~220pt list can't slide down over the prompt bar
+                    // and swallow taps mid-animation. See showReferencePanel's declaration note.
+                    mentionSuggestionList
+                        .allowsHitTesting(showReferencePanel)
+                        .transition(.opacity)
+                }
                 if let msg = errorMessage {
                     Text(msg)
                         .font(.subheadline)
@@ -349,12 +458,24 @@ struct GenerateView: View {
                         .transition(.opacity)
                 }
                 promptBar
-                if showReferencePanel {
-                    referencePanel
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
             .frame(maxWidth: .infinity)
+            // Constant base padding only — SwiftUI's keyboard avoidance adds the keyboard lift on
+            // top (Config C). Focused: 6pt breathing room above the keyboard. Unfocused: 65pt to
+            // clear the custom tab bar. This is the FROZEN composer position — the @-mention list
+            // now lives ABOVE the composer (keyboard stays up), so the composer keeps its normal
+            // focused/unfocused padding whether or not the list is open. See
+            // .planning/notes/keyboard-composer-architecture.md.
+            //
+            // FIX (2026-07-12): this .padding() MUST stay BEFORE the two .animation(value:)
+            // modifiers below — SwiftUI's .animation(_, value:) only covers modifier changes that
+            // are already part of the view chain ABOVE it (source order = wrap order). With the
+            // animation modifiers written first and this padding after (the original bug), the
+            // padding change fell OUTSIDE both animations' scope and snapped instantly — measured
+            // via frame-by-frame screen-recording analysis at 1 frame (~16ms), zero interpolation,
+            // despite a correctly-tuned spring sitting right next to it. Do NOT move this padding
+            // back above the animation modifiers.
+            .padding(.bottom, promptFocused ? 6 : 65)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showReferencePanel)
             // MUST exactly match UIKit's keyboard animation curve (mass 3 / stiffness 1000 /
             // damping 500). The composer's dismiss motion is (keyboard lift → 0, system-timed)
@@ -363,11 +484,6 @@ struct GenerateView: View {
             // keyboard, so the composer dips below its resting spot and bounces back up at the
             // end of dismiss (tried 2026-07-06, reverted). Do not retune independently.
             .animation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500), value: promptFocused)
-            // Constant base padding only — SwiftUI's keyboard avoidance adds the keyboard lift on
-            // top (Config C). Focused: 6pt breathing room above the keyboard. Unfocused: 65pt to
-            // clear the custom tab bar. Panel open: flush above the safe area (panel has its own
-            // home-indicator padding). See .planning/notes/keyboard-composer-architecture.md.
-            .padding(.bottom, showReferencePanel ? 0 : (promptFocused ? 6 : 65))
             .background(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 40)
@@ -377,8 +493,10 @@ struct GenerateView: View {
             )
             // No dismiss-on-drag gesture here by design — swiping down anywhere inside the
             // composer (text box, paperclip column, divider gap, options row) must never dismiss
-            // the keyboard; only the history ScrollView's .scrollDismissesKeyboard(.immediately)
-            // (outside the composer) does that now. See .planning/notes/keyboard-composer-architecture.md.
+            // the keyboard; only the history ScrollView's threshold-gated drag gesture (outside
+            // the composer, see keyboardDismissSwipeThreshold) does that now (2026-07-12 — was
+            // .scrollDismissesKeyboard(.immediately) before the swipe-threshold/haptic fix). See
+            // .planning/notes/keyboard-composer-architecture.md.
         }
         .onChange(of: promptText) { old, new in
             // Atomic token deletion now happens inside HighlightingTextView's UITextView
@@ -397,55 +515,35 @@ struct GenerateView: View {
             if let match = Self.mentionTriggerRegex?.firstMatch(in: new, range: searchRange),
                let r = Range(match.range, in: new) {
                 let q = String(new[r].dropFirst())
+                // Keep the keyboard UP and surface the inline suggestion list above the composer.
+                // Because the keyboard stays up, every subsequent keystroke re-runs this handler and
+                // updates mentionQuery, so mentionSuggestions filters live as the user types "@name"
+                // (reverted from T8b's keyboard-dismiss bottom grid, 2026-07-13).
                 mentionQuery = q
                 if !showReferencePanel {
-                    // Dismiss the keyboard and slide up the reference panel below the composer,
-                    // mirroring the model-selector pill's presentation instead of an inline list
-                    // pinned above the composer (T8b). With the keyboard down the user can't type
-                    // further filter text, so mentionQuery stays "" and mentionSuggestions falls
-                    // back to defaultMentionSuggestions.
-                    promptFocused = false
                     Task { await mediaLibrary.load() }
-                    // Insert the panel only once the keyboard is FULLY down. Adding a 300pt
-                    // child to the keyboard-avoiding bottom safeAreaInset while the dismissal is
-                    // still animating races the collapsing geometry — when the race is lost the
-                    // inset renders in one place but hit-tests in another, freezing the whole
-                    // composer (can't type, X buttons dead). A single deferred runloop tick
-                    // (tried previously) does NOT guarantee the keyboard is down, only that
-                    // resignFirstResponder started; waiting for keyboardDidHide does. The
-                    // timeout covers hardware-keyboard / already-hidden cases where the
-                    // notification never fires. Does NOT change the composer's frozen
-                    // position/padding. See
-                    // .planning/notes/2026-07-06-reference-panel-cutoff-freeze-investigation.md.
-                    Task { @MainActor in
-                        await waitForKeyboardHidden(timeout: .milliseconds(500))
-                        guard mentionQuery != nil, !showReferencePanel else { return }
-                        // Start flush regardless of any leftover drag offset from a prior
-                        // swipe-dismiss, so the slide-in transition begins from y=0.
-                        referencePanelDragOffset = 0
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = true }
-                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = true }
                 }
-            } else if !showReferencePanel {
-                // Panel hide is explicit now (select/cancel) — with the keyboard down while the
-                // panel is open, this trigger regex can't stop matching from user typing anymore,
-                // so this branch only clears mentionQuery when the panel was never opened.
+            } else {
+                // Trigger no longer matches (user deleted the "@", typed a space, or moved the
+                // caret away): clear the query and hide the list. The keyboard was never touched,
+                // so there's no dismiss race to guard against here.
                 mentionQuery = nil
+                if showReferencePanel {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
+                }
             }
         }
         .onChange(of: promptFocused) { _, focused in
-            // Refocusing the composer while the @-reference panel is open (tapping straight
-            // back into the text view instead of using the panel's select/cancel actions) used
-            // to leave the panel "open" but buried under the keyboard — every subsequent "@"
-            // then couldn't reopen it, and the stranded 300pt panel read as a growing blank gap
-            // between the textbox and the keyboard. Treat refocus as cancel: drop the bare "@"
-            // trigger, clear the query, close the panel.
-            guard focused, showReferencePanel else { return }
-            if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
-                promptText.replaceSubrange(range, with: "")
-            }
+            // The inline suggestion list lives above the composer and only makes sense while the
+            // keyboard is up (that's what enables live "@name" filtering). When the keyboard is
+            // dismissed — background tap, swipe-to-dismiss over the history, etc. — close the list
+            // too. The typed "@query" is intentionally LEFT in the prompt so the user can refocus
+            // and keep going; a re-focus that still has "@…" before the caret re-triggers the
+            // onChange(of: promptText) handler above and reopens the list.
+            guard !focused, showReferencePanel else { return }
             mentionQuery = nil
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
         }
         .onChange(of: selectedPickerItem) { _, newItem in
             guard newItem != nil else { return }
@@ -554,15 +652,18 @@ struct GenerateView: View {
             )
         }
         // Swipe-to-delete confirmation (Issue 4) — shared by every SwipeToDeleteRow. The row
-        // stays revealed (isHeldOpen) while this is up — Messages pattern.
-        .confirmationDialog(
+        // stays revealed (isHeldOpen) while this is up — Messages pattern. Uses .alert (not
+        // .confirmationDialog): a 2-button alert lays Cancel/Delete side-by-side in a single compact
+        // centered box — wider + shorter than the action sheet's tall vertical button stack
+        // (2026-07-13 request).
+        .alert(
             confirmDeleteItem.map { $0.isImage ? "Delete this image?" : "Delete this video?" } ?? "Delete this video?",
             isPresented: Binding(
                 get: { confirmDeleteItem != nil },
                 set: { if !$0 { confirmDeleteItem = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
+            Button("Cancel", role: .cancel) { confirmDeleteItem = nil }
             Button("Delete", role: .destructive) {
                 if let item = confirmDeleteItem {
                     deletingItemIds.insert(item.id)
@@ -570,9 +671,28 @@ struct GenerateView: View {
                 }
                 confirmDeleteItem = nil
             }
-            Button("Cancel", role: .cancel) { confirmDeleteItem = nil }
         } message: {
             Text("This cannot be undone.")
+        }
+        // Reference-upload delete confirmation — the @-mention list's swipe-to-delete and
+        // long-press → Delete both route here. deleteLibraryItem already animates the removal and
+        // detaches the reference from the current draft. Same compact .alert shape as above.
+        .alert(
+            confirmDeleteReference.map { ($0.isVideo ? "Delete this video?" : "Delete this image?") } ?? "Delete this reference?",
+            isPresented: Binding(
+                get: { confirmDeleteReference != nil },
+                set: { if !$0 { confirmDeleteReference = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { confirmDeleteReference = nil }
+            Button("Delete", role: .destructive) {
+                if let item = confirmDeleteReference {
+                    Task { await deleteLibraryItem(item) }
+                }
+                confirmDeleteReference = nil
+            }
+        } message: {
+            Text("This removes it from your references. This cannot be undone.")
         }
     }
 
@@ -757,9 +877,9 @@ struct GenerateView: View {
             clearPrompt()
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(theme.textPrimary.opacity(0.85))
-                .frame(width: 20, height: 20)
+                .frame(width: 24, height: 24)
                 .background(theme.surface, in: Circle())
                 .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 0.5))
         }
@@ -866,7 +986,12 @@ struct GenerateView: View {
                             accentColor: UIColor(accent),
                             textColor: UIColor(theme.textPrimary),
                             tokenThumbnails: tokenThumbnails,
-                            onTokenDeleted: { inner in dereferenceToken(inner) }
+                            onTokenDeleted: { inner in dereferenceToken(inner) },
+                            // Inline @-mention autocomplete: gray ghost suffix of the top suggestion
+                            // drawn at the caret; Return commits it (instead of a newline). See
+                            // mentionGhostSuffix / acceptTopMentionCompletion.
+                            ghostText: mentionGhostSuffix,
+                            onAcceptCompletion: acceptTopMentionCompletion
                         )
                     }
                     .padding(.top, promptFirstLineTopInset)
@@ -880,10 +1005,10 @@ struct GenerateView: View {
                     // 11pt top padding above isn't clipped off the last line. Keeps the .topLeading
                     // placeholder fix intact.
                     .frame(height: max(44, promptTextHeight + promptFirstLineTopInset), alignment: .top)
-                    // leading 0 (was 4) moves the prompt text closer to the paperclip; trailing 2
-                    // (was 15, then 8, then 5) pushes the wrap/cutoff further right so text gets more width.
+                    // leading 0 (was 4) moves the prompt text closer to the paperclip; trailing -8
+                    // (was 15, then 8, then 5, then 2) pushes the wrap/cutoff further right so text gets more width.
                     .padding(.leading, 0)
-                    .padding(.trailing, 2)
+                    .padding(.trailing, -8)
                     // Placeholder+caret vertical position: smaller top padding = higher (was 16→10→4).
                     // Bottom 4 (was 14) shrinks the gap between the last text line and the divider.
                     // See .planning/notes/keyboard-composer-architecture.md.
@@ -897,7 +1022,9 @@ struct GenerateView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
 
                 // Submit + credit cost, stacked so the cost sits directly under the arrow.
-                VStack(alignment: .trailing, spacing: 6) {
+                // spacing 4 (was 6): compensates the arrow button's +2pt frame growth below so
+                // creditCostLabel's position is unchanged even though the button got bigger.
+                VStack(alignment: .trailing, spacing: 4) {
                     Button {
                         promptFocused = false
                         guard creditManager.entitlementLevel != .none else {
@@ -926,9 +1053,9 @@ struct GenerateView: View {
                         Task { await dispatchGeneration() }
                     } label: {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 34, height: 34)
                             .background(
                                 LinearGradient(
                                     colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
@@ -942,6 +1069,9 @@ struct GenerateView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isSubmitDisabled)
+                    // Nudges the button down a couple px without moving creditCostLabel below it
+                    // (offset is a render-time transform, doesn't consume VStack layout space).
+                    .offset(y: 2)
 
                     creditCostLabel
                         .offset(y: 3)
@@ -1121,179 +1251,126 @@ struct GenerateView: View {
         for r in attachedReferences {
             if r.isVideo { videoCount += 1 } else { imageCount += 1 }
             if r.id == ref.id {
-                return ref.isVideo ? "Video \(videoCount)" : "Image \(imageCount)"
+                return ref.isVideo ? "Video_\(videoCount)" : "Image_\(imageCount)"
             }
         }
         return ref.isVideo ? "Video" : "Image"
     }
 
-    // MARK: - @-reference panel (T8b: keyboard-height panel below the composer, replaces the
-    // old inline list pinned above it — same trigger, same commitMention/rename/delete actions,
-    // new presentation that mirrors the model-selector pill's keyboard-dismiss-and-slide-up feel)
-
-    private var referencePanel: some View {
+    // MARK: - @-mention inline suggestion list
+    // Pinned above the composer WITH THE KEYBOARD UP (see showReferencePanel's declaration note).
+    // A compact vertical list — not the T8b bottom thumbnail grid — so it fits between the top of
+    // the prompt box and the keyboard and reads naturally while the user keeps typing "@name" to
+    // filter. Tapping a row commits the token via commitMention and closes the list; the keyboard
+    // is never touched, so typing simply continues. Upload rows swipe left to delete (same
+    // SwipeToDeleteRow as the history cards) and long-press for rename/delete; a footer advertises
+    // both affordances.
+    private var mentionSuggestionList: some View {
         VStack(spacing: 0) {
-            // Grabber + title row double as the swipe-down-to-dismiss handle: the drag lives on
-            // this non-scrolling top region only (NOT the grid below) so dragging the finger over
-            // the thumbnail grid still scrolls it instead of dismissing the panel.
-            VStack(spacing: 0) {
-                Capsule()
-                    .fill(theme.textSecondary.opacity(0.35))
-                    .frame(width: 36, height: 5)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                HStack {
-                    Text("References")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.textPrimary)
-                    Spacer()
-                    Button {
-                        cancelReferencePanel()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(theme.textSecondary)
-                            .frame(width: 28, height: 28)
-                            .background(theme.surface, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 10)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        referencePanelDragOffset = max(0, value.translation.height)
-                    }
-                    .onEnded { value in
-                        if value.translation.height > 80 {
-                            dismissReferencePanelViaSwipe()
-                        } else {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                referencePanelDragOffset = 0
-                            }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if mediaLibrary.isLoading {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(theme.textSecondary)
+                            Text("Loading…")
+                                .font(.caption)
+                                .foregroundStyle(theme.textSecondary)
                         }
-                    }
-            )
-
-            if mediaLibrary.isLoading {
-                Spacer(minLength: 0)
-                ReferencePanelLoadingIndicator(textColor: theme.textSecondary)
-                Spacer(minLength: 0)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 14) {
+                        .padding()
+                    } else {
                         ForEach(mentionSuggestions, id: \.id) { candidate in
-                            Button {
-                                commitReferencePanelSelection(candidate)
-                            } label: {
-                                VStack(spacing: 6) {
-                                    libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 74)
-                                    Text(candidate.displayLabel(in: mediaLibrary.items))
-                                        .font(.caption2)
-                                        .foregroundStyle(candidate.hasCustomName ? theme.textPrimary : theme.textSecondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
+                            VStack(spacing: 0) {
                                 switch candidate {
                                 case .upload(let item):
-                                    Button("Rename") {
-                                        renamingItem = item
-                                        renameText = item.displayName ?? ""
-                                        mentionQuery = nil
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
+                                    // Swipe-left-to-delete, mirroring the generation cards but with
+                                    // a tighter reveal for the compact row. Held open while its
+                                    // confirmation alert is up (Messages pattern).
+                                    SwipeToDeleteRow(
+                                        onRequestDelete: { confirmDeleteReference = item },
+                                        isHeldOpen: confirmDeleteReference?.id == item.id,
+                                        cornerRadius: 10,
+                                        trailingInset: 0,
+                                        revealWidth: 96,
+                                        threshold: 64
+                                    ) {
+                                        mentionRow(candidate)
                                     }
-                                    Button("Delete", role: .destructive) {
-                                        mentionQuery = nil
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
-                                        Task { await deleteLibraryItem(item) }
-                                    }
-                                case .generation(let item):
-                                    Button("Name as reference") {
-                                        mentionQuery = nil
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
-                                        handleNameAsReference(item: item)
-                                    }
+                                case .generation:
+                                    mentionRow(candidate)
+                                }
+                                if candidate.id != mentionSuggestions.last?.id {
+                                    Divider().overlay(theme.divider)
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
                 }
             }
+            // Cap at ~3 rows (each row = 40pt thumbnail + 9pt×2 vertical padding ≈ 58pt), so the
+            // list shows exactly 3 assets before scrolling — was 220 (~3.7 rows). (2026-07-13)
+            .frame(maxHeight: 176)
+
+            // Discoverability: statically advertise the row gestures so users know they exist
+            // without having to find them by accident (2026-07-13 request). Hidden while loading /
+            // empty since there's nothing to act on.
+            if !mediaLibrary.isLoading, !mentionSuggestions.isEmpty {
+                Divider().overlay(theme.divider)
+                Text("Swipe to delete · Long press to rename")
+                    .font(.caption2)
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+            }
         }
-        // Constant, NOT measured: the panel sits above MainTabView's 90pt tab-bar safe-area
-        // inset, so the home indicator can never overlap it — and measuring
-        // safeAreaInsets.bottom here was poisoned by SwiftUI keyboard avoidance (inflates to
-        // keyboard height while the keyboard is up / mid-dismiss), which compressed the grid
-        // to a sliver inside this fixed 300pt frame. See
-        // .planning/notes/2026-07-06-reference-panel-cutoff-freeze-investigation.md.
-        .padding(.bottom, 24)
-        .frame(height: 300)
-        .frame(maxWidth: .infinity)
         .background(theme.elevatedBackground)
-        .clipShape(.rect(topLeadingRadius: 20, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 20))
-        .overlay(alignment: .top) {
-            Rectangle().fill(theme.divider).frame(height: 0.5)
-        }
-        // Render-only follow of the swipe-down drag; reset to 0 whenever the panel is dismissed
-        // so the next open starts flush. Does not affect the composer's layout above it.
-        .offset(y: referencePanelDragOffset)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+        .padding(.horizontal, 14)
     }
 
-    /// Cell tap: commits the token/reference (unchanged commitMention logic), closes the panel,
-    /// and refocuses the composer keyboard.
-    private func commitReferencePanelSelection(_ candidate: MentionCandidate) {
-        commitMention(candidate)
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
-        promptFocused = true
-    }
-
-    /// X button cancel: removes the typed "@" (bare trigger, no filter text since the keyboard was
-    /// down), closes the panel, and refocuses the composer keyboard (tap-target implies "keep typing").
-    private func cancelReferencePanel() {
-        if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
-            promptText.replaceSubrange(range, with: "")
-        }
-        mentionQuery = nil
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
-        promptFocused = true
-    }
-
-    /// Swipe-down-to-dismiss: same cleanup as cancelReferencePanel (drop the bare "@", close the
-    /// panel) but does NOT refocus — popping the keyboard back up on a downward dismissal gesture
-    /// reads as contradictory, so a swipe-away lands on the resting (unfocused) composer instead.
-    private func dismissReferencePanelViaSwipe() {
-        if let q = mentionQuery, let range = rangeOfActiveMention(query: q) {
-            promptText.replaceSubrange(range, with: "")
-        }
-        mentionQuery = nil
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { showReferencePanel = false }
-    }
-
-    /// Suspends until UIKit posts keyboardDidHide, or the timeout elapses (covers the
-    /// already-hidden / hardware-keyboard cases where the notification never fires). Used to
-    /// gate the @-reference panel's insertion so it never lands mid-dismiss-animation — see
-    /// the panel-open call site above for why that race froze the composer.
-    @MainActor
-    private func waitForKeyboardHidden(timeout: Duration) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { @MainActor in
-                for await _ in NotificationCenter.default.notifications(
-                    named: UIResponder.keyboardDidHideNotification
-                ) { break }
+    /// One tappable suggestion row (thumbnail + label). Opaque background so a leftward swipe
+    /// reveals the red delete pane only in the vacated strip, not through the row itself.
+    private func mentionRow(_ candidate: MentionCandidate) -> some View {
+        Button {
+            // commitMention replaces the "@query" run with the token, so the trigger regex stops
+            // matching and onChange(of: promptText) would hide the list on its own — we close it
+            // here immediately for snappiness.
+            commitMention(candidate)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
+        } label: {
+            HStack(spacing: 10) {
+                libraryItemThumbnail(cacheKey: candidate.id, isVideo: candidate.isVideo, url: candidate.thumbnailURL, size: 40)
+                Text(candidate.displayLabel(in: mediaLibrary.items))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(candidate.hasCustomName ? theme.textPrimary : theme.textSecondary)
+                    .lineLimit(1)
+                Spacer()
             }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(theme.elevatedBackground)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            switch candidate {
+            case .upload(let item):
+                Button("Rename") {
+                    renamingItem = item
+                    renameText = item.displayName ?? ""
+                    mentionQuery = nil
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
+                }
+                Button("Delete", role: .destructive) {
+                    confirmDeleteReference = item
+                }
+            case .generation(let item):
+                Button("Name as reference") {
+                    mentionQuery = nil
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showReferencePanel = false }
+                    handleNameAsReference(item: item)
+                }
             }
-            await group.next()
-            group.cancelAll()
         }
     }
 
@@ -1336,7 +1413,7 @@ struct GenerateView: View {
         var count = 0
         for lib in mediaLibrary.items {
             if lib.isVideo == item.isVideo { count += 1 }
-            if lib.id == item.id { return item.isVideo ? "Video \(count)" : "Image \(count)" }
+            if lib.id == item.id { return item.isVideo ? "Video_\(count)" : "Image_\(count)" }
         }
         return item.isVideo ? "Video" : "Image"
     }
@@ -2137,31 +2214,6 @@ struct GenerateView: View {
     }
 }
 
-/// References panel loading state. Appears fresh each time `mediaLibrary.isLoading` flips true
-/// (it's only in the view hierarchy while loading) and is torn down — cancelling its `.task` —
-/// the moment loading finishes, so the delay timer never leaks across load cycles. Most loads
-/// resolve via MediaLibraryManager's cache almost instantly; the "waking up" copy only appears
-/// if a real network fetch is still in flight after 1.5s, i.e. the rare case where the Railway
-/// backend cold-started (see FantasiaApp's keep-warm ping, which is the primary mitigation).
-private struct ReferencePanelLoadingIndicator: View {
-    let textColor: Color
-    @State private var isSlow = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView().tint(textColor)
-            Text(isSlow ? "Waking up the server — almost there…" : "Loading…")
-                .font(.caption)
-                .foregroundStyle(textColor)
-        }
-        .task {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            isSlow = true
-        }
-    }
-}
-
 // MARK: - SwipeToDeleteRow
 
 /// Standard iOS drag-to-delete for a plain VStack-in-ScrollView (no free .swipeActions here).
@@ -2174,6 +2226,12 @@ private struct ReferencePanelLoadingIndicator: View {
 private struct SwipeToDeleteRow<Content: View>: View {
     var onRequestDelete: () -> Void
     var isHeldOpen: Bool = false
+    // Styling knobs so the same swipe interaction fits both the large generation cards (defaults)
+    // and the compact @-mention reference rows (smaller reveal, tighter corner, no trailing inset).
+    var cornerRadius: CGFloat = 16
+    var trailingInset: CGFloat = 16
+    var revealWidth: CGFloat = 130
+    var threshold: CGFloat = 90
     @ViewBuilder var content: () -> Content
 
     // ⚠️ Fast-flick-from-rest fix (2026-07-06): the swipe is driven by a UIKit
@@ -2197,8 +2255,8 @@ private struct SwipeToDeleteRow<Content: View>: View {
     // See .planning/notes/2026-07-06-generate-fast-swipe-investigation.md.
     @State private var dragWidth: CGFloat = 0
 
-    private let deleteThreshold: CGFloat = 90   // release past this = ask to delete
-    private let maxReveal: CGFloat = 130
+    private var deleteThreshold: CGFloat { threshold }   // release past this = ask to delete
+    private var maxReveal: CGFloat { revealWidth }
 
     // Leftward only, rubber-banding past maxReveal instead of tracking the finger 1:1.
     // While a confirmation is up for this row (isHeldOpen), stay parked at full reveal
@@ -2218,7 +2276,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isHeldOpen)
             .background(alignment: .trailing) {
                 if offset < 0 {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: cornerRadius)
                         .fill(Color.red.opacity(isPastThreshold ? 1.0 : 0.85))
                         .overlay {
                             Image(systemName: "trash.fill")
@@ -2227,11 +2285,11 @@ private struct SwipeToDeleteRow<Content: View>: View {
                                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPastThreshold)
                                 .opacity(min(1, -offset / 60))
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
                         .frame(width: -offset)
-                        // Match GenerationCardView's own 16pt horizontal inset so the pane
-                        // aligns with the card face, not the row edge.
-                        .padding(.trailing, 16)
+                        // Aligns the pane with the content face (GenerationCardView has its own 16pt
+                        // inset; the flat mention rows pass 0).
+                        .padding(.trailing, trailingInset)
                 }
             }
             .sensoryFeedback(.impact(weight: .medium), trigger: isPastThreshold) { _, crossed in crossed }
@@ -2360,7 +2418,7 @@ private enum MentionCandidate: Identifiable {
             var count = 0
             for lib in mediaLibraryItems {
                 if lib.isVideo == item.isVideo { count += 1 }
-                if lib.id == item.id { return item.isVideo ? "Video \(count)" : "Image \(count)" }
+                if lib.id == item.id { return item.isVideo ? "Video_\(count)" : "Image_\(count)" }
             }
             return item.isVideo ? "Video" : "Image"
         case .generation:

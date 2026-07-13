@@ -26,7 +26,7 @@ struct NameAsReferenceAlertModifier: ViewModifier {
                 Button("Save") { save() }
                 Button("Cancel", role: .cancel) { dismiss() }
             } message: {
-                Text("Use [name] in prompts to reference this media.")
+                Text("Use @name in prompts to reference this media.")
             }
             .alert("Couldn't Save Reference", isPresented: Binding(
                 get: { errorMessage != nil },

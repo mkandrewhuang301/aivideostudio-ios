@@ -43,9 +43,9 @@ struct GenerationDetailSheet: View {
     @State private var editSourceURLString: String?
     @State private var showMaskEditor = false
 
-    // D-4 (09.2-10 Task 3): preset Remix/Regen fork — mirrors GenerationCardView's own
+    // D-4 (09.2-10 Task 3): preset Remix fork — mirrors GenerationCardView's own
     // presetRegistry/presetForRemix/remixPrefillSlots/matchedPreset exactly, so a preset row's
-    // Remix/Regen here reopens the prefilled PresetInputSheet instead of dumping the user into
+    // Remix here reopens the prefilled PresetInputSheet instead of dumping the user into
     // the freeform composer with a blank prompt (the backend nulls item.prompt on preset rows —
     // the 9.1 gap left by 09.1-08, which only forked GenerationCardView's own Remix action).
     @State private var presetRegistry = PresetRegistryManager()
@@ -169,12 +169,20 @@ struct GenerationDetailSheet: View {
                         // showDivider: false so no line dangles after the final row.
                         let hasCredits = item.costCredits > 0
                         VStack(alignment: .leading, spacing: 0) {
-                            paramRow("Model", value: ModelCatalog.displayName(for: item.model))
+                            // Preset rows are branded, not model-exposed — the underlying model is
+                            // an implementation detail (and the backend nulls it for presets, D-G).
+                            // Show the preset's own title instead of the raw model name.
+                            if item.isPreset {
+                                paramRow("Preset", value: matchedPreset?.title ?? "Preset")
+                            } else {
+                                paramRow("Model", value: ModelCatalog.displayName(for: item.model))
+                            }
                             if item.isImage {
+                                // Aspect ratio removed from the image pullup (2026-07-11) — not
+                                // meaningful for faceswap/preset output, which matches the input.
                                 if let w = item.params.width, let h = item.params.height {
-                                    paramRow("Resolution", value: "\(w) × \(h)")
+                                    paramRow("Resolution", value: "\(w) × \(h)", showDivider: hasCredits)
                                 }
-                                paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—", showDivider: hasCredits)
                             } else {
                                 paramRow("Resolution", value: item.params.resolution ?? "—")
                                 paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
@@ -198,13 +206,10 @@ struct GenerationDetailSheet: View {
                     // Actions
                     if item.status == .completed {
                         VStack(spacing: 14) {
-                            // Remix + Regenerate + Reference (+ Animate for images) + Favorite row
-                            HStack(spacing: 20) {
+                            // Remix + Reference (+ Animate for images) + (Edit for images) + Favorite row
+                            HStack(spacing: 10) {
                                 circleActionButton("arrow.2.squarepath", "Remix") {
                                     handleRemix()
-                                }
-                                circleActionButton("arrow.clockwise", "Regen") {
-                                    handleRegenerate()
                                 }
                                 circleActionButton("paperclip", "Reference") {
                                     handleReference()
@@ -309,7 +314,7 @@ struct GenerationDetailSheet: View {
                                 Task { await reportGeneration() }
                             } label: {
                                 HStack(spacing: 5) {
-                                    Image(systemName: "flag.fill")               // filled reads as a clearer signal at caption2
+                                    Image(systemName: "flag")                    // outline (not filled inside) — red tint only
                                         .font(.caption2)
                                         .foregroundStyle(Color(red: 0.90, green: 0.26, blue: 0.24))   // report red
                                     Text(isReporting ? "Reported" : "Report an issue").font(.caption)
@@ -356,7 +361,13 @@ struct GenerationDetailSheet: View {
                     .environment(theme)
             }
         }
-        // D-4 (09.2-10 Task 3): preset Remix/Regen reopens PresetInputSheet prefilled from this
+        // When Magic Editor (or any in-sheet submit) fires a generation, close this detail sheet so
+        // the user lands on the Generate feed's loading card (MainTabView switches to tab 1 on the
+        // same notification). Mirrors handleRemix()'s `isPresented = false`.
+        .onReceive(NotificationCenter.default.publisher(for: .generationSubmitted)) { _ in
+            isPresented = false
+        }
+        // D-4 (09.2-10 Task 3): preset Remix reopens PresetInputSheet prefilled from this
         // row's stored preset_input_upload_ids — never the composer. Mirrors GenerationCardView's
         // own `.sheet(item: $presetForRemix)` exactly (same prefill contract).
         .sheet(item: $presetForRemix) { preset in
@@ -422,15 +433,17 @@ struct GenerationDetailSheet: View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(theme.textPrimary)
-                    .frame(width: 54, height: 54)
+                    .frame(width: 46, height: 46)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 0.5))
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
         }
@@ -452,20 +465,7 @@ struct GenerationDetailSheet: View {
         isPresented = false
     }
 
-    private func handleRegenerate() {
-        // D-4: same preset fork as handleRemix() above — Regen on a preset row also reopens the
-        // prefilled PresetInputSheet, not the composer.
-        if item.isPreset, matchedPreset != nil {
-            presentPresetRemixSheet()
-            return
-        }
-        // Pre-fill Generate tab with same settings; user can submit immediately or tweak
-        generationManager.pendingRemix = item
-        NotificationCenter.default.post(name: .remixGenerationRequested, object: nil)
-        isPresented = false
-    }
-
-    // MARK: - Preset Remix/Regen fork (D-4, 09.2-10 Task 3)
+    // MARK: - Preset Remix fork (D-4, 09.2-10 Task 3)
     // Re-signs this row's stored preset_input_upload_ids against the shared MediaLibraryManager
     // cache — same re-signing routine as GenerationCardView.presentPresetRemixSheet(), since
     // presigned URLs rotate per fetch (documented project landmine) and can't be trusted stale.

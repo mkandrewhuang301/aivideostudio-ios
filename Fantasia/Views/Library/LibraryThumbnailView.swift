@@ -17,6 +17,10 @@ struct LibraryThumbnailView: View {
     @State private var thumbnail: UIImage? = nil
     @State private var cachedImage: UIImage? = nil
     @State private var isMediaPreviewActive = false  // hides the tile while the long-press lift is on screen (no duplicate)
+    // T12 follow-up: confirmation now lives per-cell (was a single shared @State on the whole
+    // LibraryView ZStack), so the dialog is actually anchored to the pressed tile instead of
+    // appearing at an unrelated position on screen.
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         // scaledToFill makes the thumbnail's LAYOUT FRAME larger than the cell (clipShape/
@@ -84,7 +88,7 @@ struct LibraryThumbnailView: View {
                                 onNameAsReference()
                             },
                             UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
-                                onRequestDelete()
+                                showDeleteConfirm = true
                             }
                         ])
                     },
@@ -104,6 +108,18 @@ struct LibraryThumbnailView: View {
                 if item.isImage, cachedImage == nil {
                     loadCachedImage()
                 }
+            }
+            // T12 follow-up: anchored to this cell (not a whole-screen shared @State), so the
+            // dialog presents right where the tile is instead of at an unrelated position.
+            .confirmationDialog(
+                item.isImage ? "Delete this image?" : "Delete this video?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { onRequestDelete() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This cannot be undone.")
             }
     }
 

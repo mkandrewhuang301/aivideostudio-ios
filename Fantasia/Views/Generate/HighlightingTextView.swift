@@ -36,8 +36,17 @@ struct HighlightingTextView: UIViewRepresentable {
     /// removed a whole [token] — see Coordinator.textView(_:shouldChangeTextIn:replacementText:).
     var onTokenDeleted: ((String) -> Void)?
 
+    /// Inline @-mention autocomplete. `ghostText` is the gray suffix drawn at the caret (the
+    /// remainder of the top suggestion's name); empty = no completion showing. It is drawn as a
+    /// SEPARATE overlay label — never inserted into the text storage — so the model text, caret,
+    /// and token-pill machinery are completely untouched by it. `onAcceptCompletion` fires when the
+    /// user presses Return while a ghost is showing (the newline is swallowed in that case only).
+    var ghostText: String = ""
+    var onAcceptCompletion: (() -> Void)?
+
     private static let bracketTokenRegex = try? NSRegularExpression(pattern: #"\[[^\]]+\]"#)
     private static let pillCache = NSCache<NSString, UIImage>()
+    private static let ghostLabelTag = 918_274
 
     func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
@@ -129,6 +138,7 @@ struct HighlightingTextView: UIViewRepresentable {
             uiView.resignFirstResponder()
         }
         recalcHeight(uiView)
+        updateGhostLabel(uiView)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -376,6 +386,50 @@ struct HighlightingTextView: UIViewRepresentable {
         tv.bringSubviewToFront(indicator)
     }
 
+    // MARK: - Ghost completion label (inline @-mention autocomplete)
+
+    /// Gray suffix drawn immediately after the caret. A tagged subview (like the scroll indicator)
+    /// rather than a stored property, since this struct is recreated on every body pass — the
+    /// UITextView and its subviews are what persist. Purely additive: it never touches the text
+    /// storage, so the model/caret/token logic is unaffected.
+    private func ghostLabelView(for tv: UITextView, create: Bool) -> UILabel? {
+        if let existing = tv.viewWithTag(Self.ghostLabelTag) as? UILabel { return existing }
+        guard create else { return nil }
+        let label = UILabel()
+        label.tag = Self.ghostLabelTag
+        label.isUserInteractionEnabled = false   // taps fall through to the text view / caret
+        label.backgroundColor = .clear
+        tv.addSubview(label)
+        return label
+    }
+
+    fileprivate func updateGhostLabel(_ tv: UITextView) {
+        // Only while focused with an active suffix and a collapsed caret (no selection) — a ghost
+        // dangling off a range-selection or an unfocused field reads as stray text.
+        let show = !ghostText.isEmpty
+            && tv.isFirstResponder
+            && (tv.selectedTextRange?.isEmpty ?? false)
+        guard let label = ghostLabelView(for: tv, create: show) else { return }
+        label.isHidden = !show
+        guard show, let caretPosition = tv.selectedTextRange?.end else { return }
+
+        label.text = ghostText
+        label.font = font
+        label.textColor = textColor.withAlphaComponent(0.32)
+        label.sizeToFit()
+
+        // caretRect is in the text view's own coordinate space (scrolls with content, like the
+        // caret itself), so a subview placed there stays glued to the caret when the field scrolls.
+        let caret = tv.caretRect(for: caretPosition)
+        label.frame = CGRect(
+            x: caret.maxX,
+            y: caret.minY + (caret.height - label.frame.height) / 2,
+            width: min(label.frame.width, max(0, tv.bounds.width - caret.maxX)),
+            height: label.frame.height
+        )
+        tv.bringSubviewToFront(label)
+    }
+
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: HighlightingTextView
         var lastAppliedTextColor: UIColor?
@@ -408,6 +462,13 @@ struct HighlightingTextView: UIViewRepresentable {
         // This just detects which attachment(s) are about to be removed; onTokenDeleted itself
         // fires later, from textViewDidChange (see pendingDeletedTokens doc comment).
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // Return accepts an active ghost completion instead of inserting a newline — but ONLY
+            // while a ghost is actually showing. With no completion up, Return stays a normal
+            // newline, so multi-line prompts are unaffected.
+            if text == "\n", !parent.ghostText.isEmpty, let accept = parent.onAcceptCompletion {
+                accept()
+                return false
+            }
             guard range.length > 0, let attributed = textView.attributedText, attributed.length > 0 else { return true }
             let clamped = NSRange(location: range.location, length: min(range.length, attributed.length - range.location))
             guard clamped.length > 0 else { return true }
@@ -443,6 +504,10 @@ struct HighlightingTextView: UIViewRepresentable {
                 pendingDeletedTokens.removeAll()
                 for inner in deleted { parent.onTokenDeleted?(inner) }
             }
+            // Reposition the ghost after the caret has settled from this keystroke. `parent.ghostText`
+            // itself is refreshed by SwiftUI (new suffix for the new query) via updateUIView, which
+            // also calls updateGhostLabel; this keeps it glued to the caret between those passes.
+            parent.updateGhostLabel(textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -451,6 +516,7 @@ struct HighlightingTextView: UIViewRepresentable {
             parent.selectedRange = HighlightingTextView.modelRange(forDisplayRange: textView.selectedRange, tokens: tokens)
             scrollSelectionIntoView(textView, previousRange: lastDisplayRange)
             lastDisplayRange = textView.selectedRange
+            parent.updateGhostLabel(textView)
         }
 
         // UITextViewDelegate inherits UIScrollViewDelegate — used here purely to keep the custom
@@ -459,6 +525,7 @@ struct HighlightingTextView: UIViewRepresentable {
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let textView = scrollView as? UITextView else { return }
             parent.updateScrollIndicator(textView)
+            parent.updateGhostLabel(textView)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
