@@ -171,6 +171,8 @@ struct CreditStoreView: View {
                             ForEach(packs) { pack in
                                 packCard(pack)
                             }
+                            termsLinksRow
+                                .padding(.top, 6)
                         }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 32)
@@ -202,6 +204,21 @@ struct CreditStoreView: View {
             .tracking(monoTracking)
             .foregroundStyle(.primary)
             .lineSpacing(0)
+    }
+
+    // Credit top-ups are a real IAP purchase point, same class as PaywallView — mirrors its
+    // Terms/Privacy link row exactly (2026-07-13, this screen previously had neither).
+    private var termsLinksRow: some View {
+        HStack(spacing: 4) {
+            Link("Terms of Service",
+                 destination: URL(string: "https://fantasiaai.app/terms")!)
+            Text("·").foregroundStyle(.secondary)
+            Link("Privacy Policy",
+                 destination: URL(string: "https://fantasiaai.app/privacy")!)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Skeleton

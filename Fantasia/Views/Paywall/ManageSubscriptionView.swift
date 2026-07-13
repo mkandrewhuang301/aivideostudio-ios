@@ -70,6 +70,7 @@ struct ManageSubscriptionView: View {
                         }
 
                         appStoreLink
+                        termsLinksRow
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
@@ -258,6 +259,23 @@ struct ManageSubscriptionView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
+    }
+
+    // This screen lets users directly purchase/switch subscription plans — a real purchase
+    // point, same class as PaywallView — mirrors its Terms/Privacy link row exactly (2026-07-13,
+    // this screen previously had neither).
+    private var termsLinksRow: some View {
+        HStack(spacing: 4) {
+            Link("Terms of Service",
+                 destination: URL(string: "https://fantasiaai.app/terms")!)
+            Text("·").foregroundStyle(.secondary)
+            Link("Privacy Policy",
+                 destination: URL(string: "https://fantasiaai.app/privacy")!)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
     // MARK: - Actions

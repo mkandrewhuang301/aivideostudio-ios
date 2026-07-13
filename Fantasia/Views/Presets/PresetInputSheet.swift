@@ -55,12 +55,15 @@ struct PresetInputSheet: View {
     // from the uploaded photo (deliberate: see 2026-07-07 notes/
     // hairstyle-preset-style-images-gender-filter.md). Defaults to showing every style.
     @State private var styleGenderFilter: PresetStyleGenderTag?
+    // Small scroll-position indicator below the style grid (2026-07-12, user-requested) — only
+    // meaningful when the grid is the horizontal-scrolling >6-style layout.
+    @State private var styleScrollMetrics = StyleScrollMetrics()
+    // Drives the sliding underline beneath the active All/Feminine/Masculine tab (2026-07-12,
+    // user-chosen "Option B" from a 3-way design comparison — TikTok/Instagram-style underline
+    // tabs instead of a filled pill or a native segmented control).
+    @Namespace private var genderTabNamespace
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    // Likeness consent for the upload-driven face presets (Motion Transfer / AI Influencer). These
-    // animate an uploaded face, so we require the user to affirm they have the rights to it before
-    // submitting — pairs with the server-side celebrity-likeness block (celebrityCheckMiddleware).
-    @State private var consentAccepted = false
     // Aspect-ratio chip selection (only rendered when `preset.sheet?.aspectRatios` is non-empty —
     // GPT-Image-2 presets). Seeded from `sheet.defaultAspectRatio` in `init`; nil for every other
     // preset, which instead shows a fixed, non-interactive aspect/length/resolution caption.
@@ -98,6 +101,16 @@ struct PresetInputSheet: View {
     // Motion Transfer 30s confirm-trim (D-16/D-17/D-18).
     @State private var pendingTrim: PendingVideoTrim?
 
+    // AI Influencer Standard/Pro quality tier (2026-07-12, UI-only pass — see memory
+    // project_ai_influencer_premium_tier.md). Standard dispatches the existing single-call Wan
+    // 2.2 Animate Replace, unchanged. Pro is the placeholder for the future 3-step compositing
+    // pipeline (frame extract -> Wan 2.7 composite -> Kling v3 Motion Control) — NOT wired to any
+    // backend behavior yet; selecting it does not change what gets dispatched or billed. Scoped
+    // to preset_id == "ai-influencer" only (isAIInfluencerPreset below) — Marlon Motion Transfer
+    // (09.6 D-03) is deliberately single-shot-only and must never show this control.
+    @State private var qualityTier: AIInfluencerQuality = .standard
+    @Namespace private var qualityTabNamespace
+
     /// - Parameters:
     ///   - preset: the registry row to render.
     ///   - prefillSlots: existing upload ids/urls/thumbnails to preload per slot index — used by
@@ -125,6 +138,7 @@ struct PresetInputSheet: View {
                     VStack(alignment: .leading, spacing: 26) {
                         headerSection
                         slotsSection
+                        qualityTierSection
                         textSection
                         styleGridSection
                         aspectRatioSection
@@ -145,9 +159,6 @@ struct PresetInputSheet: View {
 
             VStack(spacing: 10) {
                 Spacer()
-                if requiresLikenessConsent {
-                    consentRow
-                }
                 generateBar
             }
         }
@@ -212,11 +223,12 @@ struct PresetInputSheet: View {
             pendingGenerationPick = nil
         }) {
             sourceChooserSheet
-                // Bumped 2026-07-12 alongside the rows/strip growing larger (54/44pt badges,
-                // 80pt strip thumbnails vs. the previous 46/36 and 64).
+                // Bumped 2026-07-12 alongside the rows/strip growing larger — all 3 badges now
+                // 54pt (was 54/44 split), strip thumbnails 100pt (was 80pt, previously 64pt), plus
+                // the extra top padding + row spacing + bigger "Recent" label added afterward.
                 .presentationDetents([.height(recentMatchingGenerations.isEmpty
-                    ? (UIImagePickerController.isSourceTypeAvailable(.camera) ? 400 : 340)
-                    : (UIImagePickerController.isSourceTypeAvailable(.camera) ? 520 : 460))])
+                    ? (UIImagePickerController.isSourceTypeAvailable(.camera) ? 440 : 370)
+                    : (UIImagePickerController.isSourceTypeAvailable(.camera) ? 580 : 510))])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(theme.background)
         }
@@ -278,9 +290,13 @@ struct PresetInputSheet: View {
         Button {
             dismiss()
         } label: {
-            // 2026-07-12 (user-requested): visible circle grown 32x32 → 40x40, with a comfortably
-            // larger 46x46 tap frame around it (was previously untouched — no separate hit-target
-            // expansion existed at this commit).
+            // 2026-07-12 (user-reported): the visible circle was 32x32, under Apple's 44pt
+            // minimum tap target — grown to 40x40 (2026-07-12, user-requested "make the X bigger
+            // too"). A tap slightly off the circle fell through the surrounding HStack's
+            // untappable Spacer to whatever scroll content was underneath — after scrolling, that's
+            // often the large upload-media tile, which is why tapping "near" X sometimes triggered
+            // an upload picker instead of dismissing. The real hit area is 46x46 via the outer
+            // frame + explicit contentShape, still comfortably over the visible circle.
             Image(systemName: "xmark")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
@@ -373,6 +389,81 @@ struct PresetInputSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: - Quality tier (AI Influencer Standard/Pro, UI-only pass)
+
+    private enum AIInfluencerQuality {
+        case standard, pro
+    }
+
+    private var isAIInfluencerPreset: Bool {
+        preset.presetId == "ai-influencer"
+    }
+
+    /// Centered eyebrow + segmented toggle + one-line caption — deliberately its own centered
+    /// block rather than a left-aligned "Quality" label + content row like Style/Aspect ratio
+    /// below, per the locked comparison (segmented control beat a pill+sheet and side-by-side
+    /// tier cards). No cost shown here — the Generate bar's live credit count is the only place
+    /// cost ever appears (matches MaskEditorView's existing convention elsewhere in the app).
+    @ViewBuilder
+    private var qualityTierSection: some View {
+        if isAIInfluencerPreset {
+            VStack(spacing: 10) {
+                Text("QUALITY")
+                    .font(.system(size: 11, weight: .heavy))
+                    .tracking(1.1)
+                    .foregroundStyle(theme.textTertiary)
+
+                qualitySegmentedControl
+                    .frame(width: 280)
+
+                Text(qualityTier == .standard
+                     ? "Quick swap — same motion and background, delivered fast."
+                     : "An extra compositing pass for a natural, camera-real look.")
+                    .font(.caption)
+                    .foregroundStyle(theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 280)
+                    .contentTransition(.opacity)
+                    .id(qualityTier == .standard ? "std-caption" : "pro-caption")
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var qualitySegmentedControl: some View {
+        HStack(spacing: 0) {
+            qualitySegment(.standard, label: "Standard")
+            qualitySegment(.pro, label: "Pro")
+        }
+        .padding(3)
+        .background(theme.surface, in: Capsule())
+        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
+    }
+
+    /// Deliberately no sparkle/crown icon on the Pro segment — the brand-gradient fill (the same
+    /// gradient the Generate button itself uses) is the only "premium" signal, borrowing Apple's
+    /// own plain-typographic Pro convention rather than the generic AI-app "unlock ✨" pattern.
+    private func qualitySegment(_ tier: AIInfluencerQuality, label: String) -> some View {
+        let isSelected = qualityTier == tier
+        return Button {
+            withAnimation(.snappy(duration: 0.22)) { qualityTier = tier }
+        } label: {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? .white : theme.textSecondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(tier == .pro ? AnyShapeStyle(LinearGradient.brandPrimary) : AnyShapeStyle(theme.surfaceStrong))
+                            .matchedGeometryEffect(id: "qualitySelection", in: qualityTabNamespace)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
     }
 
     private func slotLabel(_ slot: PresetSlot, index: Int) -> some View {
@@ -550,22 +641,26 @@ struct PresetInputSheet: View {
     //     same as "Take Photo"), no separate screen for the common case. "See All" at the strip's
     //     end opens the full GenerationPickerSheet grid for anything further back.
     //  2. The 3 rows themselves adopt Variant D's treatment: single-hue (purple only) layered
-    //     badges instead of 3 unrelated flat-tint colors, and one deliberate size/weight
-    //     asymmetry (Photo Library — most-used — is a larger "primary" row with an elevated
-    //     background; Take Photo/Choose File are smaller "secondary" rows, no elevated fill).
-    //     This is what the sketch's research flagged as the fix for the "reads as AI-generated
-    //     template" look a uniform 3-equal-rows list has.
+    //     badges instead of 3 unrelated flat-tint colors. Badge size is uniform across all 3 rows
+    //     (2026-07-12, user-requested — an earlier 54/44 primary/secondary size split read as
+    //     Take Photo/Choose File being undersized); Photo Library keeps a lighter "primary" weight
+    //     via its elevated background + bolder label only, not a bigger icon.
     private var sourceChooserSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add media")
                 .font(.headline)
                 .foregroundStyle(theme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 20)
+                // 2026-07-12 (user-requested "move the entire ... z stack down a couple pixels"):
+                // bumped 20 -> 26 — pushes the whole title+strip+rows block down together since
+                // this is the top padding of the VStack's first child.
+                .padding(.top, 26)
 
             recentGenerationsStrip
 
-            VStack(spacing: 8) {
+            // 2026-07-12 (user-requested "one more pixel ... between the space" of the 3 rows):
+            // bumped 8 -> 10.
+            VStack(spacing: 10) {
                 sourceRow(
                     icon: "photo.on.rectangle.fill",
                     label: "Photo Library",
@@ -607,8 +702,11 @@ struct PresetInputSheet: View {
     private var recentGenerationsStrip: some View {
         if !recentMatchingGenerations.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
+                // 2026-07-12 (user-requested "make the word recent a little bit bigger"): bumped
+                // from .caption to .subheadline, matching this sheet's other section headers (e.g.
+                // "Style").
                 Text("Recent")
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(theme.textTertiary)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -623,6 +721,8 @@ struct PresetInputSheet: View {
         }
     }
 
+    // 2026-07-12 (user-requested "make the pictures a little bigger"): strip thumbnails grown
+    // 80 -> 100pt; seeAllTile matches so the row stays evenly sized.
     private func stripThumbnail(_ item: GenerationItem) -> some View {
         Button {
             // Same one-tap-and-dismiss behavior as the 3 rows below — no extra confirmation step.
@@ -636,7 +736,7 @@ struct PresetInputSheet: View {
                     CachedVideoFrameThumbnail(cacheKey: "addmedia-strip-\(item.id)", videoURL: url)
                 }
             }
-            .frame(width: 80, height: 80)
+            .frame(width: 100, height: 100)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
         }
@@ -655,7 +755,7 @@ struct PresetInputSheet: View {
                     .font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(theme.textSecondary)
-            .frame(width: 80, height: 80)
+            .frame(width: 100, height: 100)
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
         }
@@ -693,20 +793,18 @@ struct PresetInputSheet: View {
         .buttonStyle(PressableButtonStyle())
     }
 
-    // 2026-07-12 (user-requested): moved away from the single-hue purple "hierarchical" badge
-    // (sketch Variant D's original treatment) back to distinct, recognizable colors per source —
-    // user's own words: "SVGs instead of these generic purple icons." True SVG/vector app-icon
-    // assets aren't something to embed here (Apple's real Photos/Camera/Files icons are their own
-    // trademarked artwork, not available to bundle) — this instead gives each row its own
-    // deliberate, distinct system color evoking the matching real app (blue ~ Photos, orange ~
-    // Camera, green ~ Files), which is what actually reads as "distinct icons" rather than "one
-    // generic tint" — while keeping the layered-gradient depth touch (not a flat single-tone
-    // fill) since that part of the sketch's research still holds regardless of hue count.
-    // Icons switched to the FILLED SF Symbol variant (2026-07-12, user-requested "actual Apple
-    // development icons" — SF Symbols IS Apple's official development icon set; the filled/solid
-    // variants read closer to real system-app-icon boldness than the thin outline glyphs did).
+    // Distinct, recognizable colors per source (blue ~ Photos, orange ~ Camera, green ~ Files) —
+    // Apple's real Photos/Camera/Files icons are their own trademarked artwork, not available to
+    // bundle, so this uses SF Symbols (Apple's own icon set) in each app's evocative hue instead.
+    // 2026-07-12 (user-requested "make Take Photo/Choose File a little bigger too so all three are
+    // the same size"): badge size is now uniform across all 3 rows — Photo Library's remaining
+    // "primary" treatment is its elevated .ultraThinMaterial background + bolder label only.
+    // 2026-07-12 (user-requested "generic-looking icons... Apple developer icons"): dropped the
+    // radial-gradient/shine-overlay/shadow treatment for a flat, single-tone fill — closer to how
+    // native iOS icons (e.g. Settings rows) are actually drawn, rather than a glossy app-icon-style
+    // badge.
     private func sourceBadge(icon: String, isPrimary: Bool) -> some View {
-        let size: CGFloat = isPrimary ? 54 : 44
+        let size: CGFloat = 54
         let hue: Color = {
             switch icon {
             case "photo.on.rectangle.fill": return Color(red: 0.04, green: 0.52, blue: 1.0)   // Photos-like blue
@@ -715,21 +813,7 @@ struct PresetInputSheet: View {
             }
         }()
         return RoundedRectangle(cornerRadius: size * 0.28)
-            .fill(
-                RadialGradient(
-                    colors: [hue.opacity(0.95), hue.opacity(0.85), hue.opacity(0.55)],
-                    center: UnitPoint(x: 0.34, y: 0.28),
-                    startRadius: 0,
-                    endRadius: size * 0.75
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: size * 0.28)
-                    .strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.3), .clear], startPoint: .topLeading, endPoint: .center),
-                        lineWidth: 1
-                    )
-            )
+            .fill(hue)
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: icon)
@@ -789,88 +873,143 @@ struct PresetInputSheet: View {
                     .foregroundStyle(theme.textPrimary)
 
                 if !availableGenderFilters.isEmpty {
-                    HStack(spacing: 8) {
-                        genderFilterChip(label: "All", isSelected: styleGenderFilter == nil) {
-                            styleGenderFilter = nil
+                    HStack(spacing: 22) {
+                        genderFilterTab(label: "All", isSelected: styleGenderFilter == nil) {
+                            withAnimation(.easeOut(duration: 0.22)) { styleGenderFilter = nil }
                         }
                         ForEach(availableGenderFilters, id: \.self) { tag in
-                            genderFilterChip(label: tag == .feminine ? "Feminine" : "Masculine", isSelected: styleGenderFilter == tag) {
-                                styleGenderFilter = tag
+                            genderFilterTab(label: tag == .feminine ? "Feminine" : "Masculine", isSelected: styleGenderFilter == tag) {
+                                withAnimation(.easeOut(duration: 0.22)) { styleGenderFilter = tag }
                             }
                         }
+                        Spacer(minLength: 0)
                     }
                 }
 
                 let visibleStyles = filteredStyles(styles)
-                if visibleStyles.count > 6 {
-                    // Two fixed rows, horizontal scroll — compact when a category has many
-                    // styles (hairstyle has 12; user-requested 2026-07-08).
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHGrid(rows: [GridItem(.fixed(94), spacing: 10), GridItem(.fixed(94), spacing: 10)], spacing: 10) {
-                            ForEach(visibleStyles, id: \.id) { style in
-                                styleCell(style)
-                            }
-                        }
-                        .padding(.horizontal, 2)   // keeps the selection stroke from clipping at the edges
-                    }
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
+                // Always the same two-row horizontal-scroll layout regardless of filter/count
+                // (2026-07-12, user-reported: Feminine — a short list — used to fall back to a
+                // different wrapping vertical grid, so switching filters visibly changed the grid's
+                // shape/formatting). Fewer items just means fewer columns / no scroll needed; the
+                // cell size, row height, and visual structure stay identical across All/Feminine/
+                // Masculine.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHGrid(rows: [GridItem(.fixed(168), spacing: 10), GridItem(.fixed(168), spacing: 10)], spacing: 10) {
                         ForEach(visibleStyles, id: \.id) { style in
                             styleCell(style)
                         }
                     }
+                    .padding(.horizontal, 2)   // keeps the selection stroke from clipping at the edges
                 }
+                // .id() forces SwiftUI to treat a filter change as a brand-new ScrollView instance
+                // instead of reusing the old one — without this, the previous scroll offset carried
+                // over into the new filter's (different) content, reading as the new grid "sliding
+                // over" from wherever the old one was scrolled to, instead of just appearing fresh
+                // (2026-07-12, user-reported).
+                .id(styleGenderFilter)
+                // Small custom scroll-position indicator (2026-07-12, user-requested) — native
+                // .scrollIndicators(.visible) reads as a barely-visible transient OS overlay right
+                // on top of the content; this is a persistent, deliberately tiny track+thumb bar so
+                // users notice there's more to scroll to.
+                .onScrollGeometryChange(for: StyleScrollMetrics.self) { geometry in
+                    let maxOffset = geometry.contentSize.width - geometry.containerSize.width
+                    let progress = maxOffset > 0 ? geometry.contentOffset.x / maxOffset : 0
+                    let thumbFraction = geometry.contentSize.width > 0
+                        ? min(1, geometry.containerSize.width / geometry.contentSize.width)
+                        : 1
+                    return StyleScrollMetrics(progress: progress, thumbFraction: thumbFraction)
+                } action: { _, newValue in
+                    styleScrollMetrics = newValue
+                }
+                styleScrollTrack
             }
         }
     }
 
-    /// One style-grid cell (thumbnail + selection stroke + label). Fixed width so it lays out
-    /// identically whether hosted in the vertical LazyVGrid (≤6 styles) or the horizontal
-    /// 2-row LazyHGrid (>6 styles) above.
+    /// Tiny track+thumb scroll indicator for the horizontal style grid — deliberately small
+    /// (2pt track height) per user request, just enough to signal there's more to scroll.
+    private var styleScrollTrack: some View {
+        GeometryReader { geo in
+            let trackWidth = geo.size.width
+            let thumbWidth = max(24, trackWidth * styleScrollMetrics.thumbFraction)
+            let maxThumbOffset = trackWidth - thumbWidth
+            Capsule()
+                .fill(theme.surfaceBorder)
+                .frame(height: 2)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(theme.textSecondary.opacity(0.6))
+                        .frame(width: thumbWidth, height: 2)
+                        .offset(x: maxThumbOffset * styleScrollMetrics.progress)
+                }
+        }
+        .frame(height: 2)
+        .padding(.horizontal, 2)
+        .padding(.top, 4)
+    }
+
+    /// One style-grid cell (thumbnail + selection stroke + label). Fixed width so every cell in
+    /// the two-row horizontal grid lays out identically — including the SELECTED cell (2026-07-12,
+    /// user-reported): a prior version scaled the selected cell up 1.08x with an elevated zIndex,
+    /// which clipped against the grid's top/side edges and visually overlapped/"interfered with"
+    /// neighboring cells. Every cell now stays exactly the same size; the selected one only gets a
+    /// static accent border + brighter label, never a size change.
     private func styleCell(_ style: PresetStyle) -> some View {
-        Button {
-            selectedStyleId = (selectedStyleId == style.id) ? nil : style.id
+        let isSelected = selectedStyleId == style.id
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                selectedStyleId = isSelected ? nil : style.id
+            }
         } label: {
             VStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(theme.surface)
-                    .frame(height: 72)
+                    .frame(height: 140)
                     .overlay {
                         if let thumbURL = style.thumbURL {
-                            CachedThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)", url: thumbURL)
+                            // "-lg" keeps this cache entry distinct from any pre-existing lower-res
+                            // entry the old (smaller) cell size may have cached under the plain key.
+                            StyleThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)-lg", url: thumbURL)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                     }
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                selectedStyleId == style.id ? theme.textPrimary : theme.surfaceBorder,
-                                lineWidth: selectedStyleId == style.id ? 2 : 1
-                            )
+                            .stroke(isSelected ? presetAccent : theme.surfaceBorder, lineWidth: isSelected ? 2.5 : 1)
                     )
                 Text(style.label)
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(theme.textSecondary)
+                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: 90)
+            .frame(width: 130)
         }
         .buttonStyle(PressableButtonStyle())
     }
 
-    private func genderFilterChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    // 2026-07-12: replaced the filled-pill design with underline tabs ("Option B" from a 3-way
+    // comparison the user picked) — TikTok/Instagram-style: plain text labels, no box/border on
+    // either state, just a colored underline that slides to the active tab via
+    // matchedGeometryEffect. Deliberately no full-row baseline under the whole tab group (unlike
+    // the comparison mockup) — a row-wide divider risked visually blending with this sheet's other
+    // section spacing, which uses whitespace alone rather than hairline rules between sections.
+    private func genderFilterTab(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(isSelected ? Color.white : theme.textSecondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule().fill(isSelected ? presetAccent : theme.surface)
-                )
-                .overlay(
-                    Capsule().stroke(theme.surfaceBorder, lineWidth: isSelected ? 0 : 1)
-                )
+            VStack(spacing: 6) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textTertiary)
+
+                ZStack {
+                    if isSelected {
+                        Capsule()
+                            .fill(presetAccent)
+                            .frame(height: 2.5)
+                            .matchedGeometryEffect(id: "genderTabUnderline", in: genderTabNamespace)
+                    }
+                }
+                .frame(height: 2.5)
+            }
         }
         .buttonStyle(PressableButtonStyle())
     }
@@ -881,17 +1020,9 @@ struct PresetInputSheet: View {
     private var aspectRatioSection: some View {
         if let ratios = preset.sheet?.aspectRatios, !ratios.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Aspect ratio")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.textPrimary)
-                    Spacer()
-                    if let resolutionLabel = preset.sheet?.resolutionLabel {
-                        Text(resolutionLabel)
-                            .font(.caption)
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                }
+                Text("Aspect ratio")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary)
                 HStack(spacing: 10) {
                     ForEach(ratios, id: \.self) { ratio in
                         aspectChip(ratio)
@@ -968,32 +1099,6 @@ struct PresetInputSheet: View {
 
     // MARK: - Generate bar
 
-    // Likeness-rights attestation for the face presets — required before Generate enables (see
-    // requiresLikenessConsent / isValid). Tapping anywhere on the row toggles the checkbox.
-    private var consentRow: some View {
-        Button {
-            consentAccepted.toggle()
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: consentAccepted ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(consentAccepted ? presetAccent : theme.textSecondary)
-                Text("I have the rights to this face and it isn't a real person's likeness used without permission.")
-                    .font(.caption)
-                    .foregroundStyle(theme.textSecondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 18)
-        .accessibilityAddTraits(consentAccepted ? [.isSelected] : [])
-    }
-
     private var generateBar: some View {
         VStack(spacing: 6) {
             // Script-expansion presets (e.g. gorilla-vlogs) take an extra LLM hop before dispatch —
@@ -1065,6 +1170,16 @@ struct PresetInputSheet: View {
     /// Motion Transfer (media_type == "avatar") reads the authoritative live rate parsed from
     /// GET /rates by RatesManager (Plan 05, D-18) rather than the registry's own snapshot value,
     /// since RatesManager is the single live source of truth the composer itself already uses.
+    // AI Influencer Pro tier pricing (D-25) — mirrors the backend's computeCharacterReplaceProCost
+    // exactly (Kling v3 Motion Control 'std' mode, $0.07/sec -> 7 credits/sec, PLUS the Wan 2.7
+    // Image composite's flat $0.03 -> 3 credits). Deliberately Kling's 'std' tier, not 'pro' — this
+    // preset's "Pro" tier is the 3-step compositing pipeline itself, not Kling's own quality flag
+    // (2026-07-13, user-clarified). Hardcoded here rather than added to the preset registry
+    // schema — this is a one-off special case for a single preset's second tier, not a
+    // generalized pricing axis every preset needs.
+    private let aiInfluencerProCreditsPerSec = 7
+    private let aiInfluencerProFlatCredits = 3
+
     private var displayCost: Int {
         guard let cost = preset.cost else { return 0 }
         switch cost {
@@ -1073,6 +1188,9 @@ struct PresetInputSheet: View {
         case .perSecond(let creditsPerSec, let maxSeconds):
             let rawSeconds = videoSlotDurationSeconds ?? 0
             let cappedSeconds = maxSeconds.map { min(rawSeconds, Double($0)) } ?? rawSeconds
+            if isAIInfluencerPreset && qualityTier == .pro {
+                return Int(ceil(cappedSeconds * Double(aiInfluencerProCreditsPerSec))) + aiInfluencerProFlatCredits
+            }
             if preset.mediaType == "avatar" {
                 return Int(ceil(cappedSeconds * ratesManager.dreamactorRate))
             }
@@ -1127,14 +1245,7 @@ struct PresetInputSheet: View {
            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
-        if requiresLikenessConsent && !consentAccepted { return false }
         return true
-    }
-
-    /// True for the upload-driven face presets (Motion Transfer / AI Influencer), which require a
-    /// likeness-rights attestation before Generate is enabled.
-    private var requiresLikenessConsent: Bool {
-        preset.mediaType == "avatar" || preset.mediaType == "character_replace"
     }
 
     // MARK: - Slot media handlers
@@ -1312,7 +1423,8 @@ struct PresetInputSheet: View {
             referenceVideoGenerationIds: nil,
             presetId: preset.presetId,
             presetInputUploadIds: hasAnyUpload ? uploadIds : nil,
-            estimatedDurationSeconds: estimatedDurationSecondsForSubmission
+            estimatedDurationSeconds: estimatedDurationSecondsForSubmission,
+            quality: (isAIInfluencerPreset && qualityTier == .pro) ? "pro" : nil
         )
 
         // Optimistic UI (mirrors GenerateView.dispatchGeneration): drop a pending placeholder
@@ -1377,6 +1489,60 @@ struct PresetInputSheet: View {
         } catch {
             generationManager.removeLocalPlaceholder(id: placeholderId)
             errorMessage = "An error has occurred. Please try again."
+        }
+    }
+}
+
+// MARK: - Style grid scroll indicator
+
+/// Scroll-position readout for the horizontal style grid (2026-07-12, user-requested small
+/// scrollbar below the grid). `progress`: 0 = scrolled to the start, 1 = scrolled to the end.
+/// `thumbFraction`: how much of the total scrollable content is visible at once (used to size
+/// the indicator's thumb, not just position it).
+private struct StyleScrollMetrics: Equatable {
+    var progress: CGFloat = 0
+    var thumbFraction: CGFloat = 1
+}
+
+// MARK: - Style grid thumbnail (bottom-anchored crop)
+
+/// Style-grid-only thumbnail loader (2026-07-12, user-requested framing fix). Deliberately a
+/// separate type from GenerateView's CachedThumbnailImage (frozen file — CLAUDE.md keyboard/
+/// composer notice) rather than adding an alignment parameter there, even though the two are
+/// otherwise identical cache/load logic. The style reference photos are front-facing portraits
+/// (head + shoulders); the grid cell's frame is shorter+wider than the source photo, so
+/// scaledToFill always overflows vertically and something gets cropped. Center alignment (as
+/// CachedThumbnailImage uses) cropped the top of the head AND most of the neck/shoulders,
+/// landing the chin right at the bottom edge. Bottom alignment keeps the image's bottom (shoulder)
+/// edge pinned to the cell's bottom edge, so the crop comes off the TOP instead — the face sits
+/// higher in the cell and the neck/shoulders stay visible, matching the requested framing.
+private struct StyleThumbnailImage: View {
+    let cacheKey: String
+    let url: URL?
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Color.clear
+                    .overlay(alignment: .bottom) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                            .allowsHitTesting(false)
+                    }
+                    .clipped()
+                    .contentShape(Rectangle())
+            } else {
+                Color.white.opacity(0.08)
+            }
+        }
+        .task(id: cacheKey) {
+            guard image == nil else { return }
+            if let cached = await ThumbnailCache.shared.image(for: cacheKey) { image = cached; return }
+            guard let url, let (data, _) = try? await URLSession.shared.data(from: url),
+                  let downloaded = UIImage(data: data) else { return }
+            let thumb = downloaded.preparingThumbnail(of: CGSize(width: 260, height: 280)) ?? downloaded
+            ThumbnailCache.shared[cacheKey] = thumb
+            image = thumb
         }
     }
 }

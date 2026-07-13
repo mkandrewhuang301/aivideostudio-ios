@@ -428,6 +428,11 @@ struct GenerationRequestBody: Encodable {
     // alongside preset_input_upload_ids[0] (the source image) to dispatch the inline OpenAI
     // gpt-image-2 mask-edit path (09.2-08).
     var maskUploadId: String? = nil
+    // AI Influencer Pro tier only (D-25): "pro" routes the backend's presetResolver to the
+    // character_replace_quality flag instead of the direct Wan 2.2 dispatch. nil (Standard tier,
+    // or every other preset) omits this key entirely — the server only ever reads it when
+    // preset_id is "ai-influencer" (presetResolver.ts scopes it there explicitly).
+    var quality: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case prompt, model
@@ -448,5 +453,6 @@ struct GenerationRequestBody: Encodable {
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
         case maskUploadId = "mask_upload_id"
+        case quality
     }
 }
