@@ -257,6 +257,482 @@ actor APIClient {
         }
         return try JSONDecoder().decode(UploadResponse.self, from: responseData)
     }
+
+    // MARK: - Edit Studio: Project API (Phase 13, Plan 08)
+    // Every endpoint here mirrors aivideostudio-backend/src/routes/projects.ts, read directly
+    // 2026-07-14. Paths are built as plain interpolated strings (memory: appendingPathComponent
+    // percent-encodes '?', so this file avoids it entirely for the new project methods —
+    // query params, where needed, go through URLComponents exactly like fetchGenerations does).
+
+    // Builds "\(baseURL)/\(path)" without appendingPathComponent.
+    private func projectURL(_ path: String) -> URL {
+        URL(string: "\(baseURL.absoluteString)/\(path)")!
+    }
+
+    // Shared JSON request/decode helper for every project endpoint below. Uses an .iso8601
+    // JSONDecoder (unlike the generic authorizedRequest<T>) since EditProject/ProjectSummary
+    // carry created_at/updated_at Date fields. expectedStatus lets callers accept 200/201/202 —
+    // the generic authorizedRequest only ever accepts 200, which doesn't fit these routes'
+    // 201 (create) / 202 (export) responses. On an unexpected status, the backend's
+    // `{ error: "..." }` body (this router's convention, distinct from other routes' `{ code }`)
+    // is parsed into a typed APIError so callers never crash-decode an error body as a DTO.
+    private func projectRequest<T: Decodable>(
+        path: String,
+        method: String,
+        body: Data? = nil,
+        expectedStatus: Set<Int> = [200]
+    ) async throws -> T {
+        let token = try await getIDToken()
+        var request = URLRequest(url: projectURL(path))
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, expectedStatus.contains(httpResponse.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let bodyStr = String(data: data, encoding: .utf8) ?? "no body"
+            print("[APIClient] \(method) \(path) → HTTP \(status): \(bodyStr)")
+            let errorMessage = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+            throw APIError.unexpectedResponse(statusCode: status, code: errorMessage)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(T.self, from: data)
+    }
+
+    // Multipart POST for clip/audio file uploads — mirrors uploadReferenceMedia's manual
+    // boundary construction, generalized with optional extra text fields (numeric trim/offset
+    // params the backend's multer routes read via req.body, coerced server-side by
+    // parseOptionalNumber since multipart fields always arrive as strings).
+    private func multipartProjectRequest<T: Decodable>(
+        path: String,
+        fileFieldName: String = "file",
+        fileName: String,
+        mimeType: String,
+        fileData: Data,
+        textFields: [String: String] = [:],
+        expectedStatus: Set<Int> = [201]
+    ) async throws -> T {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        let crlf = "\r\n"
+        for (key, value) in textFields {
+            body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\(crlf)\(crlf)".data(using: .utf8)!)
+            body.append("\(value)\(crlf)".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fileFieldName)\"; filename=\"\(fileName)\"\(crlf)".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\(crlf)\(crlf)".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
+
+        let token = try await getIDToken()
+        var request = URLRequest(url: projectURL(path))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, expectedStatus.contains(httpResponse.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let errorMessage = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+            throw APIError.unexpectedResponse(statusCode: status, code: errorMessage)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(T.self, from: data)
+    }
+
+    // POST /api/projects — NOTE: this specific endpoint's request body is camelCase
+    // (`aspectRatio`), unlike PATCH /api/projects/:id's snake_case `aspect_ratio` — a real
+    // inconsistency in the already-shipped backend route (routes/projects.ts POST '/' destructures
+    // `{ title, aspectRatio }` directly off req.body), not something this iOS-only plan can fix.
+    // Response is the slim `Project` row shape (see EditProject's doc comment).
+    func createProject(title: String? = nil, aspectRatio: String? = nil) async throws -> EditProject {
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        if let aspectRatio { body["aspectRatio"] = aspectRatio }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: ProjectResponse = try await projectRequest(
+            path: "api/projects", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.project
+    }
+
+    // GET /api/projects — cursor-paginated project hub list, newest-first (D-06).
+    func listProjects(cursor: String? = nil, limit: Int = 20) async throws -> (items: [ProjectSummary], nextCursor: String?) {
+        var components = URLComponents(url: projectURL("api/projects"), resolvingAgainstBaseURL: false)!
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        components.queryItems = queryItems
+        let token = try await getIDToken()
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("[APIClient] GET api/projects → HTTP \(status): \(String(data: data, encoding: .utf8) ?? "no body")")
+            throw APIError.unexpectedResponse(statusCode: status, code: nil)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ProjectsListResponse.self, from: data)
+        return (decoded.items, decoded.nextCursor)
+    }
+
+    // GET /api/projects/:id — full editable project state (D-01), fresh presigned urls for
+    // every clip/audio element.
+    func getProject(id: String) async throws -> EditProject {
+        let response: ProjectResponse = try await projectRequest(path: "api/projects/\(id)", method: "GET")
+        return response.project
+    }
+
+    // PATCH /api/projects/:id — the SINGLE update method both Plan 11 (title rename, aspect
+    // toggle) and Plan 16 (Caption Style sheet) call. Sends ONLY the non-nil parameters so
+    // omitted fields are never overwritten with `null` — matches the backend's "ANY subset"
+    // contract (routes/projects.ts PATCH '/:id'). A 400 (invalid aspect_ratio / caption_style
+    // .position) surfaces as a typed APIError.unexpectedResponse via projectRequest, never a
+    // crash-decode of the error body as EditProject.
+    func updateProject(
+        id: String,
+        title: String? = nil,
+        aspectRatio: String? = nil,
+        captionStyle: CaptionStyle? = nil
+    ) async throws -> EditProject {
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        if let aspectRatio { body["aspect_ratio"] = aspectRatio }
+        if let captionStyle {
+            body["caption_style"] = [
+                "fontSize": captionStyle.fontSize,
+                "color": captionStyle.color,
+                "highlightColor": captionStyle.highlightColor,
+                "position": captionStyle.position,
+            ]
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: ProjectResponse = try await projectRequest(
+            path: "api/projects/\(id)", method: "PATCH", body: bodyData, expectedStatus: [200]
+        )
+        return response.project
+    }
+
+    // DELETE /api/projects/:id — reuses the existing swipe/long-press confirm-dialog pattern (D-04).
+    func deleteProject(id: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(id)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/clips — import by copy from an owned, completed generation (D-03).
+    func importClipFromGeneration(projectId: String, generationId: String) async throws -> ProjectClip {
+        let body: [String: Any] = ["source_type": "generation", "generation_id": generationId]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: ClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/clips", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.clip
+    }
+
+    // POST /api/projects/:id/clips — import a freshly-uploaded file (camera roll/Files, D-08)
+    // as multipart/form-data. mediaType only picks a content-type fallback when the file's own
+    // extension isn't recognized — the backend infers media_type from the multipart mimetype.
+    func uploadClip(projectId: String, fileURL: URL, mediaType: String) async throws -> ProjectClip {
+        let fileData = try Data(contentsOf: fileURL)
+        let ext = fileURL.pathExtension.lowercased()
+        let mimeType: String
+        switch ext {
+        case "mp4": mimeType = "video/mp4"
+        case "jpg", "jpeg": mimeType = "image/jpeg"
+        case "png": mimeType = "image/png"
+        case "webp": mimeType = "image/webp"
+        default: mimeType = mediaType == "image" ? "image/jpeg" : "video/mp4"
+        }
+        let response: ClipResponse = try await multipartProjectRequest(
+            path: "api/projects/\(projectId)/clips",
+            fileName: fileURL.lastPathComponent,
+            mimeType: mimeType,
+            fileData: fileData,
+            expectedStatus: [201]
+        )
+        return response.clip
+    }
+
+    // PATCH /api/projects/:id/clips/:clipId — trim/reorder a clip (SC2).
+    func updateClip(
+        projectId: String,
+        clipId: String,
+        sortOrder: Int? = nil,
+        trimStart: Double? = nil,
+        trimEnd: Double? = nil
+    ) async throws -> ProjectClip {
+        var body: [String: Any] = [:]
+        if let sortOrder { body["sort_order"] = sortOrder }
+        if let trimStart { body["trim_start_seconds"] = trimStart }
+        if let trimEnd { body["trim_end_seconds"] = trimEnd }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: ClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/clips/\(clipId)", method: "PATCH", body: bodyData, expectedStatus: [200]
+        )
+        return response.clip
+    }
+
+    // DELETE /api/projects/:id/clips/:clipId
+    func deleteClip(projectId: String, clipId: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(projectId)/clips/\(clipId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/text — add a draggable Text overlay (SC3).
+    func addTextOverlay(
+        projectId: String,
+        text: String,
+        xNorm: Double,
+        yNorm: Double,
+        widthNorm: Double? = nil,
+        startSeconds: Double,
+        endSeconds: Double
+    ) async throws -> TextOverlay {
+        var body: [String: Any] = [
+            "text": text, "x_norm": xNorm, "y_norm": yNorm,
+            "start_seconds": startSeconds, "end_seconds": endSeconds,
+        ]
+        if let widthNorm { body["width_norm"] = widthNorm }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: TextOverlayResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/text", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.textOverlay
+    }
+
+    // PATCH /api/projects/:id/text/:textId — move/retime/resize a Text overlay.
+    func updateTextOverlay(
+        projectId: String,
+        textId: String,
+        text: String? = nil,
+        xNorm: Double? = nil,
+        yNorm: Double? = nil,
+        widthNorm: Double? = nil,
+        startSeconds: Double? = nil,
+        endSeconds: Double? = nil
+    ) async throws -> TextOverlay {
+        var body: [String: Any] = [:]
+        if let text { body["text"] = text }
+        if let xNorm { body["x_norm"] = xNorm }
+        if let yNorm { body["y_norm"] = yNorm }
+        if let widthNorm { body["width_norm"] = widthNorm }
+        if let startSeconds { body["start_seconds"] = startSeconds }
+        if let endSeconds { body["end_seconds"] = endSeconds }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: TextOverlayResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/text/\(textId)", method: "PATCH", body: bodyData, expectedStatus: [200]
+        )
+        return response.textOverlay
+    }
+
+    // DELETE /api/projects/:id/text/:textId
+    func deleteTextOverlay(projectId: String, textId: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(projectId)/text/\(textId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/audio — add an audio clip from a fresh upload (multipart). Numeric
+    // fields are sent as multipart TEXT fields (never JSON) — the backend's multer route coerces
+    // them server-side via parseOptionalNumber, exactly like the file path requires.
+    func addAudioClip(
+        projectId: String,
+        fileURL: URL,
+        startOffsetSeconds: Double? = nil,
+        trimStartSeconds: Double? = nil,
+        trimEndSeconds: Double? = nil
+    ) async throws -> AudioClip {
+        let fileData = try Data(contentsOf: fileURL)
+        let ext = fileURL.pathExtension.lowercased()
+        let mimeType: String
+        switch ext {
+        case "m4a": mimeType = "audio/mp4"
+        case "mp3": mimeType = "audio/mpeg"
+        case "wav": mimeType = "audio/wav"
+        default: mimeType = "audio/mp4"
+        }
+        var textFields: [String: String] = [:]
+        if let startOffsetSeconds { textFields["start_offset_seconds"] = String(startOffsetSeconds) }
+        if let trimStartSeconds { textFields["trim_start_seconds"] = String(trimStartSeconds) }
+        if let trimEndSeconds { textFields["trim_end_seconds"] = String(trimEndSeconds) }
+        let response: AudioClipResponse = try await multipartProjectRequest(
+            path: "api/projects/\(projectId)/audio",
+            fileName: fileURL.lastPathComponent,
+            mimeType: mimeType,
+            fileData: fileData,
+            textFields: textFields,
+            expectedStatus: [201]
+        )
+        return response.audioClip
+    }
+
+    // POST /api/projects/:id/audio — add a preset background-music track (server-side R2 copy,
+    // no file upload) as a plain JSON body so multer's multipart parser doesn't engage.
+    func addPresetAudio(
+        projectId: String,
+        presetMusicId: String,
+        startOffsetSeconds: Double? = nil,
+        trimStartSeconds: Double? = nil,
+        trimEndSeconds: Double? = nil
+    ) async throws -> AudioClip {
+        var body: [String: Any] = ["source_type": "preset", "preset_music_id": presetMusicId]
+        if let startOffsetSeconds { body["start_offset_seconds"] = startOffsetSeconds }
+        if let trimStartSeconds { body["trim_start_seconds"] = trimStartSeconds }
+        if let trimEndSeconds { body["trim_end_seconds"] = trimEndSeconds }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: AudioClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/audio", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.audioClip
+    }
+
+    // PATCH /api/projects/:id/audio/:audioId — reposition/retrim/reorder an audio clip.
+    func updateAudioClip(
+        projectId: String,
+        audioId: String,
+        startOffsetSeconds: Double? = nil,
+        trimStartSeconds: Double? = nil,
+        trimEndSeconds: Double? = nil,
+        sortOrder: Int? = nil
+    ) async throws -> AudioClip {
+        var body: [String: Any] = [:]
+        if let startOffsetSeconds { body["start_offset_seconds"] = startOffsetSeconds }
+        if let trimStartSeconds { body["trim_start_seconds"] = trimStartSeconds }
+        if let trimEndSeconds { body["trim_end_seconds"] = trimEndSeconds }
+        if let sortOrder { body["sort_order"] = sortOrder }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: AudioClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/audio/\(audioId)", method: "PATCH", body: bodyData, expectedStatus: [200]
+        )
+        return response.audioClip
+    }
+
+    // DELETE /api/projects/:id/audio/:audioId
+    func deleteAudioClip(projectId: String, audioId: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(projectId)/audio/\(audioId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/captions — add a caption cue (+ its words).
+    func addCaptionCue(
+        projectId: String,
+        startSeconds: Double,
+        endSeconds: Double,
+        words: [CaptionWord]? = nil
+    ) async throws -> CaptionCue {
+        var body: [String: Any] = ["start_seconds": startSeconds, "end_seconds": endSeconds]
+        if let words {
+            body["words"] = words.map { ["text": $0.text, "start_seconds": $0.startSeconds, "end_seconds": $0.endSeconds] }
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: CaptionCueResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/captions", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.captionCue
+    }
+
+    // PATCH /api/projects/:id/captions/:cueId — retime a cue and/or REPLACE its word list
+    // (backend deletes+reinserts words wholesale when `words` is present — never a per-word PATCH).
+    func updateCaptionCue(
+        projectId: String,
+        cueId: String,
+        startSeconds: Double? = nil,
+        endSeconds: Double? = nil,
+        words: [CaptionWord]? = nil
+    ) async throws -> CaptionCue {
+        var body: [String: Any] = [:]
+        if let startSeconds { body["start_seconds"] = startSeconds }
+        if let endSeconds { body["end_seconds"] = endSeconds }
+        if let words {
+            body["words"] = words.map { ["text": $0.text, "start_seconds": $0.startSeconds, "end_seconds": $0.endSeconds] }
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: CaptionCueResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/captions/\(cueId)", method: "PATCH", body: bodyData, expectedStatus: [200]
+        )
+        return response.captionCue
+    }
+
+    // DELETE /api/projects/:id/captions/:cueId — delete a single cue (+ its words).
+    func deleteCaptionCue(projectId: String, cueId: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(projectId)/captions/\(cueId)", method: "DELETE")
+    }
+
+    // DELETE /api/projects/:id/captions — bulk clear the ENTIRE Captions track (D-13). Distinct
+    // path shape from the single-cue delete above (no :cueId segment).
+    func deleteAllCaptions(projectId: String) async throws {
+        try await authorizedRequestNoContent(path: "api/projects/\(projectId)/captions", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/clips/:clipId/captions/auto-generate — Whisper word-level
+    // auto-captions from a clip's audio (SC5). A transcription failure surfaces as a 502, mapped
+    // by projectRequest into a typed APIError, never a silent empty result.
+    func autoGenerateCaptions(projectId: String, clipId: String) async throws -> [CaptionCue] {
+        let response: CaptionCuesListResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/clips/\(clipId)/captions/auto-generate", method: "POST", expectedStatus: [200]
+        )
+        return response.cues
+    }
+
+    // POST /api/projects/:id/export — real free export (D-07/D-10/D-12/SC7). Returns the new
+    // generation_id so the caller reuses the EXISTING GenerationManager poll loop
+    // (GET /api/generations/:id) — no new export-status polling code (RESEARCH Don't-Hand-Roll).
+    func exportProject(id: String) async throws -> String {
+        let response: ExportResponse = try await projectRequest(
+            path: "api/projects/\(id)/export", method: "POST", expectedStatus: [202]
+        )
+        return response.generationId
+    }
+}
+
+// MARK: - Project API response wrappers (private — decode targets only, never surfaced directly)
+
+private struct ProjectResponse: Decodable {
+    let project: EditProject
+}
+
+private struct ProjectsListResponse: Decodable {
+    let items: [ProjectSummary]
+    let nextCursor: String?
+}
+
+private struct ClipResponse: Decodable {
+    let clip: ProjectClip
+}
+
+private struct TextOverlayResponse: Decodable {
+    let textOverlay: TextOverlay
+    enum CodingKeys: String, CodingKey {
+        case textOverlay = "text_overlay"
+    }
+}
+
+private struct AudioClipResponse: Decodable {
+    let audioClip: AudioClip
+    enum CodingKeys: String, CodingKey {
+        case audioClip = "audio_clip"
+    }
+}
+
+private struct CaptionCueResponse: Decodable {
+    let captionCue: CaptionCue
+    enum CodingKeys: String, CodingKey {
+        case captionCue = "caption_cue"
+    }
+}
+
+private struct CaptionCuesListResponse: Decodable {
+    let cues: [CaptionCue]
+}
+
+private struct ExportResponse: Decodable {
+    let generationId: String
+    enum CodingKeys: String, CodingKey {
+        case generationId = "generation_id"
+    }
 }
 
 // GET /rates response — rates are in credits/sec, no dollar conversion needed client-side
