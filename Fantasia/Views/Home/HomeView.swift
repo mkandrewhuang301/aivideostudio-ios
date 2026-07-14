@@ -17,6 +17,10 @@ struct HomeView: View {
     // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
     // routing.
     @State private var showStudioHub = false
+    // Own instance, read-only here — the hero card's stacked-project preview needs the user's
+    // project list before the Studio hub is ever opened (sketch 003 winner B). Same cache-first
+    // hydrate+load pattern as StudioHubView's own instance; the two don't need to share state.
+    @State private var heroProjectManager = ProjectManager()
 
     var onNavigateToGenerate: () -> Void
     /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
@@ -89,6 +93,10 @@ struct HomeView: View {
             }
         }
         .task { await registry.loadIfNeeded() }
+        .task {
+            heroProjectManager.hydrateFromSnapshot()
+            await heroProjectManager.loadProjects()
+        }
         // D-06: the Studio hub, opened exclusively from the hero card below.
         .fullScreenCover(isPresented: $showStudioHub) {
             NavigationStack {
@@ -132,22 +140,25 @@ struct HomeView: View {
 
     // MARK: - Hero (Edit Studio — D-06: the ONLY entry point into the Studio hub)
 
-    /// Phase 13, Plan 09: the "edit-studio" hero row is a registry placeholder still marked
-    /// `status: 'soon'` server-side (Coming Soon copy/pill) from before this phase built the real
-    /// Studio hub behind it. Tapping it now opens `StudioHubView` directly — bypassing the
-    /// generic isSoon-gated `onSelectPreset` routing, which is for generation presets/
-    /// PresetInputSheet, not Studio — and the stale "Coming Soon" indicators are suppressed only
-    /// for this one preset so the hero doesn't advertise "soon" for something that now works.
-    /// The card's layout/art/typography are otherwise untouched (locked by sketch 003).
+    /// Phase 13: the "edit-studio" hero row's card renders sketch 003's locked winner (variant
+    /// B — stacked project thumbnails), not a generic `PresetLoopBackground` loop. Every other
+    /// hero-section preset (none currently exist, but the registry could add one) falls back to
+    /// the original loop+Coming-Soon treatment untouched.
     private func heroCard(_ preset: Preset) -> some View {
         let isEditStudio = preset.presetId == "edit-studio"
         let showComingSoon = preset.isSoon && !isEditStudio
+        let projects = heroProjectManager.projects
 
         return Color.clear
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
             .overlay {
-                PresetLoopBackground(preset: preset)
-                    .allowsHitTesting(false)
+                if isEditStudio {
+                    heroProjectStack(projects: projects)
+                        .allowsHitTesting(false)
+                } else {
+                    PresetLoopBackground(preset: preset)
+                        .allowsHitTesting(false)
+                }
             }
             .overlay(alignment: .topLeading) {
                 Text("FEATURED")
@@ -162,20 +173,42 @@ struct HomeView: View {
             }
             .overlay(alignment: .bottom) {
                 ZStack(alignment: .bottom) {
-                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(isEditStudio ? 0.6 : 0.72)],
+                        startPoint: .init(x: 0.5, y: isEditStudio ? 0.3 : 0.5),
+                        endPoint: .bottom
+                    )
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(preset.title)
                                 .font(.system(size: 19, weight: .bold))
                                 .foregroundStyle(.white)
-                            if let subtitle = preset.subtitle, !(isEditStudio && subtitle == "Coming Soon") {
+                            if isEditStudio {
+                                Text(projects.isEmpty ? "Start your first edit" : "Your projects, ready to finish")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(.white.opacity(0.78))
+                            } else if let subtitle = preset.subtitle {
                                 Text(subtitle)
                                     .font(.system(size: 11.5))
                                     .foregroundStyle(.white.opacity(0.75))
                             }
                         }
                         Spacer()
-                        if showComingSoon {
+                        if isEditStudio {
+                            Text("Try It ↗")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color(red: 0.545, green: 0.361, blue: 0.965), Color(red: 1.0, green: 0.302, blue: 0.557)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing
+                                    ),
+                                    in: Capsule()
+                                )
+                                .shadow(color: Color(red: 0.545, green: 0.361, blue: 0.965).opacity(0.5), radius: 10)
+                        } else if showComingSoon {
                             Text("Coming Soon")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(Color(red: 0.106, green: 0.086, blue: 0.147))
@@ -192,6 +225,14 @@ struct HomeView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .clipped()
+            .overlay {
+                if isEditStudio {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(.white.opacity(0.28), lineWidth: 1.5)
+                        .allowsHitTesting(false)
+                }
+            }
+            .shadow(color: isEditStudio ? Color(red: 0.545, green: 0.361, blue: 0.965).opacity(0.18) : .clear, radius: 20)
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .contentShape(Rectangle())
@@ -202,6 +243,94 @@ struct HomeView: View {
                     onSelectPreset(preset)
                 }
             }
+    }
+
+    /// Sketch 003 winner B: 3 fanned portrait cards — 2 project-preview slots (leftmost rotated
+    /// -9°, middle unrotated) + a constant dotted "+" card (rightmost, rotated +9°), matching the
+    /// locked percentages (24% card width, left 20/38/56%, top 12/6/12%). Empty state (0 saved
+    /// projects) renders flat monochrome placeholders — no fake "your content" claim; populated
+    /// state swaps in real project thumbnails as they're created.
+    private func heroProjectStack(projects: [ProjectSummary]) -> some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let cardW = w * 0.24
+            let cardH = cardW * 16.0 / 9.0
+
+            ZStack {
+                heroThumbSlot(project: projects.count > 0 ? projects[0] : nil)
+                    .frame(width: cardW, height: cardH)
+                    .rotationEffect(.degrees(-9))
+                    .position(x: w * 0.20 + cardW / 2, y: h * 0.12 + cardH / 2)
+
+                heroThumbSlot(project: projects.count > 1 ? projects[1] : nil)
+                    .frame(width: cardW, height: cardH)
+                    .position(x: w * 0.38 + cardW / 2, y: h * 0.06 + cardH / 2)
+
+                heroPlusSlot
+                    .frame(width: cardW, height: cardH)
+                    .rotationEffect(.degrees(9))
+                    .position(x: w * 0.56 + cardW / 2, y: h * 0.12 + cardH / 2)
+            }
+        }
+        .background(theme.elevatedBackground)
+    }
+
+    /// One of the two left-hand stacked cards. `project == nil` (cold start) renders a flat
+    /// monochrome placeholder; a real `ProjectSummary` renders its actual thumbnail (or the same
+    /// film-icon fallback `ProjectTileView` uses while a project has no clips yet).
+    private func heroThumbSlot(project: ProjectSummary?) -> some View {
+        ZStack {
+            if let project {
+                if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            heroMonoFill
+                        }
+                    }
+                } else {
+                    heroMonoFill
+                    Image(systemName: "film")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            } else {
+                heroMonoFill
+            }
+            Image(systemName: "play.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(project == nil ? 0.28 : 0.55))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
+    }
+
+    private var heroMonoFill: some View {
+        LinearGradient(
+            colors: [Color(red: 0.227, green: 0.227, blue: 0.259), Color(red: 0.125, green: 0.125, blue: 0.141)],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+    }
+
+    /// The constant third card — always a "+", never a project. Same fixed dotted-border
+    /// affordance as `AddProjectTile` inside the Studio hub itself.
+    private var heroPlusSlot: some View {
+        RoundedRectangle(cornerRadius: 9)
+            .fill(Color(red: 0.137, green: 0.137, blue: 0.161))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    .foregroundStyle(.white.opacity(0.4))
+            )
+            .overlay(
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.5))
+            )
+            .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
     }
 
     // MARK: - Video Effects / Photo Effects (same 2-col tile grid, different rows)
