@@ -25,6 +25,7 @@
 		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
 		2B37491440F3B799AC6DB3FC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7137D3DC45A60C75C3109168 /* GoogleSignInSwift */; };
+		2BEA2E1E9B02CBABB5C48C80 /* AddAudioSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */; };
 		2D68F00878203FF45BFE152D /* PresetTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237303656EFC3D6EFF8E850F /* PresetTileView.swift */; };
 		2DBDB72DBEFE96C2A467E888 /* VideoCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */; };
 		320096B36ADE2FB4E7127FA5 /* MaskEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 462ABB111EB4D74E5344ECFB /* MaskEditorView.swift */; };
@@ -105,6 +106,7 @@
 		F5BC9EED839AD6832329A1EE /* TextOverlayTrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0781CBA7E723CB78D90C3CB4 /* TextOverlayTrackRow.swift */; };
 		F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
+		F787222E0FFE1FE1BCD51358 /* AudioPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF5AE88C2CC29C4354E28C /* AudioPillView.swift */; };
 		F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */; };
 /* End PBXBuildFile section */
 
@@ -207,6 +209,8 @@
 		D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestionBankTests.swift; sourceTree = "<group>"; };
 		D20DDB7630607116A21D7693 /* MediaPrepService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPrepService.swift; sourceTree = "<group>"; };
 		D9EA405C4A05709CFA7DC6FB /* MaskEditorExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorExportTests.swift; sourceTree = "<group>"; };
+		DAAF5AE88C2CC29C4354E28C /* AudioPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPillView.swift; sourceTree = "<group>"; };
+		DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddAudioSheet.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
 		E1AF13629D571EF8D48B749B /* BubblePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePickerView.swift; sourceTree = "<group>"; };
 		E800BB75E6A7C706622D1CB0 /* CreditStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditStoreView.swift; sourceTree = "<group>"; };
@@ -516,6 +520,8 @@
 		DF2083B3E85E43E6FC4C69F9 /* Editor */ = {
 			isa = PBXGroup;
 			children = (
+				DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */,
+				DAAF5AE88C2CC29C4354E28C /* AudioPillView.swift */,
 				5CCECAEAF0CF080A251AA421 /* AudioTrackRow.swift */,
 				1BB21E9FB37EB647392EA743 /* CaptionTrackRow.swift */,
 				8867510E5992319DB56765C9 /* ClipPillView.swift */,
@@ -651,8 +657,10 @@
 			files = (
 				65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */,
 				D9372B8A631BBC6C9CEFE70A /* ActivityViewController.swift in Sources */,
+				2BEA2E1E9B02CBABB5C48C80 /* AddAudioSheet.swift in Sources */,
 				B49029739FF08706EA9810E7 /* AppConfig.swift in Sources */,
 				2234D1252AC365C122FD0D0D /* AppReview.swift in Sources */,
+				F787222E0FFE1FE1BCD51358 /* AudioPillView.swift in Sources */,
 				AB6DF7C330755B6212771832 /* AudioTrackRow.swift in Sources */,
 				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				9E8F4D64E56BB941F57A2634 /* BrandGradient.swift in Sources */,
