@@ -210,6 +210,13 @@ struct EditorView: View {
             }
             .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                // Plan 13: on-video Text overlays (SC3), sized/clipped to the same letterboxed
+                // canvas frame the AVPlayer surface renders in so overlay coordinates line up 1:1.
+                TextOverlayCanvasView(state: state)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .frame(height: 340)
