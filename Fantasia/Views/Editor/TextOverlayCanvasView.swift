@@ -1,0 +1,323 @@
+// TextOverlayCanvasView.swift
+// Fantasia
+// Phase 13, Plan 13: the on-video Text overlay rendering surface (SC3) — draggable/resizable
+// overlays with CapCut-style corner controls (✕ delete / ✎ edit / ⧉ duplicate / ⤡ resize), mounted
+// as an overlay on top of EditorView's AVPlayer preview stage (Task 3). Reproduces the locked
+// sketch's `.otext`/`.otext-btn` markup (.planning/sketches/001-video-editor-v0/index.html) and
+// 13-UI-SPEC.md's Editor Delta 5 (fixed single style — only position + uniform 0.5x-3x scale are
+// user controls, no font/color picker).
+//
+// `TextOverlay.widthNorm` doubles as the font-scale multiplier here (not a literal normalized
+// width) — this mirrors the sketch's `t.scale` field and the plan's "PATCH width_norm on drag end"
+// contract for the resize handle.
+//
+// Corner delete/edit/duplicate buttons are DISCRETE taps and therefore get a 44pt tap target
+// (13-UI-SPEC.md's 44pt exception list explicitly names "corner controls on Text overlays") even
+// though the visual glyph stays small (26pt circle, matching the sketch). The resize handle is a
+// CONTINUOUS-drag control and is exempt from the 44pt rule (same exemption ClipPillView's edge
+// handles already rely on) — kept visually small per the sketch.
+
+import SwiftUI
+
+struct TextOverlayCanvasView: View {
+    @Environment(ProjectManager.self) private var projectManager
+
+    let state: EditorState
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                ForEach(visibleOverlays) { overlay in
+                    TextOverlayItemView(
+                        overlay: overlay,
+                        canvasSize: geo.size,
+                        isSelected: state.selection == .text(overlay.id),
+                        onSelect: { state.select(.text(overlay.id)) },
+                        onMove: { xNorm, yNorm in
+                            Task { await persistMove(id: overlay.id, xNorm: xNorm, yNorm: yNorm) }
+                        },
+                        onResize: { scale in
+                            Task { await persistResize(id: overlay.id, scale: scale) }
+                        },
+                        onEditCommit: { newText in
+                            Task { await persistTextEdit(id: overlay.id, text: newText) }
+                        },
+                        onDelete: {
+                            Task { await deleteOverlay(id: overlay.id) }
+                        },
+                        onDuplicate: {
+                            Task { await duplicateOverlay(overlay) }
+                        }
+                    )
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+        }
+        .allowsHitTesting(true)
+    }
+
+    /// Only overlays whose [startSeconds, endSeconds] window contains the current playhead render
+    /// on the video canvas — matches how these overlays would actually appear burned into playback.
+    private var visibleOverlays: [TextOverlay] {
+        state.project.textOverlays.filter {
+            $0.startSeconds <= state.currentTime && state.currentTime <= $0.endSeconds
+        }
+    }
+
+    // MARK: - Persistence (SC3: position/size/timing persist to the backend)
+
+    private func persistMove(id: String, xNorm: Double, yNorm: Double) async {
+        do {
+            try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm)
+        } catch {
+            print("[TextOverlayCanvasView] move error: \(error)")
+        }
+    }
+
+    private func persistResize(id: String, scale: Double) async {
+        do {
+            try await projectManager.updateTextOverlay(textId: id, widthNorm: scale)
+        } catch {
+            print("[TextOverlayCanvasView] resize error: \(error)")
+        }
+    }
+
+    private func persistTextEdit(id: String, text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await projectManager.updateTextOverlay(textId: id, text: trimmed)
+        } catch {
+            print("[TextOverlayCanvasView] edit error: \(error)")
+        }
+    }
+
+    private func deleteOverlay(id: String) async {
+        do {
+            try await projectManager.deleteTextOverlay(textId: id)
+            if state.selection == .text(id) { state.select(.none) }
+        } catch {
+            print("[TextOverlayCanvasView] delete error: \(error)")
+        }
+    }
+
+    private func duplicateOverlay(_ overlay: TextOverlay) async {
+        do {
+            try await projectManager.addTextOverlay(
+                text: overlay.text,
+                xNorm: min(0.94, overlay.xNorm + 0.04),
+                yNorm: min(0.94, overlay.yNorm + 0.04),
+                widthNorm: overlay.widthNorm,
+                startSeconds: overlay.startSeconds,
+                endSeconds: overlay.endSeconds
+            )
+        } catch {
+            print("[TextOverlayCanvasView] duplicate error: \(error)")
+        }
+    }
+}
+
+// MARK: - One on-video text overlay: drag-anywhere-on-body move, corner controls when selected.
+
+private struct TextOverlayItemView: View {
+    let overlay: TextOverlay
+    let canvasSize: CGSize
+    let isSelected: Bool
+    let onSelect: () -> Void
+    /// Fires once, on drag release, with the final normalized (xNorm, yNorm) — mirrors
+    /// ClipPillView's onReorder/onTrimChange contract: this view only previews the live drag via a
+    /// local offset, the CALLER performs the PATCH.
+    let onMove: (Double, Double) -> Void
+    /// Fires once, on resize-handle release, with the final font-scale factor (0.5x-3x).
+    let onResize: (Double) -> Void
+    /// Fires once, when the inline edit TextField commits a non-empty, changed value.
+    let onEditCommit: (String) -> Void
+    let onDelete: () -> Void
+    let onDuplicate: () -> Void
+
+    @State private var dragOffset: CGSize = .zero
+    @State private var scaleDelta: Double = 0
+    @State private var isEditing = false
+    @State private var editDraft = ""
+    @FocusState private var editFieldFocused: Bool
+
+    private let baseFontSize: CGFloat = 26
+    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439) // #FF5470
+
+    private var baseScale: Double { overlay.widthNorm ?? 1.0 }
+    private var liveScale: Double { min(3.0, max(0.5, baseScale + scaleDelta)) }
+
+    private var basePosition: CGPoint {
+        CGPoint(x: overlay.xNorm * canvasSize.width, y: overlay.yNorm * canvasSize.height)
+    }
+
+    var body: some View {
+        Group {
+            if isEditing {
+                editingView
+            } else {
+                displayView
+            }
+        }
+        .position(x: basePosition.x + dragOffset.width, y: basePosition.y + dragOffset.height)
+        .onAppear { editDraft = overlay.text }
+        .onChange(of: overlay.text) { _, newValue in
+            if !isEditing { editDraft = newValue }
+        }
+    }
+
+    private var displayView: some View {
+        Text(overlay.text)
+            .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
+            .fixedSize()
+            .padding(6)
+            .overlay(selectionFrame)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect() }
+            .highPriorityGesture(moveDragGesture)
+            .overlay(alignment: .topLeading) {
+                if isSelected { deleteButton.offset(x: -20, y: -20) }
+            }
+            .overlay(alignment: .topTrailing) {
+                if isSelected { editButton.offset(x: 20, y: -20) }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if isSelected { duplicateButton.offset(x: -20, y: 20) }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if isSelected { resizeHandle.offset(x: 20, y: 20) }
+            }
+    }
+
+    private var editingView: some View {
+        TextField("Text", text: $editDraft)
+            .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .focused($editFieldFocused)
+            .submitLabel(.done)
+            .fixedSize()
+            .frame(minWidth: 60)
+            .onSubmit { commitEdit() }
+            .onChange(of: editFieldFocused) { _, focused in
+                if !focused { commitEdit() }
+            }
+            .onAppear { editFieldFocused = true }
+    }
+
+    private var selectionFrame: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .stroke(Color.white, lineWidth: 1.5)
+            .padding(-8)
+            .opacity(isSelected ? 1 : 0)
+    }
+
+    // MARK: - Corner controls (delete / edit / duplicate = discrete tap, 44pt target;
+    // resize = continuous drag, exempt from 44pt per 13-UI-SPEC.md)
+
+    private var deleteButton: some View {
+        cornerButton(systemName: "xmark", label: "Delete text overlay", background: destructive) {
+            onDelete()
+        }
+    }
+
+    private var editButton: some View {
+        cornerButton(systemName: "pencil", label: "Edit text overlay") {
+            editDraft = overlay.text
+            isEditing = true
+        }
+    }
+
+    private var duplicateButton: some View {
+        cornerButton(systemName: "square.on.square", label: "Duplicate text overlay") {
+            onDuplicate()
+        }
+    }
+
+    private func cornerButton(
+        systemName: String,
+        label: String,
+        background: Color = Color.black.opacity(0.85),
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack {
+                Color.clear.frame(width: 44, height: 44)
+                Image(systemName: systemName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(background, in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityLabel(label)
+    }
+
+    private var resizeHandle: some View {
+        ZStack {
+            Color.white.opacity(0.001).frame(width: 34, height: 34)
+            Circle()
+                .fill(Color.black.opacity(0.85))
+                .frame(width: 26, height: 26)
+                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .contentShape(Rectangle())
+        .highPriorityGesture(resizeDragGesture)
+        .accessibilityLabel("Resize text overlay")
+    }
+
+    // MARK: - Move (drag-anywhere-on-body)
+
+    private var moveDragGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                onSelect()
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let deltaXNorm = value.translation.width / max(canvasSize.width, 1)
+                let deltaYNorm = value.translation.height / max(canvasSize.height, 1)
+                let newX = min(0.98, max(0.02, overlay.xNorm + deltaXNorm))
+                let newY = min(0.98, max(0.02, overlay.yNorm + deltaYNorm))
+                dragOffset = .zero
+                onMove(newX, newY)
+            }
+    }
+
+    // MARK: - Resize (bottom-right corner drag scales font 0.5x-3x, matching the sketch's /120
+    // divisor feel)
+
+    private var resizeDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                onSelect()
+                scaleDelta = Double(value.translation.width) / 120.0
+            }
+            .onEnded { _ in
+                let finalScale = liveScale
+                scaleDelta = 0
+                onResize(finalScale)
+            }
+    }
+
+    // MARK: - Edit commit
+
+    private func commitEdit() {
+        guard isEditing else { return }
+        isEditing = false
+        editFieldFocused = false
+        let trimmed = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed != overlay.text {
+            onEditCommit(trimmed)
+        } else {
+            editDraft = overlay.text
+        }
+    }
+}
