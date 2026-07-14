@@ -265,26 +265,20 @@ struct HomeView: View {
         .background(theme.elevatedBackground)
     }
 
-    /// One of the two left-hand stacked cards. `project == nil` (cold start) renders `gradient`;
-    /// a real `ProjectSummary` renders its actual thumbnail (or the same film-icon fallback
-    /// `ProjectTileView` uses while a project has no clips yet). The play glyph sits directly on
-    /// the fill with no background shape of its own.
+    /// One of the two left-hand stacked cards. `project == nil` (cold start) or a real project
+    /// with no thumbnail yet both render `gradient`; a real project WITH a thumbnail renders it.
+    /// Exactly one glyph (the play triangle) is ever drawn — never stacked with a second icon,
+    /// which is what previously read as a "white box" behind the triangle when a thumbnail-less
+    /// project overlapped a film icon with the play icon on top of it.
     private func heroThumbSlot(project: ProjectSummary?, gradient: LinearGradient) -> some View {
         ZStack {
-            if let project {
-                if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            gradient
-                        }
+            if let project, let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        gradient
                     }
-                } else {
-                    gradient
-                    Image(systemName: "film")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.white.opacity(0.4))
                 }
             } else {
                 gradient
