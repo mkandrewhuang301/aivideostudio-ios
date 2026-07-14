@@ -17,13 +17,13 @@ struct StudioHubView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var projectManager = ProjectManager()
 
-    // "+" tile → media picker (D-08). Plan 10 builds the real MediaPickerSheet; until then this
-    // presents a lightweight placeholder so the hub's own navigation/state wiring is already
-    // correct and only the sheet's content needs swapping in.
+    // "+" tile → media picker (D-08), wired to the real MediaPickerSheet (Plan 10).
     @State private var showMediaPicker = false
+    @State private var isCreatingProject = false
 
-    // Tap a project tile → open it, then push the Editor. Plan 11 builds the real EditorView;
-    // until then this pushes a placeholder so the hub → editor link (must_haves) already works.
+    // Tap a project tile → open it (openProject already awaited before this is set, so
+    // projectManager.loadedProject is populated by the time navigation fires), then push the
+    // real Editor (Plan 11).
     @State private var openedProjectId: String?
 
     // Long-press → Delete → the reused confirmationDialog pattern (D-04), verbatim copy from
@@ -56,10 +56,13 @@ struct StudioHubView: View {
             await projectManager.loadProjects()
         }
         .sheet(isPresented: $showMediaPicker) {
-            mediaPickerPlaceholder
+            MediaPickerSheet { picked in
+                Task { await createProject(from: picked) }
+            }
+            .environment(projectManager)
         }
         .navigationDestination(item: $openedProjectId) { projectId in
-            editorPlaceholder(projectId: projectId)
+            editorDestination(projectId: projectId)
                 .environment(projectManager)
         }
         // D-04: VERBATIM copy from the existing LibraryThumbnailView/GenerationCardView delete
@@ -157,35 +160,55 @@ struct StudioHubView: View {
         .padding(.top, 96)
     }
 
-    // MARK: - Forward-compat placeholders (replaced by Plans 10/11 — see their own file scope)
+    // MARK: - "+" tile → new project creation (D-08)
 
-    private var mediaPickerPlaceholder: some View {
-        VStack(spacing: 12) {
-            Text("Add Media")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
-            Text("The Generations/Uploads picker lands in a follow-up plan.")
-                .font(.system(size: 13))
-                .foregroundStyle(theme.textSecondary)
-                .multilineTextAlignment(.center)
+    /// Resolves the picker's ordered selection into a new project: the first item becomes
+    /// createProject's firstClip (single-clip create call, per ProjectManager.createProject's
+    /// signature), any remaining items are appended via importClip/uploadClip afterward. Then
+    /// pushes straight into the Editor exactly like tapping an existing tile.
+    private func createProject(from picked: [PickedMedia]) async {
+        guard let first = picked.first, !isCreatingProject else { return }
+        isCreatingProject = true
+        defer { isCreatingProject = false }
+        do {
+            let created: EditProject
+            switch first {
+            case .generation(let id, _):
+                created = try await projectManager.createProject(firstClipGenerationId: id)
+            case .upload(let url, let mediaType):
+                created = try await projectManager.createProject(firstClipUploadURL: url, firstClipMediaType: mediaType)
+            }
+            for item in picked.dropFirst() {
+                switch item {
+                case .generation(let id, _):
+                    try await projectManager.importClip(generationId: id)
+                case .upload(let url, let mediaType):
+                    try await projectManager.uploadClip(fileURL: url, mediaType: mediaType)
+                }
+            }
+            openedProjectId = created.id
+        } catch {
+            print("[StudioHubView] createProject error: \(error)")
         }
-        .padding(24)
-        .presentationDetents([.medium])
     }
 
-    private func editorPlaceholder(projectId: String) -> some View {
-        ZStack {
-            Color(red: 0.039, green: 0.039, blue: 0.051).ignoresSafeArea()
-            VStack(spacing: 8) {
-                Text("Editor")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("Project \(projectId)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.6))
+    // MARK: - Editor destination (Plan 11's real EditorView)
+
+    /// `openProject(id:)` is always awaited before `openedProjectId` is set (both at the tile-tap
+    /// call site above and in `createProject`), so `loadedProject` is populated by the time this
+    /// destination is pushed — the ProgressView branch only covers the (rare) case where a pull-
+    /// to-refresh or delete raced the navigation and cleared it out from under us.
+    @ViewBuilder
+    private func editorDestination(projectId: String) -> some View {
+        if let loaded = projectManager.loadedProject, loaded.id == projectId {
+            EditorView(project: loaded)
+        } else {
+            ZStack {
+                Color(red: 0.039, green: 0.039, blue: 0.051).ignoresSafeArea()
+                ProgressView().tint(.white)
             }
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
