@@ -12,6 +12,11 @@ import SwiftUI
 struct HomeView: View {
     @Environment(ThemeManager.self) private var theme
     @State private var registry = PresetRegistryManager()
+    // Phase 13, Plan 09 (D-06): the Studio hub is the ONLY entry point into Edit Studio, opened
+    // exclusively from this hero tap — self-contained here (not bubbled up to MainTabView like
+    // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
+    // routing.
+    @State private var showStudioHub = false
 
     var onNavigateToGenerate: () -> Void
     /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
@@ -84,6 +89,13 @@ struct HomeView: View {
             }
         }
         .task { await registry.loadIfNeeded() }
+        // D-06: the Studio hub, opened exclusively from the hero card below.
+        .fullScreenCover(isPresented: $showStudioHub) {
+            NavigationStack {
+                StudioHubView()
+            }
+            .environment(theme)
+        }
     }
 
     // MARK: - Background
@@ -118,10 +130,20 @@ struct HomeView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - Hero (Cinema Studio)
+    // MARK: - Hero (Edit Studio — D-06: the ONLY entry point into the Studio hub)
 
+    /// Phase 13, Plan 09: the "edit-studio" hero row is a registry placeholder still marked
+    /// `status: 'soon'` server-side (Coming Soon copy/pill) from before this phase built the real
+    /// Studio hub behind it. Tapping it now opens `StudioHubView` directly — bypassing the
+    /// generic isSoon-gated `onSelectPreset` routing, which is for generation presets/
+    /// PresetInputSheet, not Studio — and the stale "Coming Soon" indicators are suppressed only
+    /// for this one preset so the hero doesn't advertise "soon" for something that now works.
+    /// The card's layout/art/typography are otherwise untouched (locked by sketch 003).
     private func heroCard(_ preset: Preset) -> some View {
-        Color.clear
+        let isEditStudio = preset.presetId == "edit-studio"
+        let showComingSoon = preset.isSoon && !isEditStudio
+
+        return Color.clear
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
             .overlay {
                 PresetLoopBackground(preset: preset)
@@ -146,14 +168,14 @@ struct HomeView: View {
                             Text(preset.title)
                                 .font(.system(size: 19, weight: .bold))
                                 .foregroundStyle(.white)
-                            if let subtitle = preset.subtitle {
+                            if let subtitle = preset.subtitle, !(isEditStudio && subtitle == "Coming Soon") {
                                 Text(subtitle)
                                     .font(.system(size: 11.5))
                                     .foregroundStyle(.white.opacity(0.75))
                             }
                         }
                         Spacer()
-                        if preset.isSoon {
+                        if showComingSoon {
                             Text("Coming Soon")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(Color(red: 0.106, green: 0.086, blue: 0.147))
@@ -173,7 +195,13 @@ struct HomeView: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .contentShape(Rectangle())
-            .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
+            .onTapGesture {
+                if isEditStudio {
+                    showStudioHub = true
+                } else if !preset.isSoon {
+                    onSelectPreset(preset)
+                }
+            }
     }
 
     // MARK: - Video Effects / Photo Effects (same 2-col tile grid, different rows)
