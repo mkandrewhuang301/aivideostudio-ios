@@ -160,17 +160,6 @@ struct HomeView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .topLeading) {
-                Text("FEATURED")
-                    .font(.system(size: 9.5, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundStyle(Color(red: 0.91, green: 0.87, blue: 0.99))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
-                    .padding(12)
-                    .allowsHitTesting(false)
-            }
             .overlay(alignment: .bottom) {
                 ZStack(alignment: .bottom) {
                     LinearGradient(
@@ -248,8 +237,8 @@ struct HomeView: View {
     /// Sketch 003 winner B: 3 fanned portrait cards — 2 project-preview slots (leftmost rotated
     /// -9°, middle unrotated) + a constant dotted "+" card (rightmost, rotated +9°), matching the
     /// locked percentages (24% card width, left 20/38/56%, top 12/6/12%). Empty state (0 saved
-    /// projects) renders flat monochrome placeholders — no fake "your content" claim; populated
-    /// state swaps in real project thumbnails as they're created.
+    /// projects) renders a warm/cool color-gradient pair (not gray) — live, not placeholder-dead;
+    /// populated state swaps in real project thumbnails as they're created.
     private func heroProjectStack(projects: [ProjectSummary]) -> some View {
         GeometryReader { geo in
             let w = geo.size.width
@@ -258,12 +247,12 @@ struct HomeView: View {
             let cardH = cardW * 16.0 / 9.0
 
             ZStack {
-                heroThumbSlot(project: projects.count > 0 ? projects[0] : nil)
+                heroThumbSlot(project: projects.count > 0 ? projects[0] : nil, gradient: heroSlotGradient(0))
                     .frame(width: cardW, height: cardH)
                     .rotationEffect(.degrees(-9))
                     .position(x: w * 0.20 + cardW / 2, y: h * 0.12 + cardH / 2)
 
-                heroThumbSlot(project: projects.count > 1 ? projects[1] : nil)
+                heroThumbSlot(project: projects.count > 1 ? projects[1] : nil, gradient: heroSlotGradient(1))
                     .frame(width: cardW, height: cardH)
                     .position(x: w * 0.38 + cardW / 2, y: h * 0.06 + cardH / 2)
 
@@ -276,10 +265,11 @@ struct HomeView: View {
         .background(theme.elevatedBackground)
     }
 
-    /// One of the two left-hand stacked cards. `project == nil` (cold start) renders a flat
-    /// monochrome placeholder; a real `ProjectSummary` renders its actual thumbnail (or the same
-    /// film-icon fallback `ProjectTileView` uses while a project has no clips yet).
-    private func heroThumbSlot(project: ProjectSummary?) -> some View {
+    /// One of the two left-hand stacked cards. `project == nil` (cold start) renders `gradient`;
+    /// a real `ProjectSummary` renders its actual thumbnail (or the same film-icon fallback
+    /// `ProjectTileView` uses while a project has no clips yet). The play glyph sits directly on
+    /// the fill with no background shape of its own.
+    private func heroThumbSlot(project: ProjectSummary?, gradient: LinearGradient) -> some View {
         ZStack {
             if let project {
                 if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
@@ -287,32 +277,36 @@ struct HomeView: View {
                         if let image = phase.image {
                             image.resizable().scaledToFill()
                         } else {
-                            heroMonoFill
+                            gradient
                         }
                     }
                 } else {
-                    heroMonoFill
+                    gradient
                     Image(systemName: "film")
                         .font(.system(size: 16))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
             } else {
-                heroMonoFill
+                gradient
             }
             Image(systemName: "play.fill")
+                .symbolRenderingMode(.monochrome)
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(project == nil ? 0.28 : 0.55))
+                .foregroundStyle(.white.opacity(0.85))
         }
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.1), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
     }
 
-    private var heroMonoFill: some View {
-        LinearGradient(
-            colors: [Color(red: 0.227, green: 0.227, blue: 0.259), Color(red: 0.125, green: 0.125, blue: 0.141)],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
+    /// First slot: warm magenta→orange. Second slot: cool violet→blue. Both drawn from the app's
+    /// existing accent family so the cold-start hero reads as "this app", not a generic filler.
+    private func heroSlotGradient(_ index: Int) -> LinearGradient {
+        let palettes: [[Color]] = [
+            [Color(red: 1.0, green: 0.302, blue: 0.557), Color(red: 0.949, green: 0.463, blue: 0.243)],
+            [Color(red: 0.545, green: 0.361, blue: 0.965), Color(red: 0.243, green: 0.416, blue: 0.949)],
+        ]
+        let colors = palettes[index % palettes.count]
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     /// The constant third card — always a "+", never a project. Same fixed dotted-border
