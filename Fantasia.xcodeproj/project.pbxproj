@@ -45,6 +45,7 @@
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
 		58BBC50A32FB46F00A059BB6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF9247AFEBA3DE555B9CEA35 /* FirebaseAuth */; };
+		590205AB74ECD04778D8CDB9 /* EditorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 045559253B09A54FC9E2075E /* EditorState.swift */; };
 		5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2DBF0E0597B3104F5FEC86 /* PresetInputSheet.swift */; };
 		65FF5377B8122B161E1F8B23 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85FD0F112C85F88EAD5E3A7 /* APIClient.swift */; };
 		668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F87E75370CA3504E80E2E52 /* SignUpView.swift */; };
@@ -90,6 +91,7 @@
 		E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0CDFF7D5E6363BDD71A92A /* ContentView.swift */; };
 		E38A613C2FB3BECD70B7D19E /* MediaPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BE8C0CFA8F31D6CE17902A0 /* MediaPickerSheet.swift */; };
 		E3E16AFC8FAB266C77E5E920 /* GenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68544EFABAD6EC84426B2794 /* GenerateView.swift */; };
+		E46F576F83D1D84CE86717DC /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99DB73E4892B5ED65BA6190 /* EditorView.swift */; };
 		EBE3BD23343938B199C4054C /* GenerationItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */; };
 		EE481530CEFACF77B5C77403 /* GenerationPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDACBDAC2663C5E26995727 /* GenerationPickerSheet.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
@@ -111,6 +113,7 @@
 
 /* Begin PBXFileReference section */
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		045559253B09A54FC9E2075E /* EditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorState.swift; sourceTree = "<group>"; };
 		085B4D75DB663F0A8A93228C /* RatesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesManager.swift; sourceTree = "<group>"; };
 		0BE8C0CFA8F31D6CE17902A0 /* MediaPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPickerSheet.swift; sourceTree = "<group>"; };
 		0DDACBDAC2663C5E26995727 /* GenerationPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationPickerSheet.swift; sourceTree = "<group>"; };
@@ -166,6 +169,7 @@
 		9F82A13068AFCD7F664A93D4 /* Preset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preset.swift; sourceTree = "<group>"; };
 		9F8CA418865164B649AE53D1 /* ProjectTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTileView.swift; sourceTree = "<group>"; };
 		A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationItem.swift; sourceTree = "<group>"; };
+		A99DB73E4892B5ED65BA6190 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		AA9325B3ED5B04712AB19C26 /* FeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedView.swift; sourceTree = "<group>"; };
 		AB1C6A280163238E4A8CF83F /* KeyboardHeightReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHeightReader.swift; sourceTree = "<group>"; };
 		ACCB6A3EF8F44442A1657016 /* SideDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideDrawerView.swift; sourceTree = "<group>"; };
@@ -235,6 +239,7 @@
 				2F87E75370CA3504E80E2E52 /* SignUpView.swift */,
 				C2752AF2A62657566B211B9B /* SplashView.swift */,
 				395C7109C3476F244209ECA0 /* Components */,
+				DF2083B3E85E43E6FC4C69F9 /* Editor */,
 				A05D8F1766F99A6C3145F3EE /* Feed */,
 				FF9119D91C886273102943AD /* Generate */,
 				310917A575E9D26FDCBE414E /* Home */,
@@ -494,6 +499,15 @@
 			path = Credits;
 			sourceTree = "<group>";
 		};
+		DF2083B3E85E43E6FC4C69F9 /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				045559253B09A54FC9E2075E /* EditorState.swift */,
+				A99DB73E4892B5ED65BA6190 /* EditorView.swift */,
+			);
+			path = Editor;
+			sourceTree = "<group>";
+		};
 		F4B6126BD29990B46D8DAEA3 /* Generation */ = {
 			isa = PBXGroup;
 			children = (
@@ -631,6 +645,8 @@
 				ABB54C63E460F8B91648880B /* CreditStoreView.swift in Sources */,
 				F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */,
 				1AEAC0945F74B830EAE275CA /* EditProject.swift in Sources */,
+				590205AB74ECD04778D8CDB9 /* EditorState.swift in Sources */,
+				E46F576F83D1D84CE86717DC /* EditorView.swift in Sources */,
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */,
