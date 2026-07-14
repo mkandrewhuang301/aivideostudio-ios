@@ -96,6 +96,7 @@
 		EE481530CEFACF77B5C77403 /* GenerationPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDACBDAC2663C5E26995727 /* GenerationPickerSheet.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F82A13068AFCD7F664A93D4 /* Preset.swift */; };
+		F56776D7581CA304CB2D89BC /* TimelineTrackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */; };
 		F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
 		F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */; };
@@ -133,6 +134,7 @@
 		45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCache.swift; sourceTree = "<group>"; };
 		462ABB111EB4D74E5344ECFB /* MaskEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorView.swift; sourceTree = "<group>"; };
 		4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfferingsManager.swift; sourceTree = "<group>"; };
+		4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTrackView.swift; sourceTree = "<group>"; };
 		54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailSheet.swift; sourceTree = "<group>"; };
 		59E4FE5DF35EF32FE7883309 /* FantasiaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FantasiaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
@@ -504,6 +506,7 @@
 			children = (
 				045559253B09A54FC9E2075E /* EditorState.swift */,
 				A99DB73E4892B5ED65BA6190 /* EditorView.swift */,
+				4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */,
 			);
 			path = Editor;
 			sourceTree = "<group>";
@@ -705,6 +708,7 @@
 				F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */,
 				853EE388913AAC155DAD230F /* ThemeManager.swift in Sources */,
 				C13DE69B70EBD480C723B43F /* ThumbnailCache.swift in Sources */,
+				F56776D7581CA304CB2D89BC /* TimelineTrackView.swift in Sources */,
 				404B057D9B2E3C1CFCBB9B4A /* TransparentFullScreenBackground.swift in Sources */,
 				2DBDB72DBEFE96C2A467E888 /* VideoCache.swift in Sources */,
 				DDA4D9EF675EB93881F921B8 /* ZoomPanScrollView.swift in Sources */,
