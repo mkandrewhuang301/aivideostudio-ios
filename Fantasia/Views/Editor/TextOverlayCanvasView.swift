@@ -72,10 +72,16 @@ struct TextOverlayCanvasView: View {
     }
 
     // MARK: - Persistence (SC3: position/size/timing persist to the backend)
+    //
+    // EditProject is a VALUE type: every ProjectManager mutation updates the MANAGER's copy
+    // (`loadedProject`), never `state.project` — each success path below must reconcile via
+    // syncProjectFromManager() or the canvas snaps back to the stale value on next render
+    // (13-20 i1 sweep, same bug class as EditorView's bottom-bar actions).
 
     private func persistMove(id: String, xNorm: Double, yNorm: Double) async {
         do {
             try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm)
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] move error: \(error)")
         }
@@ -84,6 +90,7 @@ struct TextOverlayCanvasView: View {
     private func persistResize(id: String, scale: Double) async {
         do {
             try await projectManager.updateTextOverlay(textId: id, widthNorm: scale)
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] resize error: \(error)")
         }
@@ -92,6 +99,7 @@ struct TextOverlayCanvasView: View {
     private func persistRotation(id: String, rotation: Double) async {
         do {
             try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] rotate error: \(error)")
         }
@@ -102,6 +110,7 @@ struct TextOverlayCanvasView: View {
         guard !trimmed.isEmpty else { return }
         do {
             try await projectManager.updateTextOverlay(textId: id, text: trimmed)
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] edit error: \(error)")
         }
@@ -111,6 +120,7 @@ struct TextOverlayCanvasView: View {
         do {
             try await projectManager.deleteTextOverlay(textId: id)
             if state.selection == .text(id) { state.select(.none) }
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] delete error: \(error)")
         }
@@ -127,8 +137,17 @@ struct TextOverlayCanvasView: View {
                 startSeconds: overlay.startSeconds,
                 endSeconds: overlay.endSeconds
             )
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayCanvasView] duplicate error: \(error)")
+        }
+    }
+
+    /// Mirrors TimelineTrackView/AudioTrackRow's identical helper — reflects ProjectManager's
+    /// persisted result back onto the shared EditorState.
+    private func syncProjectFromManager() {
+        if let refreshed = projectManager.loadedProject {
+            state.project = refreshed
         }
     }
 }

@@ -53,9 +53,13 @@ struct TextOverlayTrackRow: View {
 
     // MARK: - Mutations
 
+    // EditProject is a VALUE type — each success path must reconcile the MANAGER's mutated copy
+    // back onto state.project or the pill snaps back / lingers after delete (13-20 i1 sweep).
+
     private func retime(id: String, start: Double, end: Double) async {
         do {
             try await projectManager.updateTextOverlay(textId: id, startSeconds: start, endSeconds: end)
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayTrackRow] retime error: \(error)")
         }
@@ -65,8 +69,16 @@ struct TextOverlayTrackRow: View {
         do {
             try await projectManager.deleteTextOverlay(textId: id)
             if state.selection == .text(id) { state.select(.none) }
+            syncProjectFromManager()
         } catch {
             print("[TextOverlayTrackRow] delete error: \(error)")
+        }
+    }
+
+    /// Mirrors AudioTrackRow/CaptionTrackRow's identical helper.
+    private func syncProjectFromManager() {
+        if let refreshed = projectManager.loadedProject {
+            state.project = refreshed
         }
     }
 }
