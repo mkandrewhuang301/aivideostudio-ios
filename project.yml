@@ -54,6 +54,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSPhotoLibraryAddUsageDescription: "Fantasia saves your generated videos to your photo library."
+        NSCameraUsageDescription: "Fantasia uses the camera so you can capture a photo or video to use as a reference for generation."
+        NSMicrophoneUsageDescription: "Fantasia uses the microphone to record audio when you capture a video with the camera."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
   FantasiaTests:
