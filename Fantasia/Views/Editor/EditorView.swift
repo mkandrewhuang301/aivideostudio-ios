@@ -13,12 +13,20 @@
 // Plan 12 replaced plan 11's placeholder mount view below with the real TimelineTrackView
 // (Fantasia/Views/Editor/TimelineTrackView.swift) — filmstrip clips, fixed-center playhead,
 // background scrub, and the stacked Text/Audio/Caption track mount points.
+//
+// Plan 17: wires the Export button (top bar) to the real backend export pipeline (plan 07's
+// POST /:id/export via ProjectManager.exportProject(id:), plan 08). Dispatch is a brief
+// disabled-spinner window only (D-12 — export never locks the project); the returned
+// generation_id is handed to the EXISTING GenerationManager poll loop (no new polling code) so
+// completion/failure follow the app-wide APNs push + Generate feed pattern (D-07) — zero new
+// completion UI here. Exact copy strings per 13-UI-SPEC.md's Export Flow section.
 
 import SwiftUI
 import AVFoundation
 
 struct EditorView: View {
     @Environment(ProjectManager.self) private var projectManager
+    @Environment(GenerationManager.self) private var generationManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var state: EditorState
@@ -31,6 +39,9 @@ struct EditorView: View {
     @State private var titleErrorClearTask: Task<Void, Never>?
 
     @State private var isExporting = false
+    @State private var exportToastMessage: String?
+    @State private var exportToastTask: Task<Void, Never>?
+    @State private var exportFailedError: String?
 
     // Plan 16: fullscreen preview player (SC6) + Caption Style sheet (Delta 4).
     @State private var showFullscreenPlayer = false
@@ -81,6 +92,26 @@ struct EditorView: View {
         }
         .sheet(isPresented: $showCaptionStyleSheet) {
             CaptionStyleSheet(state: state)
+        }
+        .overlay(alignment: .bottom) {
+            if let exportToastMessage {
+                Text(exportToastMessage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.75), in: Capsule())
+                    .padding(.bottom, 24)
+                    .transition(.opacity)
+            }
+        }
+        .alert("Export failed", isPresented: Binding(
+            get: { exportFailedError != nil },
+            set: { if !$0 { exportFailedError = nil } }
+        )) {
+            Button("OK", role: .cancel) { exportFailedError = nil }
+        } message: {
+            Text(exportFailedError ?? "")
         }
     }
 
@@ -157,7 +188,7 @@ struct EditorView: View {
 
     private var exportButton: some View {
         Button {
-            // Plan 14 wires the real export dispatch (D-10/D-12) — placeholder no-op stub.
+            performExport()
         } label: {
             Group {
                 if isExporting {
@@ -176,6 +207,41 @@ struct EditorView: View {
             .background(accent, in: Capsule())
         }
         .disabled(isExporting)
+    }
+
+    // MARK: - Export (Delta: Plan 17 — D-07/D-10/D-12/SC7)
+    //
+    // The button is only disabled long enough to prevent a double-tap during the network
+    // round-trip to dispatch — NOT for the whole render (D-12: the project was never locked, so
+    // Export becomes tappable again immediately after dispatch succeeds). The returned
+    // generation_id is fed into the EXISTING GenerationManager poll loop so the export enters the
+    // normal tracked-generations set; completion/failure are handled entirely by the app-wide
+    // APNs push + Generate feed refresh (D-07) — no bespoke export-status polling here.
+    private func performExport() {
+        guard !isExporting else { return }
+        isExporting = true
+        Task {
+            do {
+                _ = try await projectManager.exportProject(id: state.project.id)
+                isExporting = false
+                showExportToast("Exporting your video — we'll notify you when it's ready.")
+                generationManager.startPolling(forceRefresh: true)
+            } catch {
+                print("[EditorView] exportProject error: \(error)")
+                isExporting = false
+                exportFailedError = "Your project is safe — nothing was lost. Try exporting again."
+            }
+        }
+    }
+
+    private func showExportToast(_ message: String) {
+        exportToastMessage = message
+        exportToastTask?.cancel()
+        exportToastTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            exportToastMessage = nil
+        }
     }
 
     private func commitTitleRename() {
@@ -375,5 +441,6 @@ struct EditorView: View {
         player?.pause()
         player = nil
         titleErrorClearTask?.cancel()
+        exportToastTask?.cancel()
     }
 }
