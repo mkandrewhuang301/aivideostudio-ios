@@ -58,6 +58,7 @@
 		853EE388913AAC155DAD230F /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D50E6F16247DF7BE7CE91E /* ThemeManager.swift */; };
 		85CA86AA8FFD652B733E9213 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD06EBDDED984EC354B17EC5 /* MainTabView.swift */; };
 		88D883F41FD2A11825631F90 /* NameAsReferenceAlertModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DADBF436850B0317557514 /* NameAsReferenceAlertModifier.swift */; };
+		8D9993E1A6CC16B7E52CC7FE /* ProjectTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8CA418865164B649AE53D1 /* ProjectTileView.swift */; };
 		98891B7B4E232C4194621D74 /* ConsentAttestationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D24724077CFB86BC490722 /* ConsentAttestationView.swift */; };
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
 		9CBE3B9FE3090E3EB4DBFE1C /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93666B740F1CC44A352A2920 /* CameraPicker.swift */; };
@@ -92,6 +93,7 @@
 		EE481530CEFACF77B5C77403 /* GenerationPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDACBDAC2663C5E26995727 /* GenerationPickerSheet.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F82A13068AFCD7F664A93D4 /* Preset.swift */; };
+		F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */; };
 		F6D9428EC7AAB60569B93E95 /* DrawerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677EDD477B29B62723B6D417 /* DrawerManager.swift */; };
 		F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE36B0056A0142DCBCDA131E /* PresetRegistryManager.swift */; };
 /* End PBXBuildFile section */
@@ -145,6 +147,7 @@
 		739201A04305B948BFA7474D /* Fantasia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Fantasia.entitlements; sourceTree = "<group>"; };
 		73AB21366AA28409EB76A559 /* Fantasia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Fantasia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		76D50E6F16247DF7BE7CE91E /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
+		770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioHubView.swift; sourceTree = "<group>"; };
 		79385464051C4A0AD6E66F28 /* PlanCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCatalog.swift; sourceTree = "<group>"; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
 		89DADBF436850B0317557514 /* NameAsReferenceAlertModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NameAsReferenceAlertModifier.swift; sourceTree = "<group>"; };
@@ -159,6 +162,7 @@
 		988EBFB034876308CEF701E2 /* BrandGradient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandGradient.swift; sourceTree = "<group>"; };
 		9A6EF873F72A0E921645CE75 /* CircularCreditIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCreditIndicator.swift; sourceTree = "<group>"; };
 		9F82A13068AFCD7F664A93D4 /* Preset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preset.swift; sourceTree = "<group>"; };
+		9F8CA418865164B649AE53D1 /* ProjectTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTileView.swift; sourceTree = "<group>"; };
 		A63EB005F89BF6BD6E2D5D5C /* GenerationItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationItem.swift; sourceTree = "<group>"; };
 		AA9325B3ED5B04712AB19C26 /* FeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedView.swift; sourceTree = "<group>"; };
 		AB1C6A280163238E4A8CF83F /* KeyboardHeightReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHeightReader.swift; sourceTree = "<group>"; };
@@ -238,6 +242,7 @@
 				9754CE97948C45B64BE85462 /* Player */,
 				2852844D5C638484A9E6C72A /* Presets */,
 				A5E948275525FAE94171DD07 /* Shared */,
+				56EAF8565526F8CDF5758305 /* Studio */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -309,6 +314,15 @@
 				2B5077D8688B1538D3C4D849 /* OnboardingView.swift */,
 			);
 			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		56EAF8565526F8CDF5758305 /* Studio */ = {
+			isa = PBXGroup;
+			children = (
+				9F8CA418865164B649AE53D1 /* ProjectTileView.swift */,
+				770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */,
+			);
+			path = Studio;
 			sourceTree = "<group>";
 		};
 		7FEA6F335CD22F04FD1524C6 /* Resources */ = {
@@ -658,6 +672,7 @@
 				353E782F3022A63807F459DE /* PressableButtonStyle.swift in Sources */,
 				EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */,
 				3567EB5421B6AE41F6D299E7 /* ProjectManager.swift in Sources */,
+				8D9993E1A6CC16B7E52CC7FE /* ProjectTileView.swift in Sources */,
 				0A2F523ECED9070744A0665C /* PurchaseManager.swift in Sources */,
 				9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */,
 				DDBEE25E908DF1E2574D83E5 /* RatesManager.swift in Sources */,
@@ -667,6 +682,7 @@
 				668D558BEDC75E6CCDD3F553 /* SignUpView.swift in Sources */,
 				14C33C25B4E446F40F55E0F3 /* SocialSignInButton.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
+				F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */,
 				853EE388913AAC155DAD230F /* ThemeManager.swift in Sources */,
 				C13DE69B70EBD480C723B43F /* ThumbnailCache.swift in Sources */,
 				404B057D9B2E3C1CFCBB9B4A /* TransparentFullScreenBackground.swift in Sources */,
