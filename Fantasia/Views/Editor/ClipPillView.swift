@@ -10,8 +10,16 @@
 //
 // 22pt edge handles / this pill's 58pt height are EXEMPT from the 44pt HIG minimum (13-UI-SPEC.md
 // "Continuous-drag hit targets" exception) — validated on-device by Spike 001, do not enlarge.
+//
+// 13-20 i5: real media previews. Video clips render a filmstrip — one AVAssetImageGenerator
+// frame per 46pt cell spanning the pill's width, cached in a tiny in-memory NSCache (distinct
+// from ThumbnailCache.shared, which is keyed one-image-per-generation-id and persists to disk —
+// this needs many small per-clip/per-cell frames that never need to survive an app relaunch).
+// Image clips render a single AsyncImage fill. While loading or on failure, the original
+// gradient+glyph placeholder still shows.
 
 import SwiftUI
+import AVFoundation
 
 struct ClipPillView: View {
     let clip: ProjectClip
@@ -32,25 +40,30 @@ struct ClipPillView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
+    @State private var filmstripFrames: [Int: UIImage] = [:]
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)      // #8C59FF
     private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439) // #FF5470
+
+    // Tiny in-memory-only cache — deliberately NOT ThumbnailCache.shared (see file header).
+    private static let filmstripCache = NSCache<NSString, UIImage>()
+    private let cellWidth: CGFloat = 46
 
     private var trimStart: Double { clip.trimStartSeconds }
     private var trimEnd: Double {
         clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
     }
     private var width: Double { max((trimEnd - trimStart) * pxPerSecond, 30) }
+    private var cellCount: Int { max(1, Int((width / cellWidth).rounded(.up))) }
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(red: 0.16, green: 0.14, blue: 0.22))
 
-            Image(systemName: clip.mediaType == "image" ? "photo" : "film")
-                .font(.system(size: 16))
-                .foregroundStyle(.white.opacity(0.45))
+            mediaContent
         }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? accent : .clear, lineWidth: 2)
@@ -68,6 +81,75 @@ struct ClipPillView: View {
         }
         .overlay(alignment: .topTrailing) {
             if isSelected { deleteButton }
+        }
+        .task(id: "\(clip.id)-\(clip.url ?? "")-\(cellCount)") {
+            guard clip.mediaType != "image" else { return }
+            await loadFilmstripIfNeeded()
+        }
+    }
+
+    // MARK: - Media preview (13-20 i5)
+
+    @ViewBuilder
+    private var mediaContent: some View {
+        if clip.mediaType == "image" {
+            if let urlString = clip.url, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        placeholderGlyph
+                    }
+                }
+            } else {
+                placeholderGlyph
+            }
+        } else if !filmstripFrames.isEmpty {
+            HStack(spacing: 0) {
+                ForEach(0..<cellCount, id: \.self) { index in
+                    Group {
+                        if let frame = filmstripFrames[index] {
+                            Image(uiImage: frame).resizable().scaledToFill()
+                        } else {
+                            Color.clear
+                        }
+                    }
+                    .frame(width: cellWidth)
+                }
+            }
+            .frame(width: width, height: 58, alignment: .leading)
+        } else {
+            placeholderGlyph
+        }
+    }
+
+    private var placeholderGlyph: some View {
+        Image(systemName: clip.mediaType == "image" ? "photo" : "film")
+            .font(.system(size: 16))
+            .foregroundStyle(.white.opacity(0.45))
+    }
+
+    private func loadFilmstripIfNeeded() async {
+        guard let urlString = clip.url, let url = URL(string: urlString) else { return }
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 92, height: 116)
+
+        for index in 0..<cellCount {
+            if Task.isCancelled { return }
+            let cacheKey = "\(clip.id)-\(index)" as NSString
+            if let cached = Self.filmstripCache.object(forKey: cacheKey) {
+                filmstripFrames[index] = cached
+                continue
+            }
+            let seconds = trimStart + Double(index) * (cellWidth / pxPerSecond)
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            guard let (cgImage, _) = try? await generator.image(at: time) else { continue }
+            let image = UIImage(cgImage: cgImage)
+            Self.filmstripCache.setObject(image, forKey: cacheKey)
+            if Task.isCancelled { return }
+            filmstripFrames[index] = image
         }
     }
 

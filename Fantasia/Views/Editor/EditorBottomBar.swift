@@ -70,7 +70,7 @@ struct EditorBottomBar: View {
 
     private var defaultBar: some View {
         HStack(spacing: 0) {
-            tool(icon: "pencil.and.outline", label: "Edit", action: onEdit)
+            tool(icon: "pencil", label: "Edit", action: onEdit)
             tool(icon: "textformat", label: "Text", action: onAddText)
             tool(icon: "music.note", label: "Audio", action: onAddAudio)
             captionsTool

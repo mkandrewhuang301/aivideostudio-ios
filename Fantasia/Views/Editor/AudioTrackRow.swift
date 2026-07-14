@@ -15,11 +15,13 @@
 // top of each other in z-order; this is an accepted v1 tradeoff (matches the locked sketch's
 // "multiple addAudio() calls produce multiple stacked green rows" note), not a blocker.
 //
-// The "+" tile is pinned at local x = `state.currentTime * pxPerSecond`, exactly like
-// TextOverlayTrackRow's add-tile: because this row lives inside TimelineTrackView's content stack
-// (translated by `viewportWidth/2 - currentTime*pxPerSecond`), a tile at that local x always
-// resolves to `viewportWidth/2` on screen — i.e. it rides along at the fixed-center playhead
-// position without this plan needing to touch TimelineTrackView.swift.
+// 13-20 i2: each audio clip now gets its OWN row (a `VStack` of one-row-per-item), matching the
+// locked sketch's per-item stacking (index.html:402 — audio pills stack below the text rows, each
+// on its own row) instead of a single shared ZStack rail where overlapping clips would visually
+// collide. TimelineTrackView hosts this inside its vertically-scrollable tracks viewport and gives
+// the WHOLE stack (TextOverlayTrackRow + this row + CaptionTrackRow) its shared
+// `contentWidth`/`contentOffset` — this view only needs to lay out one `pxPerSecond`-scaled pill
+// per row.
 
 import SwiftUI
 
@@ -28,33 +30,34 @@ struct AudioTrackRow: View {
 
     let state: EditorState
     let pxPerSecond: Double
-
-    private let rowHeight: CGFloat = 30
+    var rowHeight: CGFloat = 28
 
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
-            // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
+        // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
+        // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(state.project.audioClips) { clip in
-                AudioPillView(
-                    clip: clip,
-                    pxPerSecond: pxPerSecond,
-                    isSelected: state.selection == .audio(clip.id),
-                    onSelect: { state.select(.audio(clip.id)) },
-                    onRetime: { offset, trimStart, trimEnd in
-                        Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
-                    },
-                    onDelete: {
-                        Task { await delete(id: clip.id) }
-                    }
-                )
-                .offset(x: clip.startOffsetSeconds * pxPerSecond)
+                ZStack(alignment: .topLeading) {
+                    AudioPillView(
+                        clip: clip,
+                        pxPerSecond: pxPerSecond,
+                        isSelected: state.selection == .audio(clip.id),
+                        onSelect: { state.select(.audio(clip.id)) },
+                        onRetime: { offset, trimStart, trimEnd in
+                            Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
+                        },
+                        onDelete: {
+                            Task { await delete(id: clip.id) }
+                        }
+                    )
+                    .offset(x: clip.startOffsetSeconds * pxPerSecond)
+                }
+                .frame(height: rowHeight, alignment: .leading)
             }
         }
-        .frame(height: rowHeight)
         .overlay(alignment: .bottom) {
             if let toastMessage {
                 Text(toastMessage)

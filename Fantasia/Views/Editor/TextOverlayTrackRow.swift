@@ -9,11 +9,12 @@
 // SAME struct name/signature as plan 12's stub (`TextOverlayTrackRow(state:, pxPerSecond:)`) —
 // TimelineTrackView.swift (already compiled/wired) needs no changes.
 //
-// The "+" tile is pinned at local x = `state.currentTime * pxPerSecond`: because this row lives
-// inside TimelineTrackView's content stack, which the parent translates by
-// `viewportWidth/2 - currentTime*pxPerSecond`, a tile at that local x always resolves to
-// `viewportWidth/2` on screen — i.e. it rides along at the fixed-center playhead position exactly
-// like the clip row's inline add-tile, without this plan needing to touch TimelineTrackView.swift.
+// 13-20 i2: each text overlay now gets its OWN row (a `VStack` of one-row-per-item), matching the
+// locked sketch's per-item stacking (index.html:389 — `p.style.top=(idx*30)+'px'`) instead of a
+// single shared ZStack rail where two overlays active at the same time would visually overlap.
+// TimelineTrackView hosts this inside its vertically-scrollable tracks viewport and gives the
+// WHOLE stack (this row + AudioTrackRow + CaptionTrackRow) its shared `contentWidth`/
+// `contentOffset` — this view only needs to lay out one `pxPerSecond`-scaled pill per row.
 
 import SwiftUI
 
@@ -22,31 +23,32 @@ struct TextOverlayTrackRow: View {
 
     let state: EditorState
     let pxPerSecond: Double
-
-    private let rowHeight: CGFloat = 30
+    var rowHeight: CGFloat = 28
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
-            // Text action (which makes this exact same addTextOverlay call at the playhead); no
-            // per-row "+" tile lives here anymore.
+        // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
+        // Text action (which makes this exact same addTextOverlay call at the playhead); no
+        // per-row "+" tile lives here anymore.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(state.project.textOverlays) { overlay in
-                TextOverlayPillView(
-                    overlay: overlay,
-                    pxPerSecond: pxPerSecond,
-                    isSelected: state.selection == .text(overlay.id),
-                    onSelect: { state.select(.text(overlay.id)) },
-                    onRetime: { start, end in
-                        Task { await retime(id: overlay.id, start: start, end: end) }
-                    },
-                    onDelete: {
-                        Task { await delete(id: overlay.id) }
-                    }
-                )
-                .offset(x: overlay.startSeconds * pxPerSecond)
+                ZStack(alignment: .topLeading) {
+                    TextOverlayPillView(
+                        overlay: overlay,
+                        pxPerSecond: pxPerSecond,
+                        isSelected: state.selection == .text(overlay.id),
+                        onSelect: { state.select(.text(overlay.id)) },
+                        onRetime: { start, end in
+                            Task { await retime(id: overlay.id, start: start, end: end) }
+                        },
+                        onDelete: {
+                            Task { await delete(id: overlay.id) }
+                        }
+                    )
+                    .offset(x: overlay.startSeconds * pxPerSecond)
+                }
+                .frame(height: rowHeight, alignment: .leading)
             }
         }
-        .frame(height: rowHeight)
     }
 
     // MARK: - Mutations
