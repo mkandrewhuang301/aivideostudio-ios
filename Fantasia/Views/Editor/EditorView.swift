@@ -32,6 +32,10 @@ struct EditorView: View {
 
     @State private var isExporting = false
 
+    // Plan 16: fullscreen preview player (SC6) + Caption Style sheet (Delta 4).
+    @State private var showFullscreenPlayer = false
+    @State private var showCaptionStyleSheet = false
+
     // Forced-dark palette (13-UI-SPEC.md Color contract) — NOT theme.background/theme.surface.
     private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051)   // #0A0A0D
     private let previewStageBackground = Color(red: 0.047, green: 0.047, blue: 0.067) // #0C0C11
@@ -58,6 +62,25 @@ struct EditorView: View {
         .onDisappear { tearDownPlayer() }
         .onChange(of: state.isPlaying) { _, isPlaying in
             if isPlaying { player?.play() } else { player?.pause() }
+        }
+        .onChange(of: showFullscreenPlayer) { _, isShowing in
+            // The fullscreen player (plan 16) owns its own AVPlayer bound to the same
+            // EditorState clock — pause the inline player while fullscreen is up so both
+            // players' periodic time observers never race writes onto state.currentTime at
+            // once, then reconcile the inline player's position/playback back on minimize.
+            if isShowing {
+                player?.pause()
+            } else if let player {
+                let time = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                if state.isPlaying { player.play() }
+            }
+        }
+        .fullScreenCover(isPresented: $showFullscreenPlayer) {
+            FullscreenEditorPlayerView(state: state, onMinimize: { showFullscreenPlayer = false })
+        }
+        .sheet(isPresented: $showCaptionStyleSheet) {
+            CaptionStyleSheet(state: state)
         }
     }
 
@@ -217,6 +240,15 @@ struct EditorView: View {
                     .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            .overlay {
+                // Plan 16: live karaoke captions (SC5's render half — Delta 6), same letterboxed
+                // canvas frame as the Text overlay layer above so both sit in the same coordinate
+                // space as the AVPlayer surface. Read-only preview, never interactive.
+                CaptionOverlayView(state: state)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .allowsHitTesting(false)
+            }
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .frame(height: 340)
@@ -239,7 +271,7 @@ struct EditorView: View {
     private var controlsRow: some View {
         HStack(spacing: 4) {
             Button {
-                // Plan 14 wires the real fullscreen player (FullscreenEditorPlayerView).
+                showFullscreenPlayer = true
             } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 15))
@@ -257,6 +289,19 @@ struct EditorView: View {
                     .frame(minWidth: 32, minHeight: 32)
             }
             .accessibilityLabel("Aspect ratio")
+
+            // Plan 16, Delta 4: Caption Style gear — only once the Captions track has >=1 cue.
+            if !state.project.captionCues.isEmpty {
+                Button {
+                    showCaptionStyleSheet = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                }
+                .accessibilityLabel("Caption style")
+            }
 
             Spacer()
 
