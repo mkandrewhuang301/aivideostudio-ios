@@ -250,7 +250,7 @@ struct EditorView: View {
                 titleDraft = state.project.title ?? ""
                 isEditingTitle = true
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 8) {
                     Text(displayTitle)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white)
@@ -382,6 +382,20 @@ struct EditorView: View {
                     Image(systemName: "film")
                         .font(.system(size: 32))
                         .foregroundStyle(.white.opacity(0.3))
+                }
+                // i5.3 (Plan 13-20): the composition only carries VIDEO frames (see
+                // buildComposition's KNOWN LIMITATION doc comment below) — when the playhead sits
+                // inside an IMAGE clip's [start, end) range, overlay the still directly so image
+                // clips are no longer a black hole in the live preview (export already renders
+                // them correctly server-side).
+                if let imageClipURL = currentImageClipURL {
+                    AsyncImage(url: imageClipURL) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFit()
+                        } else {
+                            Color.black
+                        }
+                    }
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -524,7 +538,10 @@ struct EditorView: View {
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
             Task { @MainActor in
-                state.currentTime = time.seconds
+                // i4.2 (Plan 13-20): the divider can never read before 00:00 or past the total —
+                // state.seek and the scrub gesture already clamp; this closes the last gap
+                // (periodic playback writes were unclamped).
+                state.currentTime = min(max(time.seconds, 0), state.totalDuration)
                 if state.isPlaying, time.seconds >= currentPlayEnd - 0.05 {
                     state.isPlaying = false
                 }
@@ -597,6 +614,18 @@ struct EditorView: View {
         return max(0, end - clip.trimStartSeconds)
     }
 
+    /// i5.3: the image clip (if any) whose [start, end) range the playhead currently sits inside,
+    /// resolved from `clipRanges` (the same cumulative-duration windows `buildComposition` already
+    /// computes) — nil for video clips or when the playhead is outside every clip's range.
+    private var currentImageClipURL: URL? {
+        guard let range = clipRanges.first(where: { state.currentTime >= $0.start && state.currentTime < $0.end }),
+              let clip = state.project.clips.first(where: { $0.id == range.clipId }),
+              clip.mediaType == "image",
+              let urlString = clip.url,
+              let url = URL(string: urlString) else { return nil }
+        return url
+    }
+
     private func tearDownPlayerObserverOnly() {
         if let token = timeObserverToken {
             player?.removeTimeObserver(token)
@@ -642,12 +671,13 @@ struct EditorView: View {
     private func addDefaultTextOverlay() async {
         do {
             try await projectManager.addTextOverlay(
-                text: "Tap to edit",
+                text: "Text",
                 xNorm: 0.5,
                 yNorm: 0.5,
                 startSeconds: state.currentTime,
                 endSeconds: state.currentTime + 3
             )
+            syncProjectFromManager()
         } catch {
             print("[EditorView] addDefaultTextOverlay error: \(error)")
         }
@@ -722,6 +752,9 @@ struct EditorView: View {
             Task {
                 do {
                     let didSplit = try await projectManager.splitTextOverlay(textId: id, atLocalSeconds: state.currentTime)
+                    if didSplit {
+                        syncProjectFromManager()
+                    }
                     showBarToast(didSplit ? "Split" : "Nothing to split")
                 } catch {
                     print("[EditorView] splitTextOverlay error: \(error)")
@@ -790,6 +823,7 @@ struct EditorView: View {
                 do {
                     try await projectManager.deleteTextOverlay(textId: id)
                     state.select(.none)
+                    syncProjectFromManager()
                     showBarToast("Text removed")
                 } catch {
                     print("[EditorView] deleteTextOverlay error: \(error)")
@@ -848,6 +882,7 @@ struct EditorView: View {
                 startSeconds: overlay.startSeconds,
                 endSeconds: overlay.endSeconds
             )
+            syncProjectFromManager()
             showBarToast("Text duplicated")
         } catch {
             print("[EditorView] duplicateSelectedText error: \(error)")
