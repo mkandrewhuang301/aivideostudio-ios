@@ -10,9 +10,9 @@
 // light/dark ThemeManager setting — matches every professional video editor convention and the
 // locked sketch, which has no light variant.
 //
-// TimelineMountView below is a deliberate placeholder — plan 12 replaces it with the real
-// filmstrip/pill timeline. Its signature (`TimelineMountView(state:)`) is the stable mount point
-// that replacement swaps in.
+// Plan 12 replaced plan 11's placeholder mount view below with the real TimelineTrackView
+// (Fantasia/Views/Editor/TimelineTrackView.swift) — filmstrip clips, fixed-center playhead,
+// background scrub, and the stacked Text/Audio/Caption track mount points.
 
 import SwiftUI
 import AVFoundation
@@ -49,7 +49,7 @@ struct EditorView: View {
             topBar
             previewStage
             controlsRow
-            TimelineMountView(state: state)
+            TimelineTrackView(state: state)
         }
         .background(canvasBackground.ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -323,47 +323,5 @@ struct EditorView: View {
         player?.pause()
         player = nil
         titleErrorClearTask?.cancel()
-    }
-}
-
-// MARK: - TimelineMountView (PLACEHOLDER — plan 12 replaces this with the real filmstrip/pill
-// timeline: ruler + clips + text/audio/caption pill rails, all sharing this fixed-center
-// playhead convention). Signature is the stable mount point EditorView keeps calling.
-
-struct TimelineMountView: View {
-    let state: EditorState
-
-    private let trackBackground = Color(red: 0.078, green: 0.078, blue: 0.098) // #141419
-
-    var body: some View {
-        ZStack {
-            trackBackground
-
-            VStack(spacing: 4) {
-                Text("Timeline")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
-                Text("\(formattedTime(state.currentTime)) / \(formattedTime(state.totalDuration))")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-
-            // Fixed-center playhead — content (ruler/filmstrip/pill rails) will translate under
-            // this via .offset() in plan 12, never a native ScrollView (Spike 001's validated
-            // gesture pattern).
-            Rectangle()
-                .fill(Color.white)
-                .frame(width: 2)
-                .shadow(color: .white.opacity(0.5), radius: 4)
-                .allowsHitTesting(false)
-        }
-        .frame(height: 120)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func formattedTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
