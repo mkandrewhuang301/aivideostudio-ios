@@ -32,6 +32,7 @@ struct TextOverlayCanvasView: View {
                         overlay: overlay,
                         canvasSize: geo.size,
                         isSelected: state.selection == .text(overlay.id),
+                        startEditing: state.editRequestedTextId == overlay.id,
                         onSelect: { state.select(.text(overlay.id)) },
                         onMove: { xNorm, yNorm in
                             Task { await persistMove(id: overlay.id, xNorm: xNorm, yNorm: yNorm) }
@@ -39,8 +40,14 @@ struct TextOverlayCanvasView: View {
                         onResize: { scale in
                             Task { await persistResize(id: overlay.id, scale: scale) }
                         },
+                        onRotate: { rotation in
+                            Task { await persistRotation(id: overlay.id, rotation: rotation) }
+                        },
                         onEditCommit: { newText in
                             Task { await persistTextEdit(id: overlay.id, text: newText) }
+                        },
+                        onEditTriggerConsumed: {
+                            if state.editRequestedTextId == overlay.id { state.editRequestedTextId = nil }
                         },
                         onDelete: {
                             Task { await deleteOverlay(id: overlay.id) }
@@ -82,6 +89,14 @@ struct TextOverlayCanvasView: View {
         }
     }
 
+    private func persistRotation(id: String, rotation: Double) async {
+        do {
+            try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
+        } catch {
+            print("[TextOverlayCanvasView] rotate error: \(error)")
+        }
+    }
+
     private func persistTextEdit(id: String, text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -108,6 +123,7 @@ struct TextOverlayCanvasView: View {
                 xNorm: min(0.94, overlay.xNorm + 0.04),
                 yNorm: min(0.94, overlay.yNorm + 0.04),
                 widthNorm: overlay.widthNorm,
+                rotation: overlay.rotation,
                 startSeconds: overlay.startSeconds,
                 endSeconds: overlay.endSeconds
             )
@@ -123,6 +139,9 @@ private struct TextOverlayItemView: View {
     let overlay: TextOverlay
     let canvasSize: CGSize
     let isSelected: Bool
+    /// Flips true when the contextual bottom bar's "Edit" action targets this overlay (13-19 Task
+    /// A) — mirrors tapping the ✎ corner button. Consumed via `onEditTriggerConsumed` immediately.
+    let startEditing: Bool
     let onSelect: () -> Void
     /// Fires once, on drag release, with the final normalized (xNorm, yNorm) — mirrors
     /// ClipPillView's onReorder/onTrimChange contract: this view only previews the live drag via a
@@ -130,13 +149,18 @@ private struct TextOverlayItemView: View {
     let onMove: (Double, Double) -> Void
     /// Fires once, on resize-handle release, with the final font-scale factor (0.5x-3x).
     let onResize: (Double) -> Void
+    /// Fires once, on rotation-handle release, with the final angle in degrees (clockwise-positive,
+    /// matching `.rotationEffect`) — 13-19 Task H.
+    let onRotate: (Double) -> Void
     /// Fires once, when the inline edit TextField commits a non-empty, changed value.
     let onEditCommit: (String) -> Void
+    let onEditTriggerConsumed: () -> Void
     let onDelete: () -> Void
     let onDuplicate: () -> Void
 
     @State private var dragOffset: CGSize = .zero
     @State private var scaleDelta: Double = 0
+    @State private var rotationDelta: Double = 0
     @State private var isEditing = false
     @State private var editDraft = ""
     @FocusState private var editFieldFocused: Bool
@@ -146,6 +170,7 @@ private struct TextOverlayItemView: View {
 
     private var baseScale: Double { overlay.widthNorm ?? 1.0 }
     private var liveScale: Double { min(3.0, max(0.5, baseScale + scaleDelta)) }
+    private var liveRotation: Double { overlay.rotation + rotationDelta }
 
     private var basePosition: CGPoint {
         CGPoint(x: overlay.xNorm * canvasSize.width, y: overlay.yNorm * canvasSize.height)
@@ -164,8 +189,18 @@ private struct TextOverlayItemView: View {
         .onChange(of: overlay.text) { _, newValue in
             if !isEditing { editDraft = newValue }
         }
+        .onChange(of: startEditing) { _, shouldStart in
+            guard shouldStart, !isEditing else { return }
+            editDraft = overlay.text
+            isEditing = true
+            onEditTriggerConsumed()
+        }
     }
 
+    // The ENTIRE box — text, selection frame, and all four corner controls — is composed FIRST,
+    // then `.rotationEffect` is the LAST modifier applied, so every control rotates together as
+    // one rigid unit around the box's center (CapCut-style), and `.overlay(alignment:)` below
+    // aligns against the box's own (pre-rotation) bounds rather than a screen-axis-aligned one.
     private var displayView: some View {
         Text(overlay.text)
             .font(.system(size: baseFontSize * liveScale, weight: .heavy))
@@ -189,6 +224,10 @@ private struct TextOverlayItemView: View {
             .overlay(alignment: .bottomTrailing) {
                 if isSelected { resizeHandle.offset(x: 20, y: 20) }
             }
+            .overlay(alignment: .top) {
+                if isSelected { rotationHandle.offset(y: -36) }
+            }
+            .rotationEffect(.degrees(liveRotation))
     }
 
     private var editingView: some View {
@@ -271,6 +310,55 @@ private struct TextOverlayItemView: View {
         .contentShape(Rectangle())
         .highPriorityGesture(resizeDragGesture)
         .accessibilityLabel("Resize text overlay")
+    }
+
+    // MARK: - Rotation (NEW, 13-19 Task H) — short vertical line rising from the box's top-center
+    // to a small dot; press-drag the dot to rotate clockwise/counterclockwise. Continuous-drag
+    // control, exempt from the 44pt rule (same exemption resizeHandle already relies on).
+
+    private var rotationHandle: some View {
+        VStack(spacing: 2) {
+            Rectangle()
+                .fill(Color.white.opacity(0.85))
+                .frame(width: 1.5, height: 20)
+            ZStack {
+                Color.white.opacity(0.001).frame(width: 34, height: 34)
+                Circle()
+                    .fill(Color.black.opacity(0.85))
+                    .frame(width: 12, height: 12)
+                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+            }
+        }
+        .contentShape(Rectangle())
+        .highPriorityGesture(rotationDragGesture)
+        .accessibilityLabel("Rotate text overlay")
+    }
+
+    // Approximate distance (points) from the box's CENTER to the handle's rest position — the box
+    // varies in height with font size/scale, so this is a fixed, "close enough" constant rather
+    // than exact per-overlay geometry (same pragmatic tradeoff resizeHandle's /120 divisor makes).
+    private let rotationHandleRadius: Double = 62
+
+    // SwiftUI delivers DragGesture translation in the GESTURE-ATTACHED view's own local coordinate
+    // space, already adjusted for any ancestor `.rotationEffect` — so at the CURRENT (possibly
+    // already-rotated) orientation, "straight up" from the handle's rest point is still (0, -R) in
+    // this local frame. The finger's current vector from box-center is therefore
+    // (0, -R) + translation; atan2(x, -y) of that vector gives the ADDITIONAL clockwise angle
+    // (SwiftUI's .rotationEffect convention) relative to the box's current rotation — i.e. exactly
+    // `rotationDelta`, added to `overlay.rotation` by `liveRotation` above.
+    private var rotationDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                onSelect()
+                let vectorX = value.translation.width
+                let vectorY = -rotationHandleRadius + value.translation.height
+                rotationDelta = atan2(vectorX, -vectorY) * 180 / .pi
+            }
+            .onEnded { _ in
+                let finalRotation = liveRotation
+                rotationDelta = 0
+                onRotate(finalRotation)
+            }
     }
 
     // MARK: - Move (drag-anywhere-on-body)

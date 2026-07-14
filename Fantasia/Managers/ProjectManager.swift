@@ -213,6 +213,32 @@ final class ProjectManager {
         loadedProject?.clips.removeAll { $0.id == clipId }
     }
 
+    /// Splits the clip at `atLocalSeconds` (in the clip's own trim-seconds space; 13-19 Task
+    /// F/G1). Uses `ClipPillView.splitPoint` for the exact same bounds math the inline trim
+    /// handles rely on — a nil result (split point not strictly inside the clip's trim range) is a
+    /// safe no-op, returns false. `new_trim_end` must be a concrete number server-side (the
+    /// backend column has no "play to source end" sentinel), so a nil `newClipTrimEnd` (no explicit
+    /// trim on the original) resolves to the clip's `originalDurationSeconds`.
+    @discardableResult
+    func splitClip(clipId: String, atLocalSeconds: Double) async throws -> Bool {
+        guard let id = loadedProject?.id,
+              let clip = loadedProject?.clips.first(where: { $0.id == clipId }),
+              let split = ClipPillView.splitPoint(clip: clip, at: atLocalSeconds)
+        else { return false }
+
+        let newTrimEnd = split.newClipTrimEnd ?? clip.originalDurationSeconds ?? split.newClipTrimStart
+        _ = try await APIClient.shared.splitClip(
+            projectId: id,
+            clipId: clipId,
+            originalTrimEnd: split.originalTrimEnd,
+            newTrimStart: split.newClipTrimStart,
+            newTrimEnd: newTrimEnd,
+            newSortOrder: split.newClipSortOrder
+        )
+        await refreshLoadedProjectURLs()
+        return true
+    }
+
     // MARK: - Text overlay mutations (SC3) — optimistic in-place update; no url concern.
 
     func addTextOverlay(
@@ -220,13 +246,14 @@ final class ProjectManager {
         xNorm: Double,
         yNorm: Double,
         widthNorm: Double? = nil,
+        rotation: Double? = nil,
         startSeconds: Double,
         endSeconds: Double
     ) async throws {
         guard let id = loadedProject?.id else { return }
         let overlay = try await APIClient.shared.addTextOverlay(
             projectId: id, text: text, xNorm: xNorm, yNorm: yNorm,
-            widthNorm: widthNorm, startSeconds: startSeconds, endSeconds: endSeconds
+            widthNorm: widthNorm, rotation: rotation, startSeconds: startSeconds, endSeconds: endSeconds
         )
         loadedProject?.textOverlays.append(overlay)
     }
@@ -237,13 +264,14 @@ final class ProjectManager {
         xNorm: Double? = nil,
         yNorm: Double? = nil,
         widthNorm: Double? = nil,
+        rotation: Double? = nil,
         startSeconds: Double? = nil,
         endSeconds: Double? = nil
     ) async throws {
         guard let id = loadedProject?.id else { return }
         let overlay = try await APIClient.shared.updateTextOverlay(
             projectId: id, textId: textId, text: text, xNorm: xNorm, yNorm: yNorm,
-            widthNorm: widthNorm, startSeconds: startSeconds, endSeconds: endSeconds
+            widthNorm: widthNorm, rotation: rotation, startSeconds: startSeconds, endSeconds: endSeconds
         )
         if let index = loadedProject?.textOverlays.firstIndex(where: { $0.id == textId }) {
             loadedProject?.textOverlays[index] = overlay
@@ -254,6 +282,30 @@ final class ProjectManager {
         guard let id = loadedProject?.id else { return }
         try await APIClient.shared.deleteTextOverlay(projectId: id, textId: textId)
         loadedProject?.textOverlays.removeAll { $0.id == textId }
+    }
+
+    /// Splits the text overlay at `atLocalSeconds` (must fall strictly inside its own
+    /// [startSeconds, endSeconds]) — client-side only, no backend change (13-19 Task F): shrinks
+    /// the original's endSeconds and adds a second overlay carrying the same text/position/scale/
+    /// rotation for the remainder. No-op (returns false) if the split point isn't strictly inside.
+    @discardableResult
+    func splitTextOverlay(textId: String, atLocalSeconds: Double) async throws -> Bool {
+        guard let overlay = loadedProject?.textOverlays.first(where: { $0.id == textId }) else { return false }
+        guard atLocalSeconds > overlay.startSeconds + 0.05, atLocalSeconds < overlay.endSeconds - 0.05 else {
+            return false
+        }
+        let originalEnd = overlay.endSeconds
+        try await updateTextOverlay(textId: textId, endSeconds: atLocalSeconds)
+        try await addTextOverlay(
+            text: overlay.text,
+            xNorm: overlay.xNorm,
+            yNorm: overlay.yNorm,
+            widthNorm: overlay.widthNorm,
+            rotation: overlay.rotation,
+            startSeconds: atLocalSeconds,
+            endSeconds: originalEnd
+        )
+        return true
     }
 
     // MARK: - Audio clip mutations (SC4) — reconcile via re-fetch (url-less mutation responses).
@@ -305,6 +357,33 @@ final class ProjectManager {
         guard let id = loadedProject?.id else { return }
         try await APIClient.shared.deleteAudioClip(projectId: id, audioId: audioId)
         loadedProject?.audioClips.removeAll { $0.id == audioId }
+    }
+
+    /// Splits the audio clip at `atLocalSeconds` (in the clip's own trim-seconds space; 13-19 Task
+    /// F/G2). A split point not strictly inside the clip's current trim range is a safe no-op
+    /// (returns false). The second piece starts playing on the timeline exactly where the first
+    /// piece now ends: `newStartOffset = original.startOffsetSeconds + (atLocalSeconds - original.trimStartSeconds)`.
+    @discardableResult
+    func splitAudioClip(audioId: String, atLocalSeconds: Double) async throws -> Bool {
+        guard let id = loadedProject?.id,
+              let clip = loadedProject?.audioClips.first(where: { $0.id == audioId }),
+              let currentTrimEnd = clip.trimEndSeconds
+        else { return false }
+        guard atLocalSeconds > clip.trimStartSeconds + 0.05, atLocalSeconds < currentTrimEnd - 0.05 else {
+            return false
+        }
+
+        let newStartOffset = clip.startOffsetSeconds + (atLocalSeconds - clip.trimStartSeconds)
+        _ = try await APIClient.shared.splitAudioClip(
+            projectId: id,
+            audioId: audioId,
+            originalTrimEnd: atLocalSeconds,
+            newTrimStart: atLocalSeconds,
+            newTrimEnd: currentTrimEnd,
+            newStartOffsetSeconds: newStartOffset
+        )
+        await refreshLoadedProjectURLs()
+        return true
     }
 
     // MARK: - Caption cue mutations (SC5, D-13) — optimistic in-place update; no url concern.

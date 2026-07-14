@@ -24,10 +24,12 @@ struct TextOverlayTrackRow: View {
     let pxPerSecond: Double
 
     private let rowHeight: CGFloat = 30
-    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0) // #8C59FF
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
+            // Text action (which makes this exact same addTextOverlay call at the playhead); no
+            // per-row "+" tile lives here anymore.
             ForEach(state.project.textOverlays) { overlay in
                 TextOverlayPillView(
                     overlay: overlay,
@@ -43,44 +45,8 @@ struct TextOverlayTrackRow: View {
                 )
                 .offset(x: overlay.startSeconds * pxPerSecond)
             }
-
-            addTextTile
-                .offset(x: state.currentTime * pxPerSecond - 11)
         }
         .frame(height: rowHeight)
-    }
-
-    // MARK: - Row-level "+" — appends a new default overlay at the playhead (D-09-style inline add)
-
-    private var addTextTile: some View {
-        Button {
-            Task { await addDefaultOverlay() }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(accent)
-                .frame(width: 22, height: 22)
-                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(accent.opacity(0.7), lineWidth: 1)
-                )
-        }
-        .accessibilityLabel("Add text overlay")
-    }
-
-    private func addDefaultOverlay() async {
-        do {
-            try await projectManager.addTextOverlay(
-                text: "Tap to edit",
-                xNorm: 0.5,
-                yNorm: 0.5,
-                startSeconds: state.currentTime,
-                endSeconds: state.currentTime + 3
-            )
-        } catch {
-            print("[TextOverlayTrackRow] addTextOverlay error: \(error)")
-        }
     }
 
     // MARK: - Mutations

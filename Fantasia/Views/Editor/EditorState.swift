@@ -41,6 +41,13 @@ final class EditorState {
 
     var selection: EditorSelection = .none
 
+    /// Transient "please enter edit mode" signals from the contextual bottom bar's Edit action
+    /// (13-19 Task A) — the owning pill view (TextOverlayItemView / CaptionTrackRow) observes its
+    /// own id against this, flips its local editing @State, then clears the signal back to nil.
+    /// Not part of persisted project state.
+    var editRequestedTextId: String?
+    var editRequestedCaptionId: String?
+
     init(project: EditProject) {
         self.project = project
         self.aspectRatio = project.aspectRatio

@@ -30,14 +30,14 @@ struct AudioTrackRow: View {
     let pxPerSecond: Double
 
     private let rowHeight: CGFloat = 30
-    private let green = Color(red: 0.184, green: 0.620, blue: 0.420) // #2F9E6B
 
-    @State private var showAddAudioSheet = false
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
+            // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
             ForEach(state.project.audioClips) { clip in
                 AudioPillView(
                     clip: clip,
@@ -53,9 +53,6 @@ struct AudioTrackRow: View {
                 )
                 .offset(x: clip.startOffsetSeconds * pxPerSecond)
             }
-
-            addAudioTile
-                .offset(x: state.currentTime * pxPerSecond - 11)
         }
         .frame(height: rowHeight)
         .overlay(alignment: .bottom) {
@@ -69,28 +66,6 @@ struct AudioTrackRow: View {
                     .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showAddAudioSheet) {
-            AddAudioSheet(currentTime: state.currentTime, onAdded: { syncProjectFromManager() })
-        }
-    }
-
-    // MARK: - Row-level "+" — opens AddAudioSheet (upload or preset music)
-
-    private var addAudioTile: some View {
-        Button {
-            showAddAudioSheet = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(green)
-                .frame(width: 22, height: 22)
-                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(green.opacity(0.7), lineWidth: 1)
-                )
-        }
-        .accessibilityLabel("Add audio")
     }
 
     // MARK: - Mutations

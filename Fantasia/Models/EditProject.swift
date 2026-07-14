@@ -94,6 +94,9 @@ struct TextOverlay: Codable, Identifiable, Equatable {
     var xNorm: Double
     var yNorm: Double
     var widthNorm: Double?
+    // Degrees, CLOCKWISE-positive (matches SwiftUI .rotationEffect) — 13-19 Task G3/H. Defaults to
+    // 0 when absent so decoding a pre-migration row (or a slim mutation response) never crashes.
+    var rotation: Double
     var startSeconds: Double
     var endSeconds: Double
 
@@ -102,8 +105,41 @@ struct TextOverlay: Codable, Identifiable, Equatable {
         case xNorm = "x_norm"
         case yNorm = "y_norm"
         case widthNorm = "width_norm"
+        case rotation
         case startSeconds = "start_seconds"
         case endSeconds = "end_seconds"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        text = try container.decode(String.self, forKey: .text)
+        xNorm = try container.decode(Double.self, forKey: .xNorm)
+        yNorm = try container.decode(Double.self, forKey: .yNorm)
+        widthNorm = try container.decodeIfPresent(Double.self, forKey: .widthNorm)
+        rotation = (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0
+        startSeconds = try container.decode(Double.self, forKey: .startSeconds)
+        endSeconds = try container.decode(Double.self, forKey: .endSeconds)
+    }
+
+    init(
+        id: String,
+        text: String,
+        xNorm: Double,
+        yNorm: Double,
+        widthNorm: Double? = nil,
+        rotation: Double = 0,
+        startSeconds: Double,
+        endSeconds: Double
+    ) {
+        self.id = id
+        self.text = text
+        self.xNorm = xNorm
+        self.yNorm = yNorm
+        self.widthNorm = widthNorm
+        self.rotation = rotation
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
     }
 }
 

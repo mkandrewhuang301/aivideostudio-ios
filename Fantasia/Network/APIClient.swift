@@ -484,6 +484,32 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/projects/\(projectId)/clips/\(clipId)", method: "DELETE")
     }
 
+    // POST /api/projects/:id/clips/:clipId/split — T-13-19 Task G1/F. Server copies the source
+    // r2_key to a new object, shrinks the original's trim_end to `originalTrimEnd`, and inserts the
+    // second half at `newSortOrder`. Returns the NEW clip; the caller re-fetches the full project
+    // (mirrors every other clip-mutation's url-less-response convention) rather than trusting
+    // either half's response for playback.
+    func splitClip(
+        projectId: String,
+        clipId: String,
+        originalTrimEnd: Double,
+        newTrimStart: Double,
+        newTrimEnd: Double,
+        newSortOrder: Int
+    ) async throws -> ProjectClip {
+        let body: [String: Any] = [
+            "original_trim_end": originalTrimEnd,
+            "new_trim_start": newTrimStart,
+            "new_trim_end": newTrimEnd,
+            "new_sort_order": newSortOrder,
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: ClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/clips/\(clipId)/split", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.clip
+    }
+
     // POST /api/projects/:id/text — add a draggable Text overlay (SC3).
     func addTextOverlay(
         projectId: String,
@@ -491,6 +517,7 @@ actor APIClient {
         xNorm: Double,
         yNorm: Double,
         widthNorm: Double? = nil,
+        rotation: Double? = nil,
         startSeconds: Double,
         endSeconds: Double
     ) async throws -> TextOverlay {
@@ -499,6 +526,7 @@ actor APIClient {
             "start_seconds": startSeconds, "end_seconds": endSeconds,
         ]
         if let widthNorm { body["width_norm"] = widthNorm }
+        if let rotation { body["rotation"] = rotation }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let response: TextOverlayResponse = try await projectRequest(
             path: "api/projects/\(projectId)/text", method: "POST", body: bodyData, expectedStatus: [201]
@@ -506,7 +534,7 @@ actor APIClient {
         return response.textOverlay
     }
 
-    // PATCH /api/projects/:id/text/:textId — move/retime/resize a Text overlay.
+    // PATCH /api/projects/:id/text/:textId — move/retime/resize/rotate a Text overlay.
     func updateTextOverlay(
         projectId: String,
         textId: String,
@@ -514,6 +542,7 @@ actor APIClient {
         xNorm: Double? = nil,
         yNorm: Double? = nil,
         widthNorm: Double? = nil,
+        rotation: Double? = nil,
         startSeconds: Double? = nil,
         endSeconds: Double? = nil
     ) async throws -> TextOverlay {
@@ -522,6 +551,7 @@ actor APIClient {
         if let xNorm { body["x_norm"] = xNorm }
         if let yNorm { body["y_norm"] = yNorm }
         if let widthNorm { body["width_norm"] = widthNorm }
+        if let rotation { body["rotation"] = rotation }
         if let startSeconds { body["start_seconds"] = startSeconds }
         if let endSeconds { body["end_seconds"] = endSeconds }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
@@ -614,6 +644,29 @@ actor APIClient {
     // DELETE /api/projects/:id/audio/:audioId
     func deleteAudioClip(projectId: String, audioId: String) async throws {
         try await authorizedRequestNoContent(path: "api/projects/\(projectId)/audio/\(audioId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/audio/:audioId/split — T-13-19 Task G2/F. Same copy-then-insert shape
+    // as splitClip. Returns the NEW audio clip; caller re-fetches for a fresh presigned url.
+    func splitAudioClip(
+        projectId: String,
+        audioId: String,
+        originalTrimEnd: Double,
+        newTrimStart: Double,
+        newTrimEnd: Double,
+        newStartOffsetSeconds: Double
+    ) async throws -> AudioClip {
+        let body: [String: Any] = [
+            "original_trim_end": originalTrimEnd,
+            "new_trim_start": newTrimStart,
+            "new_trim_end": newTrimEnd,
+            "new_start_offset_seconds": newStartOffsetSeconds,
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: AudioClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/audio/\(audioId)/split", method: "POST", body: bodyData, expectedStatus: [201]
+        )
+        return response.audioClip
     }
 
     // POST /api/projects/:id/captions — add a caption cue (+ its words).

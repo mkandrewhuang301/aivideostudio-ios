@@ -24,9 +24,7 @@ struct CaptionTrackRow: View {
     let pxPerSecond: Double
 
     private let rowHeight: CGFloat = 30
-    private let blue = Color(red: 0.169, green: 0.561, blue: 0.851) // #2B8FD9
 
-    @State private var isTranscribing = false
     @State private var editingCueId: String?
     @State private var showDeleteAllConfirm = false
     @State private var toastMessage: String?
@@ -45,31 +43,32 @@ struct CaptionTrackRow: View {
                     showDeleteAllConfirm = true
                 }
 
-            if state.project.captionCues.isEmpty {
-                emptyStateRow
-            } else {
-                ForEach(state.project.captionCues) { cue in
-                    CaptionPillView(
-                        cue: cue,
-                        pxPerSecond: pxPerSecond,
-                        isSelected: state.selection == .caption(cue.id),
-                        isEditing: editingCueId == cue.id,
-                        onSelect: { state.select(.caption(cue.id)) },
-                        onRetime: { start, end in
-                            Task { await retime(id: cue.id, start: start, end: end) }
-                        },
-                        onWordsCommit: { words in
-                            Task { await commitWords(id: cue.id, words: words) }
-                        },
-                        onDelete: {
-                            Task { await deleteCue(id: cue.id) }
-                        },
-                        onEditToggle: {
-                            editingCueId = (editingCueId == cue.id) ? nil : cue.id
-                        }
-                    )
-                    .offset(x: cue.startSeconds * pxPerSecond)
-                }
+            // Pure pill rail (13-19 Task E) — the "No captions yet / Auto-generate…" hint used to
+            // render HERE, inside the scrolling content, so the parent's contentOffset shoved it
+            // off-screen (the bug the ideal-vs-current diff caught). Auto-generate now lives
+            // exclusively on EditorBottomBar's Captions action (disabled until there's captionable
+            // media); an empty Captions track is simply blank, matching the Text/Audio rails.
+            ForEach(state.project.captionCues) { cue in
+                CaptionPillView(
+                    cue: cue,
+                    pxPerSecond: pxPerSecond,
+                    isSelected: state.selection == .caption(cue.id),
+                    isEditing: editingCueId == cue.id,
+                    onSelect: { state.select(.caption(cue.id)) },
+                    onRetime: { start, end in
+                        Task { await retime(id: cue.id, start: start, end: end) }
+                    },
+                    onWordsCommit: { words in
+                        Task { await commitWords(id: cue.id, words: words) }
+                    },
+                    onDelete: {
+                        Task { await deleteCue(id: cue.id) }
+                    },
+                    onEditToggle: {
+                        editingCueId = (editingCueId == cue.id) ? nil : cue.id
+                    }
+                )
+                .offset(x: cue.startSeconds * pxPerSecond)
             }
         }
         .frame(height: rowHeight)
@@ -96,71 +95,14 @@ struct CaptionTrackRow: View {
         } message: {
             Text("This removes every caption in this project. This cannot be undone.")
         }
-    }
-
-    // MARK: - Empty state (Copywriting Contract): "No captions yet" / "Auto-generate from this
-    // clip's audio" primary inline button, INSIDE the track row (not a full empty-state block).
-
-    private var emptyStateRow: some View {
-        HStack(spacing: 8) {
-            Text("No captions yet")
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(.white.opacity(0.55))
-
-            if isTranscribing {
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .tint(blue)
-                        .scaleEffect(0.6)
-                    Text("Transcribing…")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-            } else {
-                Button {
-                    autoGenerate()
-                } label: {
-                    Text("Auto-generate from this clip's audio")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(blue)
-                }
-            }
+        // Contextual bar's caption "Edit" action (13-19 Task A) signals here rather than owning
+        // its own editing-mode entry point — mirrors TextOverlayItemView's editRequestedTextId
+        // trigger below.
+        .onChange(of: state.editRequestedCaptionId) { _, requestedId in
+            guard let requestedId, state.project.captionCues.contains(where: { $0.id == requestedId }) else { return }
+            editingCueId = requestedId
+            state.editRequestedCaptionId = nil
         }
-        .padding(.horizontal, 4)
-    }
-
-    // MARK: - Auto-generate (non-blocking — `isTranscribing` is local @State scoped to this row
-    // only; nothing disables the rest of the editor, satisfying the Copywriting Contract's
-    // "rest of the editor stays fully interactive" requirement without any extra plumbing).
-
-    private func autoGenerate() {
-        guard let clipId = clipIdUnderPlayhead() else { return }
-        isTranscribing = true
-        Task {
-            do {
-                try await projectManager.autoGenerateCaptions(clipId: clipId)
-                syncProjectFromManager()
-            } catch {
-                print("[CaptionTrackRow] autoGenerateCaptions error: \(error)")
-            }
-            isTranscribing = false
-        }
-    }
-
-    /// Resolves which clip is under the current playhead by walking `state.project.clips` in
-    /// `sortOrder`, accumulating each clip's trimmed duration — same cumulative-offset math as
-    /// `TimelineTrackView.handleReorder`'s `starts` array, kept local here since this is a
-    /// read-only lookup (not a mutation) and doesn't warrant a new cross-file shared helper.
-    private func clipIdUnderPlayhead() -> String? {
-        let clips = state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
-        var acc = 0.0
-        for clip in clips {
-            let end = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
-            let dur = max(0, end - clip.trimStartSeconds)
-            if state.currentTime < acc + dur { return clip.id }
-            acc += dur
-        }
-        return clips.last?.id
     }
 
     // MARK: - Mutations

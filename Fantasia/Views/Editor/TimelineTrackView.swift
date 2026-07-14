@@ -28,8 +28,19 @@ struct TimelineTrackView: View {
 
     let pxPerSecond: Double = 44
     private let clipRowHeight: CGFloat = 58
+    private let rulerHeight: CGFloat = 24
+    private let rowSpacing: CGFloat = 6
+    private let topInset: CGFloat = 6   // nudged up from 10 (Task B.4) to make room below for the playhead's top
     private let trackBackground = Color(red: 0.078, green: 0.078, blue: 0.098) // #141419
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)              // #8C59FF
+
+    // Where the ruler row and clip row each start, in the SAME top-leading coordinate space the
+    // playhead/left docks use — derived from the shared layout constants above so nothing can
+    // silently drift out of sync between the docks and the actual row positions.
+    private var rulerRowTop: CGFloat { topInset }
+    private var clipRowTop: CGFloat { topInset + rulerHeight + rowSpacing }
+    private var playheadTopY: CGFloat { clipRowTop - 2 } // starts just under the ruler numbers/dots, never over them
+    private var playheadHeight: CGFloat { clipRowHeight + 28 } // spans through the clip row with a little breathing room, stays inside the 130pt track
 
     @State private var scrubDragStartTime: Double? = nil
     @State private var showAddMediaSheet = false
@@ -50,7 +61,7 @@ struct TimelineTrackView: View {
                     .contentShape(Rectangle())
                     .gesture(scrubGesture)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: rowSpacing) {
                     ruler(contentWidth: contentWidth)
                     clipRow
                     TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond)
@@ -58,18 +69,41 @@ struct TimelineTrackView: View {
                     CaptionTrackRow(state: state, pxPerSecond: pxPerSecond)
                 }
                 .frame(width: contentWidth, alignment: .leading)
-                .offset(x: contentOffset, y: 10)
+                .offset(x: contentOffset, y: topInset)
             }
             .clipped()
             .overlay(alignment: .top) {
-                // Fixed-center playhead — content (ruler + clip row + track rows) translates
-                // under this via .offset() above; the playhead itself never moves.
-                Rectangle()
+                // Fixed-center playhead (Task B.4) — content (ruler + clip row + track rows)
+                // translates under this via .offset() above; the playhead itself never moves.
+                // Shortened + pushed down so its top sits just under the ruler numbers/dots at
+                // EVERY scroll offset (never overlaps them), with a small rounded nub at its top
+                // (sketch's .playhead-line::before).
+                ZStack {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 0
+                    )
                     .fill(Color.white)
-                    .frame(width: 2, height: 120)
-                    .shadow(color: .white.opacity(0.5), radius: 4)
-                    .position(x: viewportWidth / 2, y: 60)
-                    .allowsHitTesting(false)
+                    .frame(width: 11, height: 8)
+                    .position(x: viewportWidth / 2, y: playheadTopY)
+
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(width: 2, height: playheadHeight)
+                        .shadow(color: .white.opacity(0.5), radius: 4)
+                        .position(x: viewportWidth / 2, y: playheadTopY + playheadHeight / 2)
+                }
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topLeading) {
+                // Left docks (Task B) — current/total time over the ruler row, the play-box over
+                // the clip row, exactly like the locked sketch's `.cur-time`/`.play-box`. Opaque
+                // backgrounds so scrolling content passes visually UNDER them.
+                curTimeReadout
+                    .frame(height: rulerHeight)
+                    .offset(y: rulerRowTop)
+                playBox
+                    .frame(height: clipRowHeight)
+                    .offset(y: clipRowTop)
             }
             .overlay(alignment: .trailing) {
                 addClipTile
@@ -108,14 +142,14 @@ struct TimelineTrackView: View {
             .onEnded { _ in scrubDragStartTime = nil }
     }
 
-    // MARK: - Ruler: 1s tick marks, .monospacedDigit() labels every 5s
+    // MARK: - Ruler: 1s tick marks, .monospacedDigit() mm:ss labels every 5s (Task D)
 
     private func ruler(contentWidth: Double) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(0...max(Int(state.totalDuration.rounded(.up)), 1), id: \.self) { sec in
                 VStack(spacing: 2) {
                     if sec % 5 == 0 {
-                        Text("\(sec)s")
+                        Text(Self.formatTime(Double(sec)))
                             .font(.system(size: 9))
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.45))
@@ -127,7 +161,50 @@ struct TimelineTrackView: View {
                 .offset(x: Double(sec) * pxPerSecond, y: sec % 5 == 0 ? 0 : 11)
             }
         }
-        .frame(width: contentWidth, height: 24, alignment: .topLeading)
+        .frame(width: contentWidth, height: rulerHeight, alignment: .topLeading)
+    }
+
+    // MARK: - Play-box + current/total time (Task B) — left-docked, opaque, content scrolls under.
+
+    private var playBox: some View {
+        Button {
+            state.isPlaying.toggle()
+        } label: {
+            ZStack {
+                trackBackground
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 1)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 48)
+        .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
+    }
+
+    private var curTimeReadout: some View {
+        HStack(spacing: 4) {
+            Text(Self.formatTime(state.currentTime))
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+            Text("/ \(Self.formatTime(state.totalDuration))")
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(.horizontal, 10)
+        .frame(width: 96, alignment: .leading)
+        .background(trackBackground)
+    }
+
+    // Copied verbatim from FullscreenEditorPlayerView.swift:222 (13-19 Task B contract: same
+    // helper everywhere so "0:00 / 0:09" matches across the Editor, never a second implementation).
+    static func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Clip row: sequential, adjacent ClipPillViews (SC1/SC2)
@@ -143,7 +220,7 @@ struct TimelineTrackView: View {
                     clip: clip,
                     pxPerSecond: pxPerSecond,
                     isSelected: state.selection == .clip(clip.id),
-                    onSelect: { state.select(.clip(clip.id)) },
+                    onSelect: { selectClip(clip) },
                     onReorder: { translation in handleReorder(clip: clip, translation: translation) },
                     onTrimChange: { newStart, newEnd in
                         Task { await updateClipTrim(clipId: clip.id, start: newStart, end: newEnd) }
@@ -153,6 +230,27 @@ struct TimelineTrackView: View {
             }
         }
         .frame(height: clipRowHeight, alignment: .leading)
+    }
+
+    // MARK: - Clip selection with the C0 snap-to-start rule (13-19 Task C0, exact user spec):
+    // selecting a clip the playhead is ALREADY inside leaves the playhead alone; selecting a clip
+    // the playhead falls outside of snaps the playhead to that clip's start (the boundary of the
+    // previous clip, since clips are adjacent) — never moves the divider itself, only its content.
+
+    private func selectClip(_ clip: ProjectClip) {
+        let clips = sortedClips
+        guard let index = clips.firstIndex(where: { $0.id == clip.id }) else {
+            state.select(.clip(clip.id))
+            return
+        }
+        var clipStart = 0.0
+        for earlier in clips[..<index] { clipStart += duration(of: earlier) }
+        let clipEnd = clipStart + duration(of: clip)
+
+        if !(state.currentTime >= clipStart && state.currentTime < clipEnd) {
+            state.currentTime = clipStart
+        }
+        state.select(.clip(clip.id))
     }
 
     // MARK: - Inline "+" add-clip tile (D-08/D-09) — fixed at the trailing edge, clips scroll
