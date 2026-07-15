@@ -88,10 +88,10 @@ enum EditorCompositionBuilder {
         for clip in sorted {
             let clipDuration = duration(of: clip)
             let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
-            let start = cursor.seconds
+            let segmentStart = cursor
+            let start = segmentStart.seconds
 
             let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = CMTimeRange(start: cursor, duration: durationTime)
 
             if clip.mediaType == "video", let urlString = clip.url, let url = URL(string: urlString) {
                 let asset = AVURLAsset(url: url)
@@ -119,9 +119,26 @@ enum EditorCompositionBuilder {
             }
 
             cursor = cursor + durationTime
+            // Tile instructions from the SAME CMTime cursor used for insertTimeRange — each
+            // segment ends exactly where the next begins (no independent Double recomputation).
+            instruction.timeRange = CMTimeRange(start: segmentStart, end: cursor)
             ranges.append(ClipRange(clipId: clip.id, start: start, end: cursor.seconds))
             instructions.append(instruction)
         }
+
+        // Force the last instruction to end exactly at the composition's real duration so
+        // micro-gaps from CMTime rounding cannot leave uncovered ranges (→ black / .failed item).
+        if !instructions.isEmpty {
+            let lastIndex = instructions.count - 1
+            let lastStart = instructions[lastIndex].timeRange.start
+            instructions[lastIndex].timeRange = CMTimeRange(start: lastStart, end: composition.duration)
+        }
+
+        validateInstructionTiling(
+            instructions: instructions,
+            clipIds: sorted.map(\.id),
+            compositionDuration: composition.duration
+        )
 
         var videoComposition: AVMutableVideoComposition?
         if hasVideoSegment {
@@ -151,7 +168,8 @@ enum EditorCompositionBuilder {
         // "original" (or any unknown value)
         guard let first = sortedClips.first else { return CGSize(width: 1080, height: 1920) }
         if let w = first.width, let h = first.height, w > 0, h > 0 {
-            return CGSize(width: forceEven(CGFloat(w)), height: forceEven(CGFloat(h)))
+            let size = evenCanvasSize(width: CGFloat(w), height: CGFloat(h))
+            if size.width > 0, size.height > 0 { return size }
         }
         if first.mediaType == "video", let urlString = first.url, let url = URL(string: urlString) {
             let asset = AVURLAsset(url: url)
@@ -160,10 +178,64 @@ enum EditorCompositionBuilder {
                let transform = try? await track.load(.preferredTransform) {
                 let size = naturalSize.applying(transform)
                 let w = abs(size.width), h = abs(size.height)
-                if w > 0, h > 0 { return CGSize(width: forceEven(w), height: forceEven(h)) }
+                if w > 0, h > 0 {
+                    let canvas = evenCanvasSize(width: w, height: h)
+                    if canvas.width > 0, canvas.height > 0 { return canvas }
+                }
             }
         }
         return CGSize(width: 1080, height: 1920)
+    }
+
+    private static func evenCanvasSize(width: CGFloat, height: CGFloat) -> CGSize {
+        CGSize(width: forceEven(width), height: forceEven(height))
+    }
+
+    /// Plan 13-25 L2: AVVideoComposition instructions must tile [0, composition.duration]
+    /// with no gaps or overlaps — violations produce a `.failed` player item (black preview).
+    private static func validateInstructionTiling(
+        instructions: [AVMutableVideoCompositionInstruction],
+        clipIds: [String],
+        compositionDuration: CMTime
+    ) {
+        guard !instructions.isEmpty else { return }
+
+        let sorted = instructions.enumerated().sorted { $0.element.timeRange.start < $1.element.timeRange.start }
+        var violations: [String] = []
+
+        if sorted.first?.element.timeRange.start != .zero {
+            violations.append("first instruction starts at \(sorted.first!.element.timeRange.start.seconds), expected 0")
+        }
+
+        for index in 1..<sorted.count {
+            let (prevIdx, prev) = sorted[index - 1]
+            let (currIdx, curr) = sorted[index]
+            let prevEnd = prev.timeRange.end
+            let currStart = curr.timeRange.start
+            if currStart != prevEnd {
+                let prevClip = clipIds.indices.contains(prevIdx) ? clipIds[prevIdx] : "?"
+                let currClip = clipIds.indices.contains(currIdx) ? clipIds[currIdx] : "?"
+                violations.append(
+                    "gap/overlap between clip \(prevClip) end \(prevEnd.seconds) and clip \(currClip) start \(currStart.seconds)"
+                )
+            }
+        }
+
+        if let last = sorted.last?.element, last.timeRange.end != compositionDuration {
+            let lastClip = clipIds.indices.contains(sorted.last!.offset) ? clipIds[sorted.last!.offset] : "?"
+            violations.append(
+                "last instruction (clip \(lastClip)) ends at \(last.timeRange.end.seconds), expected composition duration \(compositionDuration.seconds)"
+            )
+        }
+
+        guard !violations.isEmpty else { return }
+
+        let message = "[EditorCompositionBuilder] instruction tiling violation: \(violations.joined(separator: "; "))"
+        #if DEBUG
+        assertionFailure(message)
+        #else
+        print(message)
+        #endif
     }
 
     /// J4.2: `preferredTransform` composed with a centered aspect-FIT scale+translate of the
