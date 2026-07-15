@@ -110,7 +110,11 @@ struct EditorView: View {
             topBar
             previewStage
             controlsRow
-            TimelineTrackView(state: state)
+            TimelineTrackView(
+                state: state,
+                onAddAudio: { showAddAudioSheet = true },
+                onAddDefaultText: { Task { await addDefaultTextOverlay() } }
+            )
             editorBottomBar
         }
     }

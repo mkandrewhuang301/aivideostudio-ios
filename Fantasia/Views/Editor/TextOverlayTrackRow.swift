@@ -29,21 +29,28 @@ struct TextOverlayTrackRow: View {
         // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
         // Text action (which makes this exact same addTextOverlay call at the playhead); no
         // per-row "+" tile lives here anymore.
+        // F12 (Plan 13-21): the empty-state placeholder row + T rail tile are rendered by
+        // TimelineTrackView itself, in its viewport-pinned overlay layer (see AudioTrackRow's
+        // identical comment) — this view only reserves the matching `rowHeight`.
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(state.project.textOverlays) { overlay in
-                ZStack(alignment: .topLeading) {
-                    TextOverlayPillView(
-                        overlay: overlay,
-                        pxPerSecond: pxPerSecond,
-                        isSelected: state.selection == .text(overlay.id),
-                        onSelect: { state.select(.text(overlay.id)) },
-                        onRetime: { start, end in
-                            Task { await retime(id: overlay.id, start: start, end: end) }
-                        }
-                    )
-                    .offset(x: overlay.startSeconds * pxPerSecond)
+            if state.project.textOverlays.isEmpty {
+                Color.clear.frame(height: rowHeight)
+            } else {
+                ForEach(state.project.textOverlays) { overlay in
+                    ZStack(alignment: .topLeading) {
+                        TextOverlayPillView(
+                            overlay: overlay,
+                            pxPerSecond: pxPerSecond,
+                            isSelected: state.selection == .text(overlay.id),
+                            onSelect: { state.select(.text(overlay.id)) },
+                            onRetime: { start, end in
+                                Task { await retime(id: overlay.id, start: start, end: end) }
+                            }
+                        )
+                        .offset(x: overlay.startSeconds * pxPerSecond)
+                    }
+                    .frame(height: rowHeight, alignment: .leading)
                 }
-                .frame(height: rowHeight, alignment: .leading)
             }
         }
     }

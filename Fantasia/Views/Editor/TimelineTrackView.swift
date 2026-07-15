@@ -37,6 +37,14 @@ struct TimelineTrackView: View {
     @Environment(ProjectManager.self) private var projectManager
 
     let state: EditorState
+    /// F12 (Plan 13-21): the empty-state "+ Add audio" placeholder taps through to here — opens
+    /// the SAME AddAudioSheet EditorBottomBar's Audio action already owns (EditorView is the
+    /// source of truth for `showAddAudioSheet`, this view has no sheet-presentation state of its
+    /// own for it).
+    let onAddAudio: () -> Void
+    /// F12: the empty-state text placeholder taps through to here — the SAME
+    /// `addDefaultTextOverlay()` EditorBottomBar's Text action already calls.
+    let onAddDefaultText: () -> Void
 
     // Shared with ClipPillView/TextOverlayPillView/AudioPillView/CaptionPillView's own x-offset
     // math — kept a single constant per 13-20's explicit out-of-scope note (pinch-zoom is future
@@ -58,11 +66,28 @@ struct TimelineTrackView: View {
     private let trackBackground = Color(red: 0.078, green: 0.078, blue: 0.098) // #141419 — overall block backdrop
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)              // #8C59FF
     private let rulerDotColor = Color(red: 0.227, green: 0.227, blue: 0.275)   // #3A3A46
+    // F12: left rail tile fill (~#1E1E22) — reference image IMG_0428 2.jpg's ♪/T icon squares.
+    private let railTileFill = Color(red: 0.118, green: 0.118, blue: 0.133)
+    // Sized to fit the existing 28pt trackRowHeight (13-20's locked row height) rather than the
+    // reference image's literal "~40pt" — a 40pt tile would overlap the row above/below at this
+    // compact row height; 26pt keeps the same rounded-square glyph-tile language within the row.
+    private let railTileSize: CGFloat = 26
 
     // Fixed region (never scrolls vertically): ruler row + clip row, translated horizontally by
     // the shared `contentOffset` exactly like before.
     private var fixedRegionHeight: CGFloat { topInset + rulerHeight + rulerToClipSpacing + clipRowHeight }
     private var tracksViewportHeight: CGFloat { totalBlockHeight - fixedRegionHeight }
+
+    // F13: row-count-driven section heights — audio/text always reserve at least ONE row (the
+    // empty-state placeholder occupies it when there are zero items), captions stays its own
+    // fixed single shared rail (CaptionTrackRow's own internal `rowHeight`, 30pt).
+    private var audioRowCount: Int { max(1, state.project.audioClips.count) }
+    private var textRowCount: Int { max(1, state.project.textOverlays.count) }
+    private var audioSectionHeight: CGFloat { CGFloat(audioRowCount) * trackRowHeight }
+    private var textSectionHeight: CGFloat { CGFloat(textRowCount) * trackRowHeight }
+    private let captionRailHeight: CGFloat = 30
+    private var rowsContentHeight: CGFloat { audioSectionHeight + textSectionHeight + captionRailHeight }
+    private var maxTracksScrollY: CGFloat { max(0, rowsContentHeight - tracksViewportHeight) }
 
     // Where the ruler row and clip row each start, in the SAME top-leading coordinate space the
     // playhead/left docks use — derived from the shared layout constants above so nothing can
@@ -78,6 +103,18 @@ struct TimelineTrackView: View {
     @State private var scrubDragStartTime: Double? = nil
     @State private var showAddMediaSheet = false
     @State private var isAddingClip = false
+
+    // F13: manual vertical scroll for the tracks viewport — replaces the ScrollView(.vertical) +
+    // .simultaneousGesture(scrubGesture) combination (confirmed via simulator repro to never
+    // actually scroll: the ScrollView's own vertical pan gesture and the background scrub gesture
+    // fight over the same touch, and the ScrollView wins hit-testing before the scrub gesture ever
+    // sees a vertical drag, so `tracksScrollY` — driven entirely by hand below — never moved).
+    // Content is translated under the fixed rail/playhead via `-tracksScrollY`, matching the
+    // existing translate-under-fixed-playhead architecture the horizontal scrub already uses.
+    @State private var tracksScrollY: CGFloat = 0
+    @State private var tracksDragAxis: Axis? = nil
+    @State private var tracksScrubStartTime: Double? = nil
+    @State private var tracksScrollStartY: CGFloat? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -102,27 +139,31 @@ struct TimelineTrackView: View {
                 .frame(width: contentWidth, alignment: .leading)
                 .offset(x: contentOffset, y: topInset)
 
-                // i2: vertically-scrollable tracks viewport — one row per text overlay, one row
-                // per audio clip, then the single caption rail, stacking downward. Ruler/clip
-                // row/play/+ (above) stay fixed; only this scrolls.
-                ScrollView(.vertical, showsIndicators: false) {
+                // F12+F13: manual tracks viewport — Audio rows ABOVE Text rows (reference image
+                // order), then the single Caption rail, stacking downward. Ruler/clip row/play/+
+                // (above) stay fixed. Vertical scroll is fully manual (F13 — see tracksScrollY's
+                // doc comment); horizontal scrub still works via the SAME axis-locked gesture.
+                ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 0) {
-                        TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
                         AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
+                        TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
                         CaptionTrackRow(state: state, pxPerSecond: pxPerSecond)
                     }
                     .frame(width: contentWidth, alignment: .leading)
-                    .frame(minHeight: tracksViewportHeight, alignment: .top)
-                    // Horizontal-scrub passthrough (13-20 i2 Task 4): lets a predominantly-
-                    // horizontal drag still scrub the playhead even when it starts inside the
-                    // tracks viewport; the ScrollView's own vertical pan still wins genuinely-
-                    // vertical drags, and pill `.highPriorityGesture`s (a descendant) still win
-                    // over this ancestor `.simultaneousGesture` on their own bodies.
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(scrubGesture)
-                    .offset(x: contentOffset)
+                    .offset(x: contentOffset, y: -tracksScrollY)
+
+                    // F12: left rail tiles (♪/T) + empty-state placeholders — pinned in VIEWPORT
+                    // coordinates (translate with tracksScrollY only, never with contentOffset, so
+                    // they never scrub horizontally). Drawn AFTER the pills layer above, so they
+                    // naturally occlude pills scrolling underneath (same layering trick the
+                    // play-box dock uses over the clip row) with no separate backdrop needed.
+                    railOverlay(viewportWidth: viewportWidth)
+                        .offset(y: -tracksScrollY)
                 }
-                .frame(height: tracksViewportHeight)
+                .frame(width: viewportWidth, height: tracksViewportHeight, alignment: .topLeading)
+                .clipped()
+                .contentShape(Rectangle())
+                .gesture(tracksGesture)
                 .offset(y: fixedRegionHeight)
             }
             .clipped()
@@ -190,8 +231,9 @@ struct TimelineTrackView: View {
         }
     }
 
-    // MARK: - Background scrub (Spike 001 verbatim, + a dominant-direction guard so a genuinely
-    // vertical drag inside the tracks ScrollView never nudges currentTime — 13-20 i2 Task 4)
+    // MARK: - Background scrub (Spike 001 verbatim, + a dominant-direction guard). Used by the
+    // FIXED region only (ruler + clip row) — the tracks viewport below has its OWN axis-locked
+    // gesture (tracksGesture, F13) since it also needs to scroll vertically.
 
     private var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 2)
@@ -203,6 +245,46 @@ struct TimelineTrackView: View {
                 state.currentTime = min(max(startTime + deltaTime, 0), state.totalDuration)
             }
             .onEnded { _ in scrubDragStartTime = nil }
+    }
+
+    // MARK: - Tracks viewport gesture (F13, Plan 13-21) — ONE background DragGesture over the
+    // whole tracks region with axis lock decided on the FIRST change: a predominantly-horizontal
+    // drag scrubs `state.currentTime` (identical math to scrubGesture above); a predominantly-
+    // vertical drag adjusts `tracksScrollY` instead. The axis is locked for the remainder of that
+    // drag (never re-evaluated mid-gesture) so a diagonal finger wobble can't flip modes partway
+    // through. Pills' `.highPriorityGesture`s (descendants) still win over this ancestor gesture on
+    // their own bodies — same SwiftUI hit-testing contract every other pill/background gesture
+    // pair in this file already relies on.
+
+    private var tracksGesture: some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                if tracksDragAxis == nil {
+                    tracksDragAxis = abs(value.translation.width) >= abs(value.translation.height) ? .horizontal : .vertical
+                    switch tracksDragAxis {
+                    case .horizontal: tracksScrubStartTime = state.currentTime
+                    case .vertical: tracksScrollStartY = tracksScrollY
+                    default: break
+                    }
+                }
+                switch tracksDragAxis {
+                case .horizontal:
+                    guard let startTime = tracksScrubStartTime else { return }
+                    let deltaTime = -value.translation.width / pxPerSecond
+                    state.currentTime = min(max(startTime + deltaTime, 0), state.totalDuration)
+                case .vertical:
+                    guard let startY = tracksScrollStartY else { return }
+                    let newY = startY - value.translation.height
+                    tracksScrollY = min(max(newY, 0), maxTracksScrollY)
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in
+                tracksDragAxis = nil
+                tracksScrubStartTime = nil
+                tracksScrollStartY = nil
+            }
     }
 
     // MARK: - Ruler (13-20 i4.3): per the sketch's `renderRuler` — a label EVERY second, centered
@@ -361,6 +443,83 @@ struct TimelineTrackView: View {
         }
         .disabled(isAddingClip)
         .accessibilityLabel("Add clip")
+    }
+
+    // MARK: - F12 rail: left ♪/T tiles pinned to the first row of each section + empty-state
+    // placeholders (reference image IMG_0428 2.jpg). See tracksGesture's doc comment for why this
+    // whole layer only translates with `tracksScrollY`, never `contentOffset`.
+
+    private func railOverlay(viewportWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                railTile(systemName: "music.note")
+                if state.project.audioClips.isEmpty {
+                    audioPlaceholderPill
+                }
+            }
+            .frame(height: trackRowHeight, alignment: .leading)
+            if audioSectionHeight > trackRowHeight {
+                Color.clear.frame(height: audioSectionHeight - trackRowHeight)
+            }
+
+            HStack(spacing: 8) {
+                railTile(systemName: "textformat")
+                if state.project.textOverlays.isEmpty {
+                    textPlaceholderRow
+                }
+            }
+            .frame(height: trackRowHeight, alignment: .leading)
+            if textSectionHeight > trackRowHeight {
+                Color.clear.frame(height: textSectionHeight - trackRowHeight)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
+        .frame(width: viewportWidth, alignment: .leading)
+    }
+
+    private func railTile(systemName: String) -> some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(railTileFill)
+            .frame(width: railTileSize, height: railTileSize)
+            .overlay {
+                Image(systemName: systemName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+    }
+
+    // "+ Add audio" — grey rounded pill, tap opens the SAME AddAudioSheet the bottom bar's Audio
+    // action opens (onAddAudio, owned by EditorView).
+    private var audioPlaceholderPill: some View {
+        Button(action: onAddAudio) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .bold))
+                Text("Add audio")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.55))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .frame(height: railTileSize)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add audio")
+    }
+
+    // Empty grey rounded row, tap adds the default "Text" overlay at the playhead (onAddDefaultText,
+    // owned by EditorView — the exact same call EditorBottomBar's Text action already makes).
+    private var textPlaceholderRow: some View {
+        Button(action: onAddDefaultText) {
+            Color.white.opacity(0.06)
+                .frame(maxWidth: .infinity)
+                .frame(height: railTileSize)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add text")
     }
 
     // MARK: - Clip mutations — reconcile `state.project` from the reloaded `projectManager

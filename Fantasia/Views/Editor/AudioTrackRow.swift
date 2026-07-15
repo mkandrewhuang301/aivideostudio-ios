@@ -35,21 +35,30 @@ struct AudioTrackRow: View {
     var body: some View {
         // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
         // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
+        // F12 (Plan 13-21): the empty-state "+ Add audio" placeholder + ♪ rail tile are rendered
+        // by TimelineTrackView itself, in its viewport-pinned overlay layer (they must NOT scrub
+        // horizontally with contentOffset the way real pills do) — this view only reserves the
+        // matching `rowHeight` of vertical space so TextOverlayTrackRow below it still starts at
+        // the right y, keeping this a pure (horizontally-scrolling) pill rail either way.
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(state.project.audioClips) { clip in
-                ZStack(alignment: .topLeading) {
-                    AudioPillView(
-                        clip: clip,
-                        pxPerSecond: pxPerSecond,
-                        isSelected: state.selection == .audio(clip.id),
-                        onSelect: { state.select(.audio(clip.id)) },
-                        onRetime: { offset, trimStart, trimEnd in
-                            Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
-                        }
-                    )
-                    .offset(x: clip.startOffsetSeconds * pxPerSecond)
+            if state.project.audioClips.isEmpty {
+                Color.clear.frame(height: rowHeight)
+            } else {
+                ForEach(state.project.audioClips) { clip in
+                    ZStack(alignment: .topLeading) {
+                        AudioPillView(
+                            clip: clip,
+                            pxPerSecond: pxPerSecond,
+                            isSelected: state.selection == .audio(clip.id),
+                            onSelect: { state.select(.audio(clip.id)) },
+                            onRetime: { offset, trimStart, trimEnd in
+                                Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
+                            }
+                        )
+                        .offset(x: clip.startOffsetSeconds * pxPerSecond)
+                    }
+                    .frame(height: rowHeight, alignment: .leading)
                 }
-                .frame(height: rowHeight, alignment: .leading)
             }
         }
     }
