@@ -112,21 +112,27 @@ struct ProjectTileView: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        ZStack {
-            theme.surfaceStrong
-            if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
+        // 13-24 K7: image must never propose its own size — Color.clear fills the fixed 9:16
+        // shell; AsyncImage lives in an overlay and is clipped to that shell.
+        Color.clear
+            .overlay {
+                ZStack {
+                    theme.surfaceStrong
+                    if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            } else {
+                                theme.surfaceStrong
+                            }
+                        }
                     } else {
-                        theme.surfaceStrong
+                        Image(systemName: "film")
+                            .foregroundStyle(.white.opacity(0.35))
+                            .font(.system(size: 22))
                     }
                 }
-            } else {
-                Image(systemName: "film")
-                    .foregroundStyle(.white.opacity(0.35))
-                    .font(.system(size: 22))
             }
-        }
+            .clipped()
     }
 }

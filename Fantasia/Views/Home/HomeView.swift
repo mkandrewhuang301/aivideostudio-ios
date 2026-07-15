@@ -270,26 +270,32 @@ struct HomeView: View {
     /// Exactly one glyph (the play triangle) is ever drawn — never stacked with a second icon,
     /// which is what previously read as a "white box" behind the triangle when a thumbnail-less
     /// project overlapped a film icon with the play icon on top of it.
+    /// 13-24 K7: card frame is fixed by the caller (`.frame(width:height:)`); thumbnail center-crops
+    /// inside via Color.clear + overlay so a landscape/'original' image cannot influence layout.
     private func heroThumbSlot(project: ProjectSummary?, gradient: LinearGradient) -> some View {
-        ZStack {
-            if let project, let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
+        Color.clear
+            .overlay {
+                ZStack {
+                    if let project, let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            } else {
+                                gradient
+                            }
+                        }
                     } else {
                         gradient
                     }
+                    Image(systemName: "play.fill")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
-            } else {
-                gradient
             }
-            Image(systemName: "play.fill")
-                .symbolRenderingMode(.monochrome)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
     }
 
     /// First slot: warm magenta→orange. Second slot: cool violet→blue. Both drawn from the app's
