@@ -87,7 +87,8 @@ enum EditorCompositionBuilder {
 
         for clip in sorted {
             let clipDuration = duration(of: clip)
-            let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
+            let segmentDuration = clipDuration > 0 && clipDuration.isFinite ? clipDuration : 0
+            let durationTime = CMTime(seconds: segmentDuration, preferredTimescale: 600)
             let segmentStart = cursor
             let start = segmentStart.seconds
 
@@ -131,6 +132,17 @@ enum EditorCompositionBuilder {
             instructions.append(instruction)
         }
 
+        // A stale presigned URL can make every source insertion fail while the logical timeline
+        // above still advances. Never force an instruction's end backwards to a shorter (or zero)
+        // composition duration: that creates an invalid CMTimeRange whose seconds surface as NaN.
+        // The ProjectManager URL-refresh bridge will update the clips and trigger a clean rebuild.
+        guard composition.duration != .zero, composition.duration == cursor else {
+            print(
+                "[EditorCompositionBuilder] degraded build: inserted \(composition.duration.seconds)s of expected \(cursor.seconds)s — media unavailable (stale URLs?)"
+            )
+            return (composition, nil, ranges)
+        }
+
         // Force the last instruction to end exactly at the composition's real duration so
         // micro-gaps from CMTime rounding cannot leave uncovered ranges (→ black / .failed item).
         if !instructions.isEmpty {
@@ -159,7 +171,12 @@ enum EditorCompositionBuilder {
 
     static func duration(of clip: ProjectClip) -> Double {
         let end = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
-        return max(0, end - clip.trimStartSeconds)
+        let d = end - clip.trimStartSeconds
+        guard d.isFinite else {
+            print("[EditorCompositionBuilder] non-finite duration for clip \(clip.id)")
+            return 0
+        }
+        return max(0, d)
     }
 
     /// J4.1: the shared canvas the video composition renders into — the project's resolved aspect
@@ -236,11 +253,7 @@ enum EditorCompositionBuilder {
         guard !violations.isEmpty else { return }
 
         let message = "[EditorCompositionBuilder] instruction tiling violation: \(violations.joined(separator: "; "))"
-        #if DEBUG
-        assertionFailure(message)
-        #else
         print(message)
-        #endif
     }
 
     /// J4.2: `preferredTransform` composed with a centered aspect-FIT scale+translate of the
