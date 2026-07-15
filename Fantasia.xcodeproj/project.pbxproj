@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		02BBAB59549272FFA33C31CD /* CoverPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */; };
 		037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */; };
+		5231273AD9E106A3FC9A121B /* ClipFileCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F92D90952AA1BFB3E813858 /* ClipFileCache.swift */; };
 		03DE4BE9123D30D92B6D6A4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 71907E2C4814D307EE0AADF4 /* Assets.xcassets */; };
 		09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */; };
 		09D762574E34B0934E137E4B /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */; };
@@ -205,6 +206,7 @@
 		AED772695D33DDDDE4EC8D2F /* Fantasia.storekit */ = {isa = PBXFileReference; path = Fantasia.storekit; sourceTree = "<group>"; };
 		AFB7654B0746207F617ED9A4 /* presets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = presets.json; sourceTree = "<group>"; };
 		B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCompositionBuilder.swift; sourceTree = "<group>"; };
+		4F92D90952AA1BFB3E813858 /* ClipFileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipFileCache.swift; sourceTree = "<group>"; };
 		B6F014871EA8B9875D754906 /* PressableButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressableButtonStyle.swift; sourceTree = "<group>"; };
 		B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopPlayerPool.swift; sourceTree = "<group>"; };
 		BB17EB669A20752389935966 /* SocialSignInButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialSignInButton.swift; sourceTree = "<group>"; };
@@ -414,6 +416,14 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		0C4BE9F30DB4707056377DC4 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				4F92D90952AA1BFB3E813858 /* ClipFileCache.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 		9AD43FA858F66606AE0A3230 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
@@ -492,6 +502,7 @@
 				18291AFE74B0A76F2381C9F7 /* Network */,
 				BA8ADAFFFC39DDB32DFE30EB /* Notifications */,
 				7FEA6F335CD22F04FD1524C6 /* Resources */,
+				0C4BE9F30DB4707056377DC4 /* Services */,
 				A89496FC599418237C67CAC3 /* Utilities */,
 				13CC4AB7951EED84A3605C02 /* Views */,
 			);
@@ -699,6 +710,7 @@
 				5FBFDCA3E2006FF14EBA0F15 /* CaptionTrackRow.swift in Sources */,
 				6F591961CA61AAD504DD53CF /* CheckInboxView.swift in Sources */,
 				32104E944D1A0E14E9D90D02 /* CircularCreditIndicator.swift in Sources */,
+				5231273AD9E106A3FC9A121B /* ClipFileCache.swift in Sources */,
 				DAD0A45CA8A4E1A86062501B /* ClipPillView.swift in Sources */,
 				98891B7B4E232C4194621D74 /* ConsentAttestationView.swift in Sources */,
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,

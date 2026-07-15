@@ -183,6 +183,12 @@ final class ProjectManager {
     // MARK: - Delete (D-04 — reuses the existing swipe/long-press confirm-dialog pattern, no new UI)
 
     func deleteProject(id: String) async throws {
+        // Plan 13-26 M1: capture clip ids BEFORE the API call so the local ClipFileCache disk
+        // entries can be evicted alongside the server-side delete — only resolvable when this
+        // project happens to be the currently-loaded one (the hub grid has no clip list to draw
+        // from otherwise); those orphaned files still get reclaimed eventually by the cache's own
+        // 500MB LRU cap.
+        let clipIdsToEvict = loadedProject?.id == id ? (loadedProject?.clips.map(\.id) ?? []) : []
         try await APIClient.shared.deleteProject(id: id)
         projects.removeAll { $0.id == id }
         if loadedProject?.id == id { loadedProject = nil }
@@ -190,6 +196,9 @@ final class ProjectManager {
             ListSnapshotStore.clear(name: Self.editProjectSnapshotName(id: id), uid: uid)
         }
         persistSnapshot()
+        if !clipIdsToEvict.isEmpty {
+            Task { await ClipFileCache.shared.remove(clipIds: clipIdsToEvict) }
+        }
     }
 
     // MARK: - Project-level field updates (Plan 11: title rename/aspect toggle; Plan 16: Caption

@@ -272,7 +272,11 @@ struct ClipPillView: View {
 
     private func loadFilmstripIfNeeded() async {
         guard let urlString = clip.url, let url = URL(string: urlString) else { return }
-        let asset = AVURLAsset(url: url)
+        // Plan 13-26 M1 Fix B: resolve through the local disk cache — same clip the composition
+        // builder just downloaded (or will download) is reused here instead of a second
+        // independent stream from R2 for the filmstrip thumbnails.
+        let localURL = await ClipFileCache.shared.localURL(clipId: clip.id, remoteURL: url)
+        let asset = AVURLAsset(url: localURL)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 92, height: 116)

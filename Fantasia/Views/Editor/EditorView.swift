@@ -95,6 +95,19 @@ struct EditorView: View {
                 player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
             }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
+            // Plan 13-26 M1 Fix A: cache-first open (ProjectManager.openProjectFromCache) hands
+            // this view a snapshot whose presigned URLs may already be >1h expired; the
+            // background refreshLoadedProjectURLs() (kicked right after) updates
+            // projectManager.loadedProject but nothing previously synced that back into
+            // state.project — the editor never healed until some UNRELATED mutation happened to
+            // call syncProjectFromManager(). This bridges it: any external change to
+            // loadedProject (background refresh, or another screen mutating the same project)
+            // reflects into state.project, and the existing clips onChange above rebuilds the
+            // player once the fresh URLs land.
+            .onChange(of: projectManager.loadedProject) { _, refreshed in
+                guard let refreshed, refreshed.id == state.project.id else { return }
+                state.project = refreshed
+            }
             // 13-23 J4: the videoComposition's renderSize derives from the project aspect — cycling
             // the aspect toggle must rebuild the player item so the canvas shape follows.
             .onChange(of: state.aspectRatio) { _, _ in Task { await rebuildPlayer() } }

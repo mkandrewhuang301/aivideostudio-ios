@@ -94,7 +94,12 @@ enum EditorCompositionBuilder {
             let instruction = AVMutableVideoCompositionInstruction()
 
             if clip.mediaType == "video", let urlString = clip.url, let url = URL(string: urlString) {
-                let asset = AVURLAsset(url: url)
+                // Plan 13-26 M1 Fix B: resolve through the local disk cache first — after a
+                // clip's first download, every subsequent editor open (even with a fresh
+                // presigned URL string) loads the SAME local file instantly instead of
+                // re-streaming the full video from R2 again.
+                let localURL = await ClipFileCache.shared.localURL(clipId: clip.id, remoteURL: url)
+                let asset = AVURLAsset(url: localURL)
                 let trimStart = CMTime(seconds: clip.trimStartSeconds, preferredTimescale: 600)
                 let timeRange = CMTimeRange(start: trimStart, duration: durationTime)
                 do {
