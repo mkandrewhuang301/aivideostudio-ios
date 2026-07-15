@@ -32,9 +32,6 @@ struct AudioTrackRow: View {
     let pxPerSecond: Double
     var rowHeight: CGFloat = 28
 
-    @State private var toastMessage: String?
-    @State private var toastTask: Task<Void, Never>?
-
     var body: some View {
         // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
         // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
@@ -48,25 +45,11 @@ struct AudioTrackRow: View {
                         onSelect: { state.select(.audio(clip.id)) },
                         onRetime: { offset, trimStart, trimEnd in
                             Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
-                        },
-                        onDelete: {
-                            Task { await delete(id: clip.id) }
                         }
                     )
                     .offset(x: clip.startOffsetSeconds * pxPerSecond)
                 }
                 .frame(height: rowHeight, alignment: .leading)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if let toastMessage {
-                Text(toastMessage)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.75), in: Capsule())
-                    .transition(.opacity)
             }
         }
     }
@@ -84,33 +67,12 @@ struct AudioTrackRow: View {
         }
     }
 
-    private func delete(id: String) async {
-        do {
-            try await projectManager.deleteAudioClip(audioId: id)
-            if state.selection == .audio(id) { state.select(.none) }
-            syncProjectFromManager()
-            showToast("Audio removed")
-        } catch {
-            print("[AudioTrackRow] delete error: \(error)")
-        }
-    }
-
     /// Reflects ProjectManager's persisted result back onto the shared EditorState clock — mirrors
     /// TimelineTrackView's `syncProjectFromManager()` (EditorState "owns playback/selection state,
     /// not persistence" per its own doc comment).
     private func syncProjectFromManager() {
         if let refreshed = projectManager.loadedProject {
             state.project = refreshed
-        }
-    }
-
-    private func showToast(_ message: String) {
-        toastMessage = message
-        toastTask?.cancel()
-        toastTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            toastMessage = nil
         }
     }
 }

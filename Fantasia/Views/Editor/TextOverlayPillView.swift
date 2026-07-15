@@ -21,16 +21,12 @@ struct TextOverlayPillView: View {
     /// (startSeconds, endSeconds) — the CALLER (TextOverlayTrackRow) PATCHes via
     /// `ProjectManager.updateTextOverlay`.
     let onRetime: (Double, Double) -> Void
-    /// Instant delete (no confirmation, per 13-UI-SPEC's Copywriting Contract) — the caller
-    /// performs the mutation + toast.
-    let onDelete: () -> Void
 
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStartTime: Double? = nil
     @State private var rightDragStartTime: Double? = nil
 
     private let amber = Color(red: 0.851, green: 0.478, blue: 0.169)      // #D97A2B
-    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)  // #FF5470
     private let pillHeight: CGFloat = 28
 
     private var width: Double { max((overlay.endSeconds - overlay.startSeconds) * pxPerSecond, 30) }
@@ -50,7 +46,6 @@ struct TextOverlayPillView: View {
             RoundedRectangle(cornerRadius: 5)
                 .stroke(isSelected ? Color.white : .clear, lineWidth: 2)
         )
-        .offset(x: dragTranslation)
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .highPriorityGesture(bodyDragGesture)
@@ -60,9 +55,8 @@ struct TextOverlayPillView: View {
         .overlay(alignment: .trailing) {
             if isSelected { handle.highPriorityGesture(rightHandleGesture) }
         }
-        .overlay(alignment: .topTrailing) {
-            if isSelected { deleteButton }
-        }
+        // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
+        .offset(x: dragTranslation)
     }
 
     private var handle: some View {
@@ -74,18 +68,6 @@ struct TextOverlayPillView: View {
         }
         .frame(width: 12)
         .contentShape(Rectangle())
-    }
-
-    private var deleteButton: some View {
-        Button(action: onDelete) {
-            Image(systemName: "trash.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
-                .background(destructive, in: Circle())
-        }
-        .offset(x: 4, y: -6)
-        .accessibilityLabel("Delete text overlay")
     }
 
     // MARK: - Body drag (move — retimes the whole [start, end] window together)

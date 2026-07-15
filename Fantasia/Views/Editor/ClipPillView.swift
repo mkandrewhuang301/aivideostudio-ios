@@ -33,17 +33,12 @@ struct ClipPillView: View {
     /// Fires live, on every edge-handle drag change, with the clip's updated (trimStart, trimEnd)
     /// in seconds — the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
     let onTrimChange: (Double, Double) -> Void
-    /// Instant delete (no confirmation, per 13-UI-SPEC's Copywriting Contract for clip delete) —
-    /// the caller performs the mutation + toast.
-    let onDelete: () -> Void
-
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
     @State private var filmstripFrames: [Int: UIImage] = [:]
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)      // #8C59FF
-    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439) // #FF5470
 
     // Tiny in-memory-only cache — deliberately NOT ThumbnailCache.shared (see file header).
     private static let filmstripCache = NSCache<NSString, UIImage>()
@@ -69,7 +64,6 @@ struct ClipPillView: View {
                 .stroke(isSelected ? accent : .clear, lineWidth: 2)
         )
         .frame(width: width, height: 58)
-        .offset(x: dragTranslation)
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .highPriorityGesture(bodyDragGesture)
@@ -79,9 +73,12 @@ struct ClipPillView: View {
         .overlay(alignment: .trailing) {
             if isSelected { handle.highPriorityGesture(rightHandleGesture) }
         }
-        .overlay(alignment: .topTrailing) {
-            if isSelected { deleteButton }
-        }
+        // F2 (Plan 13-21): offset is now the LAST modifier — after the selection stroke and every
+        // handle overlay — so the entire assembly (pill body + handles) translates together during
+        // a body drag. Previously offset was applied BEFORE the overlays, so only the pill body
+        // moved live while the handles stayed pinned to the pre-drag layout position until the
+        // drag ended and the whole view re-rendered ("handles snap into place after release").
+        .offset(x: dragTranslation)
         .task(id: "\(clip.id)-\(clip.url ?? "")-\(cellCount)") {
             guard clip.mediaType != "image" else { return }
             await loadFilmstripIfNeeded()
@@ -162,18 +159,6 @@ struct ClipPillView: View {
         }
         .frame(width: 22)
         .contentShape(Rectangle())
-    }
-
-    private var deleteButton: some View {
-        Button(action: onDelete) {
-            Image(systemName: "trash.fill")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
-                .background(destructive, in: Circle())
-        }
-        .offset(x: 4, y: -6)
-        .accessibilityLabel("Delete clip")
     }
 
     // MARK: - Body drag (reorder preview — CALLER performs the sort_order PATCH on release)

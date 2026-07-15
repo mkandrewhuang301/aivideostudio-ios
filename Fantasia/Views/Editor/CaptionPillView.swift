@@ -38,9 +38,6 @@ struct CaptionPillView: View {
     /// Fires once, on TextField submit, with a re-split word list (evenly distributed across the
     /// cue's existing [start, end] window — per-word manual timing is deferred, see file header).
     let onWordsCommit: ([CaptionWord]) -> Void
-    /// Instant delete (no confirmation, per 13-UI-SPEC's Copywriting Contract for single-cue
-    /// delete — bulk "Delete All Captions" is the one confirmed action, wired in CaptionTrackRow).
-    let onDelete: () -> Void
     /// Toggles `isEditing` for this cue in the caller — see file header.
     let onEditToggle: () -> Void
 
@@ -51,7 +48,6 @@ struct CaptionPillView: View {
     @FocusState private var isTextFieldFocused: Bool
 
     private let blue = Color(red: 0.169, green: 0.561, blue: 0.851)         // #2B8FD9
-    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)    // #FF5470
     private let pillHeight: CGFloat = 28
 
     private var width: Double { max((cue.endSeconds - cue.startSeconds) * pxPerSecond, 30) }
@@ -109,9 +105,6 @@ struct CaptionPillView: View {
         .overlay(alignment: .topLeading) {
             if isSelected { editButton }
         }
-        .overlay(alignment: .topTrailing) {
-            if isSelected { deleteButton }
-        }
     }
 
     // MARK: - Editing pill (transcript-style TextField, pre-filled with this cue's words) —
@@ -161,18 +154,6 @@ struct CaptionPillView: View {
         }
         .offset(x: -4, y: -6)
         .accessibilityLabel("Edit caption words")
-    }
-
-    private var deleteButton: some View {
-        Button(action: onDelete) {
-            Image(systemName: "trash.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
-                .background(destructive, in: Circle())
-        }
-        .offset(x: 4, y: -6)
-        .accessibilityLabel("Delete caption")
     }
 
     // MARK: - Body drag (move — retimes the whole [start, end] window together)

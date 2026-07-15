@@ -39,9 +39,6 @@ struct TextOverlayTrackRow: View {
                         onSelect: { state.select(.text(overlay.id)) },
                         onRetime: { start, end in
                             Task { await retime(id: overlay.id, start: start, end: end) }
-                        },
-                        onDelete: {
-                            Task { await delete(id: overlay.id) }
                         }
                     )
                     .offset(x: overlay.startSeconds * pxPerSecond)
@@ -62,16 +59,6 @@ struct TextOverlayTrackRow: View {
             syncProjectFromManager()
         } catch {
             print("[TextOverlayTrackRow] retime error: \(error)")
-        }
-    }
-
-    private func delete(id: String) async {
-        do {
-            try await projectManager.deleteTextOverlay(textId: id)
-            if state.selection == .text(id) { state.select(.none) }
-            syncProjectFromManager()
-        } catch {
-            print("[TextOverlayTrackRow] delete error: \(error)")
         }
     }
 

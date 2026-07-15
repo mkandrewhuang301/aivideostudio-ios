@@ -53,11 +53,9 @@ struct TimelineTrackView: View {
     private let totalBlockHeight: CGFloat = 200
     private let playBoxWidth: CGFloat = 52
 
+    // F4 (Plan 13-21): play-box/cur-time dock background is now trackBackground everywhere — they
+    // match the surrounding timeline block instead of the darker canvasBackground shade.
     private let trackBackground = Color(red: 0.078, green: 0.078, blue: 0.098) // #141419 — overall block backdrop
-    // Left-dock/play-box background (13-20 i3): opaque #0A0A0D, matching EditorView.canvasBackground
-    // and the sketch's `.cur-time`/`.play-box` (both use `var(--color-bg)`) — deliberately NOT
-    // trackBackground, so the two docks read as one continuous black column at the left edge.
-    private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051) // #0A0A0D
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)              // #8C59FF
     private let rulerDotColor = Color(red: 0.227, green: 0.227, blue: 0.275)   // #3A3A46
 
@@ -80,8 +78,6 @@ struct TimelineTrackView: View {
     @State private var scrubDragStartTime: Double? = nil
     @State private var showAddMediaSheet = false
     @State private var isAddingClip = false
-    @State private var toastMessage: String?
-    @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geo in
@@ -186,18 +182,6 @@ struct TimelineTrackView: View {
                 addClipTile
                     .offset(x: viewportWidth - 46 - 8, y: clipRowTop + (clipRowHeight - 46) / 2)
             }
-            .overlay(alignment: .bottom) {
-                if let toastMessage {
-                    Text(toastMessage)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.75), in: Capsule())
-                        .padding(.bottom, 6)
-                        .transition(.opacity)
-                }
-            }
         }
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
@@ -252,11 +236,11 @@ struct TimelineTrackView: View {
             state.isPlaying.toggle()
         } label: {
             ZStack {
-                canvasBackground
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(width: 1)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                // F4 (Plan 13-21): trackBackground (#141419), not canvasBackground (#0A0A0D) — the
+                // play box now matches the surrounding timeline block instead of reading as a
+                // shade darker. Right hairline dropped: against the matching background it read as
+                // a stray seam rather than a deliberate divider (verified via simulator screenshot).
+                trackBackground
                 Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 15))
                     .foregroundStyle(.white)
@@ -285,11 +269,11 @@ struct TimelineTrackView: View {
         .lineLimit(1)
         .padding(.horizontal, 10)
         .fixedSize()
-        .background(canvasBackground)
+        .background(trackBackground) // F4: matches playBox/the timeline block, not canvasBackground
         .overlay(alignment: .trailing) {
             // Trailing 12pt fade so scrolling ruler content slides under it like the sketch's
             // `box-shadow: 12px 0 12px -4px var(--color-bg)`.
-            LinearGradient(colors: [canvasBackground, canvasBackground.opacity(0)], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(colors: [trackBackground, trackBackground.opacity(0)], startPoint: .leading, endPoint: .trailing)
                 .frame(width: 12)
                 .offset(x: 12)
                 .allowsHitTesting(false)
@@ -323,8 +307,7 @@ struct TimelineTrackView: View {
                     onReorder: { translation in handleReorder(clip: clip, translation: translation) },
                     onTrimChange: { newStart, newEnd in
                         Task { await updateClipTrim(clipId: clip.id, start: newStart, end: newEnd) }
-                    },
-                    onDelete: { Task { await deleteClip(clipId: clip.id) } }
+                    }
                 )
             }
         }
@@ -415,17 +398,6 @@ struct TimelineTrackView: View {
         }
     }
 
-    private func deleteClip(clipId: String) async {
-        do {
-            try await projectManager.deleteClip(clipId: clipId)
-            if state.selection == .clip(clipId) { state.select(.none) }
-            syncProjectFromManager()
-            showToast("Clip deleted")
-        } catch {
-            print("[TimelineTrackView] deleteClip error: \(error)")
-        }
-    }
-
     /// Live-preview drag ends here: `translation` is the final horizontal drag distance (points).
     /// Converts it to a target index by comparing the dragged clip's projected new center against
     /// every clip's timeline position, then PATCHes the dragged clip's `sort_order` to the target
@@ -474,16 +446,6 @@ struct TimelineTrackView: View {
     private func syncProjectFromManager() {
         if let refreshed = projectManager.loadedProject {
             state.project = refreshed
-        }
-    }
-
-    private func showToast(_ message: String) {
-        toastMessage = message
-        toastTask?.cancel()
-        toastTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            toastMessage = nil
         }
     }
 }

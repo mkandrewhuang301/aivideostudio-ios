@@ -61,9 +61,6 @@ struct CaptionTrackRow: View {
                     onWordsCommit: { words in
                         Task { await commitWords(id: cue.id, words: words) }
                     },
-                    onDelete: {
-                        Task { await deleteCue(id: cue.id) }
-                    },
                     onEditToggle: {
                         editingCueId = (editingCueId == cue.id) ? nil : cue.id
                     }
@@ -122,18 +119,6 @@ struct CaptionTrackRow: View {
             syncProjectFromManager()
         } catch {
             print("[CaptionTrackRow] words commit error: \(error)")
-        }
-    }
-
-    private func deleteCue(id: String) async {
-        do {
-            try await projectManager.deleteCaptionCue(cueId: id)
-            if state.selection == .caption(id) { state.select(.none) }
-            if editingCueId == id { editingCueId = nil }
-            syncProjectFromManager()
-            showToast("Caption removed")
-        } catch {
-            print("[CaptionTrackRow] delete error: \(error)")
         }
     }
 
