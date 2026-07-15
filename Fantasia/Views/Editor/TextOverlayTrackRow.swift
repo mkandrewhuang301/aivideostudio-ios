@@ -64,12 +64,37 @@ struct TextOverlayTrackRow: View {
     // EditProject is a VALUE type — each success path must reconcile the MANAGER's mutated copy
     // back onto state.project or the pill snaps back / lingers after delete (13-20 i1 sweep).
 
+    // F8 (Plan 13-21): same debounce treatment as AudioTrackRow/TimelineTrackView.updateClipTrim —
+    // `onRetime` fires continuously during an edge-handle drag, once at release for a body-move.
+    @State private var retimeBeforeByOverlay: [String: (start: Double, end: Double)] = [:]
+    @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
+
     private func retime(id: String, start: Double, end: Double) async {
+        if retimeBeforeByOverlay[id] == nil, let overlay = state.project.textOverlays.first(where: { $0.id == id }) {
+            retimeBeforeByOverlay[id] = (overlay.startSeconds, overlay.endSeconds)
+        }
         do {
             try await projectManager.updateTextOverlay(textId: id, startSeconds: start, endSeconds: end)
             syncProjectFromManager()
         } catch {
             print("[TextOverlayTrackRow] retime error: \(error)")
+        }
+        scheduleRetimeUndoCommit(id: id, after: (start, end))
+    }
+
+    private func scheduleRetimeUndoCommit(id: String, after: (start: Double, end: Double)) {
+        retimeDebounceTasks[id]?.cancel()
+        retimeDebounceTasks[id] = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            guard let before = retimeBeforeByOverlay[id] else { return }
+            retimeBeforeByOverlay[id] = nil
+            retimeDebounceTasks[id] = nil
+            state.history.record(UndoableAction(
+                label: "Retime text",
+                undo: { try await projectManager.updateTextOverlay(textId: id, startSeconds: before.start, endSeconds: before.end) },
+                redo: { try await projectManager.updateTextOverlay(textId: id, startSeconds: after.start, endSeconds: after.end) }
+            ))
         }
     }
 

@@ -78,28 +78,57 @@ struct TextOverlayCanvasView: View {
     // syncProjectFromManager() or the canvas snaps back to the stale value on next render
     // (13-20 i1 sweep, same bug class as EditorView's bottom-bar actions).
 
+    // F8 (Plan 13-21): move/resize/rotate/edit all fire ONCE per gesture (at release, or on
+    // TextField commit) — see resizeDragGesture/rotationDragGesture/moveDragGesture's `.onEnded`-
+    // only wiring in TextOverlayItemView below — so these record directly, no debounce needed
+    // (unlike the timeline pills' continuous edge-handle retime).
+
     private func persistMove(id: String, xNorm: Double, yNorm: Double) async {
+        let before = state.project.textOverlays.first(where: { $0.id == id })
         do {
             try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm)
             syncProjectFromManager()
+            if let before {
+                state.history.record(UndoableAction(
+                    label: "Move text",
+                    undo: { try await projectManager.updateTextOverlay(textId: id, xNorm: before.xNorm, yNorm: before.yNorm) },
+                    redo: { try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm) }
+                ))
+            }
         } catch {
             print("[TextOverlayCanvasView] move error: \(error)")
         }
     }
 
     private func persistResize(id: String, scale: Double) async {
+        let beforeScale = state.project.textOverlays.first(where: { $0.id == id })?.widthNorm
         do {
             try await projectManager.updateTextOverlay(textId: id, widthNorm: scale)
             syncProjectFromManager()
+            if let beforeScale {
+                state.history.record(UndoableAction(
+                    label: "Resize text",
+                    undo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: beforeScale) },
+                    redo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: scale) }
+                ))
+            }
         } catch {
             print("[TextOverlayCanvasView] resize error: \(error)")
         }
     }
 
     private func persistRotation(id: String, rotation: Double) async {
+        let beforeRotation = state.project.textOverlays.first(where: { $0.id == id })?.rotation
         do {
             try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
             syncProjectFromManager()
+            if let beforeRotation {
+                state.history.record(UndoableAction(
+                    label: "Rotate text",
+                    undo: { try await projectManager.updateTextOverlay(textId: id, rotation: beforeRotation) },
+                    redo: { try await projectManager.updateTextOverlay(textId: id, rotation: rotation) }
+                ))
+            }
         } catch {
             print("[TextOverlayCanvasView] rotate error: \(error)")
         }
@@ -108,36 +137,74 @@ struct TextOverlayCanvasView: View {
     private func persistTextEdit(id: String, text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let beforeText = state.project.textOverlays.first(where: { $0.id == id })?.text
         do {
             try await projectManager.updateTextOverlay(textId: id, text: trimmed)
             syncProjectFromManager()
+            if let beforeText {
+                state.history.record(UndoableAction(
+                    label: "Edit text",
+                    undo: { try await projectManager.updateTextOverlay(textId: id, text: beforeText) },
+                    redo: { try await projectManager.updateTextOverlay(textId: id, text: trimmed) }
+                ))
+            }
         } catch {
             print("[TextOverlayCanvasView] edit error: \(error)")
         }
     }
 
     private func deleteOverlay(id: String) async {
+        guard let overlay = state.project.textOverlays.first(where: { $0.id == id }) else { return }
         do {
             try await projectManager.deleteTextOverlay(textId: id)
             if state.selection == .text(id) { state.select(.none) }
             syncProjectFromManager()
+            var currentId = id
+            state.history.record(UndoableAction(
+                label: "Delete text",
+                undo: {
+                    try await projectManager.addTextOverlay(
+                        text: overlay.text, xNorm: overlay.xNorm, yNorm: overlay.yNorm,
+                        widthNorm: overlay.widthNorm, rotation: overlay.rotation,
+                        startSeconds: overlay.startSeconds, endSeconds: overlay.endSeconds
+                    )
+                    if let recreated = projectManager.loadedProject?.textOverlays.last { currentId = recreated.id }
+                },
+                redo: { try await projectManager.deleteTextOverlay(textId: currentId) }
+            ))
         } catch {
             print("[TextOverlayCanvasView] delete error: \(error)")
         }
     }
 
     private func duplicateOverlay(_ overlay: TextOverlay) async {
+        let newXNorm = min(0.94, overlay.xNorm + 0.04)
+        let newYNorm = min(0.94, overlay.yNorm + 0.04)
+        let idsBefore = Set(state.project.textOverlays.map(\.id))
         do {
             try await projectManager.addTextOverlay(
                 text: overlay.text,
-                xNorm: min(0.94, overlay.xNorm + 0.04),
-                yNorm: min(0.94, overlay.yNorm + 0.04),
+                xNorm: newXNorm,
+                yNorm: newYNorm,
                 widthNorm: overlay.widthNorm,
                 rotation: overlay.rotation,
                 startSeconds: overlay.startSeconds,
                 endSeconds: overlay.endSeconds
             )
             syncProjectFromManager()
+            if var newId = Set(state.project.textOverlays.map(\.id)).subtracting(idsBefore).first {
+                state.history.record(UndoableAction(
+                    label: "Duplicate text",
+                    undo: { try await projectManager.deleteTextOverlay(textId: newId) },
+                    redo: {
+                        try await projectManager.addTextOverlay(
+                            text: overlay.text, xNorm: newXNorm, yNorm: newYNorm, widthNorm: overlay.widthNorm,
+                            rotation: overlay.rotation, startSeconds: overlay.startSeconds, endSeconds: overlay.endSeconds
+                        )
+                        if let recreated = projectManager.loadedProject?.textOverlays.last { newId = recreated.id }
+                    }
+                ))
+            }
         } catch {
             print("[TextOverlayCanvasView] duplicate error: \(error)")
         }

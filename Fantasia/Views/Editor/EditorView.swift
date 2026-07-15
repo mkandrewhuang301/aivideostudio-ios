@@ -84,7 +84,21 @@ struct EditorView: View {
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
             .sheet(isPresented: $showAddAudioSheet) {
-                AddAudioSheet(currentTime: state.currentTime, onAdded: { syncProjectFromManager() })
+                // F8 (Plan 13-21): idsBefore snapshots at PRESENTATION time (this closure runs once
+                // per sheet presentation) — onAdded diffs against it to find the newly-added row
+                // and records an "add" UndoableAction (undo = soft-delete, redo = restore).
+                let idsBefore = Set(state.project.audioClips.map(\.id))
+                AddAudioSheet(currentTime: state.currentTime, onAdded: {
+                    syncProjectFromManager()
+                    let newIds = Set(state.project.audioClips.map(\.id)).subtracting(idsBefore)
+                    for newId in newIds {
+                        state.history.record(UndoableAction(
+                            label: "Add audio",
+                            undo: { try await projectManager.deleteAudioClip(audioId: newId) },
+                            redo: { try await projectManager.restoreAudioClip(audioId: newId) }
+                        ))
+                    }
+                })
             }
             .overlay(alignment: .bottom) { barToastOverlay }
             .onChange(of: showFullscreenPlayer) { _, isShowing in handleFullscreenChange(isShowing) }
@@ -372,6 +386,12 @@ struct EditorView: View {
         Task {
             do {
                 try await projectManager.updateProjectTitle(newTitle)
+                // F8: "update" record — before/after are the two title strings themselves.
+                state.history.record(UndoableAction(
+                    label: "Rename project",
+                    undo: { try await projectManager.updateProjectTitle(previousTitle ?? "") },
+                    redo: { try await projectManager.updateProjectTitle(newTitle) }
+                ))
             } catch {
                 print("[EditorView] updateProjectTitle error: \(error)")
                 state.project.title = previousTitle // revert — no blocking alert
@@ -519,28 +539,53 @@ struct EditorView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { state.select(.none) }
 
-            Button {
-                // Plan 12 wires real undo (timeline/edit history).
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 32, height: 32)
+            // F8 (Plan 13-21): undo HIDDEN until the stack is non-empty, redo HIDDEN until ITS
+            // stack is non-empty (exact user spec — redo only ever appears after an undo). Both
+            // disabled while an undo/redo is already in flight (EditorHistory.isProcessing).
+            if state.history.canUndo {
+                Button {
+                    Task { await performUndo() }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                }
+                .disabled(state.history.isProcessing)
+                .accessibilityLabel("Undo")
             }
-            .accessibilityLabel("Undo")
 
-            Button {
-                // Plan 12 wires real redo (timeline/edit history).
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 32, height: 32)
+            if state.history.canRedo {
+                Button {
+                    Task { await performRedo() }
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                }
+                .disabled(state.history.isProcessing)
+                .accessibilityLabel("Redo")
             }
-            .accessibilityLabel("Redo")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 2) // F7 (Plan 13-21): 4 → 2, frees more vertical space for the preview
+    }
+
+    // MARK: - Undo/redo (F8, Plan 13-21)
+
+    private func performUndo() async {
+        if let errorMessage = await state.history.undo() {
+            showBarToast(errorMessage)
+        }
+        syncProjectFromManager()
+    }
+
+    private func performRedo() async {
+        if let errorMessage = await state.history.redo() {
+            showBarToast(errorMessage)
+        }
+        syncProjectFromManager()
     }
 
     private func cycleAspectRatio() {
@@ -554,6 +599,19 @@ struct EditorView: View {
             do {
                 try await projectManager.updateAspectRatio(nextRatio)
                 state.project.aspectRatio = nextRatio
+                state.history.record(UndoableAction(
+                    label: "Aspect ratio",
+                    undo: {
+                        try await projectManager.updateAspectRatio(previousRatio)
+                        state.aspectRatio = previousRatio
+                        state.project.aspectRatio = previousRatio
+                    },
+                    redo: {
+                        try await projectManager.updateAspectRatio(nextRatio)
+                        state.aspectRatio = nextRatio
+                        state.project.aspectRatio = nextRatio
+                    }
+                ))
             } catch {
                 print("[EditorView] updateAspectRatio error: \(error)")
                 state.aspectRatio = previousRatio // revert on 400/failure
@@ -670,15 +728,28 @@ struct EditorView: View {
     /// "Text" (default bar) — the exact canonical add TextOverlayTrackRow's row-level "+" used to
     /// make (now removed from that row per Task E; this is its sole surviving call site).
     private func addDefaultTextOverlay() async {
+        let start = state.currentTime, end = state.currentTime + 3
+        let idsBefore = Set(state.project.textOverlays.map(\.id))
         do {
             try await projectManager.addTextOverlay(
-                text: "Text",
-                xNorm: 0.5,
-                yNorm: 0.5,
-                startSeconds: state.currentTime,
-                endSeconds: state.currentTime + 3
+                text: "Text", xNorm: 0.5, yNorm: 0.5, startSeconds: start, endSeconds: end
             )
             syncProjectFromManager()
+            // F8: "add" record — undo deletes the just-created row; redo re-creates it (gets a
+            // NEW server id each time, tracked via this shared `var` so a later undo still
+            // targets whatever id is currently live).
+            if var newId = Set(state.project.textOverlays.map(\.id)).subtracting(idsBefore).first {
+                state.history.record(UndoableAction(
+                    label: "Add text",
+                    undo: { try await projectManager.deleteTextOverlay(textId: newId) },
+                    redo: {
+                        try await projectManager.addTextOverlay(
+                            text: "Text", xNorm: 0.5, yNorm: 0.5, startSeconds: start, endSeconds: end
+                        )
+                        if let recreated = projectManager.loadedProject?.textOverlays.last { newId = recreated.id }
+                    }
+                ))
+            }
         } catch {
             print("[EditorView] addDefaultTextOverlay error: \(error)")
         }
@@ -700,10 +771,30 @@ struct EditorView: View {
     private func autoGenerateCaptionsFromPlayhead() {
         guard let clipId = videoClipIdUnderPlayheadOrFirst() else { return }
         isCaptionsBusy = true
+        let idsBefore = Set(state.project.captionCues.map(\.id))
         Task {
             do {
                 try await projectManager.autoGenerateCaptions(clipId: clipId)
                 syncProjectFromManager()
+                // F8: bulk "add" — undo deletes every newly-created cue; redo re-creates them
+                // from the captured field snapshot (not by re-running transcription, which isn't
+                // guaranteed deterministic).
+                let newCues = state.project.captionCues.filter { !idsBefore.contains($0.id) }
+                if !newCues.isEmpty {
+                    state.history.record(UndoableAction(
+                        label: "Auto-generate captions",
+                        undo: {
+                            for cue in newCues { try await projectManager.deleteCaptionCue(cueId: cue.id) }
+                        },
+                        redo: {
+                            for cue in newCues {
+                                try await projectManager.addCaptionCue(
+                                    startSeconds: cue.startSeconds, endSeconds: cue.endSeconds, words: cue.words
+                                )
+                            }
+                        }
+                    ))
+                }
             } catch {
                 print("[EditorView] autoGenerateCaptions error: \(error)")
                 showBarToast("Couldn't generate captions")
@@ -728,6 +819,11 @@ struct EditorView: View {
     /// Split — dispatches per selected-asset type. Converts the GLOBAL playhead time into the
     /// asset's own LOCAL time first (cumulative-duration walk for clips; startOffsetSeconds-
     /// relative for audio; text overlays are already timed on the global timeline directly).
+    // F8 (Plan 13-21): splits record a COMPOSITE undo (delete the new piece + PATCH the
+    // original's trim back) / redo (restore the new piece + re-PATCH the original's trim). The
+    // new piece's id isn't in either split API response (ProjectManager discards it and refetches
+    // — see splitClip's/splitAudioClip's doc comments), so it's resolved by diffing the clip/audio
+    // id sets before vs. after the refresh.
     private func performSplit() {
         switch state.selection {
         case .clip(let id):
@@ -735,12 +831,31 @@ struct EditorView: View {
                 showBarToast("Nothing to split")
                 return
             }
+            guard let originalClip = state.project.clips.first(where: { $0.id == id }) else { return }
+            let originalTrimEndBefore = originalClip.trimEndSeconds ?? originalClip.originalDurationSeconds
+            let idsBefore = Set(state.project.clips.map(\.id))
             Task {
                 do {
                     let didSplit = try await projectManager.splitClip(clipId: id, atLocalSeconds: localSeconds)
                     if didSplit {
                         syncProjectFromManager()
                         showBarToast("Split")
+                        let idsAfter = Set(state.project.clips.map(\.id))
+                        if let newClipId = idsAfter.subtracting(idsBefore).first {
+                            state.history.record(UndoableAction(
+                                label: "Split clip",
+                                undo: {
+                                    try await projectManager.deleteClip(clipId: newClipId)
+                                    if let end = originalTrimEndBefore {
+                                        try await projectManager.updateClip(clipId: id, trimEnd: end)
+                                    }
+                                },
+                                redo: {
+                                    try await projectManager.restoreClip(clipId: newClipId)
+                                    try await projectManager.updateClip(clipId: id, trimEnd: localSeconds)
+                                }
+                            ))
+                        }
                     } else {
                         showBarToast("Nothing to split")
                     }
@@ -750,11 +865,36 @@ struct EditorView: View {
                 }
             }
         case .text(let id):
+            guard let originalOverlay = state.project.textOverlays.first(where: { $0.id == id }) else { return }
+            let originalEndBefore = originalOverlay.endSeconds
+            let splitPoint = state.currentTime
+            let idsBefore = Set(state.project.textOverlays.map(\.id))
             Task {
                 do {
-                    let didSplit = try await projectManager.splitTextOverlay(textId: id, atLocalSeconds: state.currentTime)
+                    let didSplit = try await projectManager.splitTextOverlay(textId: id, atLocalSeconds: splitPoint)
                     if didSplit {
                         syncProjectFromManager()
+                        let idsAfter = Set(state.project.textOverlays.map(\.id))
+                        if let newTextId = idsAfter.subtracting(idsBefore).first {
+                            // Text has no soft-delete — undo = delete the new piece + PATCH the
+                            // original's end back; redo = re-create it via a fresh split (same
+                            // math, deterministic from the same captured fields).
+                            state.history.record(UndoableAction(
+                                label: "Split text",
+                                undo: {
+                                    try await projectManager.deleteTextOverlay(textId: newTextId)
+                                    try await projectManager.updateTextOverlay(textId: id, endSeconds: originalEndBefore)
+                                },
+                                redo: {
+                                    try await projectManager.updateTextOverlay(textId: id, endSeconds: splitPoint)
+                                    try await projectManager.addTextOverlay(
+                                        text: originalOverlay.text, xNorm: originalOverlay.xNorm, yNorm: originalOverlay.yNorm,
+                                        widthNorm: originalOverlay.widthNorm, rotation: originalOverlay.rotation,
+                                        startSeconds: splitPoint, endSeconds: originalEndBefore
+                                    )
+                                }
+                            ))
+                        }
                     }
                     showBarToast(didSplit ? "Split" : "Nothing to split")
                 } catch {
@@ -767,12 +907,31 @@ struct EditorView: View {
                 showBarToast("Nothing to split")
                 return
             }
+            guard let originalAudio = state.project.audioClips.first(where: { $0.id == id }) else { return }
+            let originalTrimEndBefore = originalAudio.trimEndSeconds ?? originalAudio.originalDurationSeconds
+            let idsBefore = Set(state.project.audioClips.map(\.id))
             Task {
                 do {
                     let didSplit = try await projectManager.splitAudioClip(audioId: id, atLocalSeconds: localSeconds)
                     if didSplit {
                         syncProjectFromManager()
                         showBarToast("Split")
+                        let idsAfter = Set(state.project.audioClips.map(\.id))
+                        if let newAudioId = idsAfter.subtracting(idsBefore).first {
+                            state.history.record(UndoableAction(
+                                label: "Split audio",
+                                undo: {
+                                    try await projectManager.deleteAudioClip(audioId: newAudioId)
+                                    if let end = originalTrimEndBefore {
+                                        try await projectManager.updateAudioClip(audioId: id, trimEndSeconds: end)
+                                    }
+                                },
+                                redo: {
+                                    try await projectManager.restoreAudioClip(audioId: newAudioId)
+                                    try await projectManager.updateAudioClip(audioId: id, trimEndSeconds: localSeconds)
+                                }
+                            ))
+                        }
                     } else {
                         showBarToast("Nothing to split")
                     }
@@ -806,6 +965,11 @@ struct EditorView: View {
 
     /// Delete/Remove — the contextual bar's Delete (clip/caption) and Remove (text/audio) both
     /// route here, matching the copy strings each track row's own inline delete already uses.
+    // F8 (Plan 13-21): every delete records an UndoableAction. Clips/audio soft-delete
+    // server-side (B1) — undo = POST …/restore, redo = soft-delete again, SAME id throughout (the
+    // row is never actually re-created). Text/caption have no soft-delete — undo = re-create from
+    // the captured fields (the re-created row gets a NEW server id, tracked in a local `var` the
+    // undo/redo closures share by reference), redo = delete whatever id is currently live.
     private func deleteSelected() {
         switch state.selection {
         case .clip(let id):
@@ -815,17 +979,38 @@ struct EditorView: View {
                     state.select(.none)
                     syncProjectFromManager()
                     showBarToast("Clip deleted")
+                    state.history.record(UndoableAction(
+                        label: "Delete clip",
+                        undo: { try await projectManager.restoreClip(clipId: id) },
+                        redo: { try await projectManager.deleteClip(clipId: id) }
+                    ))
                 } catch {
                     print("[EditorView] deleteClip error: \(error)")
                 }
             }
         case .text(let id):
+            guard let overlay = state.project.textOverlays.first(where: { $0.id == id }) else { return }
             Task {
                 do {
                     try await projectManager.deleteTextOverlay(textId: id)
                     state.select(.none)
                     syncProjectFromManager()
                     showBarToast("Text removed")
+                    var currentId = id
+                    state.history.record(UndoableAction(
+                        label: "Delete text",
+                        undo: {
+                            try await projectManager.addTextOverlay(
+                                text: overlay.text, xNorm: overlay.xNorm, yNorm: overlay.yNorm,
+                                widthNorm: overlay.widthNorm, rotation: overlay.rotation,
+                                startSeconds: overlay.startSeconds, endSeconds: overlay.endSeconds
+                            )
+                            if let recreated = projectManager.loadedProject?.textOverlays.last {
+                                currentId = recreated.id
+                            }
+                        },
+                        redo: { try await projectManager.deleteTextOverlay(textId: currentId) }
+                    ))
                 } catch {
                     print("[EditorView] deleteTextOverlay error: \(error)")
                 }
@@ -837,17 +1022,36 @@ struct EditorView: View {
                     state.select(.none)
                     syncProjectFromManager()
                     showBarToast("Audio removed")
+                    state.history.record(UndoableAction(
+                        label: "Delete audio",
+                        undo: { try await projectManager.restoreAudioClip(audioId: id) },
+                        redo: { try await projectManager.deleteAudioClip(audioId: id) }
+                    ))
                 } catch {
                     print("[EditorView] deleteAudioClip error: \(error)")
                 }
             }
         case .caption(let id):
+            guard let cue = state.project.captionCues.first(where: { $0.id == id }) else { return }
             Task {
                 do {
                     try await projectManager.deleteCaptionCue(cueId: id)
                     state.select(.none)
                     syncProjectFromManager()
                     showBarToast("Caption removed")
+                    var currentId = id
+                    state.history.record(UndoableAction(
+                        label: "Delete caption",
+                        undo: {
+                            try await projectManager.addCaptionCue(
+                                startSeconds: cue.startSeconds, endSeconds: cue.endSeconds, words: cue.words
+                            )
+                            if let recreated = projectManager.loadedProject?.captionCues.last {
+                                currentId = recreated.id
+                            }
+                        },
+                        redo: { try await projectManager.deleteCaptionCue(cueId: currentId) }
+                    ))
                 } catch {
                     print("[EditorView] deleteCaptionCue error: \(error)")
                 }
@@ -873,11 +1077,14 @@ struct EditorView: View {
     private func duplicateSelectedText() async {
         guard case .text(let id) = state.selection,
               let overlay = state.project.textOverlays.first(where: { $0.id == id }) else { return }
+        let newXNorm = min(0.94, overlay.xNorm + 0.04)
+        let newYNorm = min(0.94, overlay.yNorm + 0.04)
+        let idsBefore = Set(state.project.textOverlays.map(\.id))
         do {
             try await projectManager.addTextOverlay(
                 text: overlay.text,
-                xNorm: min(0.94, overlay.xNorm + 0.04),
-                yNorm: min(0.94, overlay.yNorm + 0.04),
+                xNorm: newXNorm,
+                yNorm: newYNorm,
                 widthNorm: overlay.widthNorm,
                 rotation: overlay.rotation,
                 startSeconds: overlay.startSeconds,
@@ -885,6 +1092,19 @@ struct EditorView: View {
             )
             syncProjectFromManager()
             showBarToast("Text duplicated")
+            if var newId = Set(state.project.textOverlays.map(\.id)).subtracting(idsBefore).first {
+                state.history.record(UndoableAction(
+                    label: "Duplicate text",
+                    undo: { try await projectManager.deleteTextOverlay(textId: newId) },
+                    redo: {
+                        try await projectManager.addTextOverlay(
+                            text: overlay.text, xNorm: newXNorm, yNorm: newYNorm, widthNorm: overlay.widthNorm,
+                            rotation: overlay.rotation, startSeconds: overlay.startSeconds, endSeconds: overlay.endSeconds
+                        )
+                        if let recreated = projectManager.loadedProject?.textOverlays.last { newId = recreated.id }
+                    }
+                ))
+            }
         } catch {
             print("[EditorView] duplicateSelectedText error: \(error)")
         }

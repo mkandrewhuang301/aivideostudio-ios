@@ -108,19 +108,49 @@ struct CaptionTrackRow: View {
 
     // MARK: - Mutations
 
+    // F8 (Plan 13-21): same debounce treatment as the other pill rows' retime — `onRetime` fires
+    // continuously during an edge-handle drag, once at release for a body-move.
+    @State private var retimeBeforeByCue: [String: (start: Double, end: Double)] = [:]
+    @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
+
     private func retime(id: String, start: Double, end: Double) async {
+        if retimeBeforeByCue[id] == nil, let cue = state.project.captionCues.first(where: { $0.id == id }) {
+            retimeBeforeByCue[id] = (cue.startSeconds, cue.endSeconds)
+        }
         do {
             try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end)
             syncProjectFromManager()
         } catch {
             print("[CaptionTrackRow] retime error: \(error)")
         }
+        retimeDebounceTasks[id]?.cancel()
+        retimeDebounceTasks[id] = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            guard let before = retimeBeforeByCue[id] else { return }
+            retimeBeforeByCue[id] = nil
+            retimeDebounceTasks[id] = nil
+            state.history.record(UndoableAction(
+                label: "Retime caption",
+                undo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: before.start, endSeconds: before.end) },
+                redo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end) }
+            ))
+        }
     }
 
+    // F8: caption word edits (tap-to-edit TextField commit) fire once per commit — single record.
     private func commitWords(id: String, words: [CaptionWord]) async {
+        let before = state.project.captionCues.first(where: { $0.id == id })?.words
         do {
             try await projectManager.updateCaptionCue(cueId: id, words: words)
             syncProjectFromManager()
+            if let before {
+                state.history.record(UndoableAction(
+                    label: "Edit caption words",
+                    undo: { try await projectManager.updateCaptionCue(cueId: id, words: before) },
+                    redo: { try await projectManager.updateCaptionCue(cueId: id, words: words) }
+                ))
+            }
         } catch {
             print("[CaptionTrackRow] words commit error: \(error)")
         }

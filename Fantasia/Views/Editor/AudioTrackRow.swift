@@ -72,7 +72,19 @@ struct AudioTrackRow: View {
 
     // MARK: - Mutations
 
+    // F8 (Plan 13-21): `onRetime` fires ONCE at release for a body-move, but CONTINUOUSLY
+    // (every `.onChanged`) for an edge-handle trim drag — same debounce treatment as
+    // TimelineTrackView.updateClipTrim so a handle drag doesn't flood the history with dozens of
+    // near-duplicate entries (a single-shot body-move just resolves its debounce ~500ms later,
+    // harmless).
+    @State private var retimeBeforeByClip: [String: (offset: Double, trimStart: Double, trimEnd: Double)] = [:]
+    @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
+
     private func retime(id: String, offset: Double, trimStart: Double, trimEnd: Double) async {
+        if retimeBeforeByClip[id] == nil, let clip = state.project.audioClips.first(where: { $0.id == id }) {
+            let beforeEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
+            retimeBeforeByClip[id] = (clip.startOffsetSeconds, clip.trimStartSeconds, beforeEnd)
+        }
         do {
             try await projectManager.updateAudioClip(
                 audioId: id, startOffsetSeconds: offset, trimStartSeconds: trimStart, trimEndSeconds: trimEnd
@@ -80,6 +92,31 @@ struct AudioTrackRow: View {
             syncProjectFromManager()
         } catch {
             print("[AudioTrackRow] retime error: \(error)")
+        }
+        scheduleRetimeUndoCommit(id: id, after: (offset, trimStart, trimEnd))
+    }
+
+    private func scheduleRetimeUndoCommit(id: String, after: (offset: Double, trimStart: Double, trimEnd: Double)) {
+        retimeDebounceTasks[id]?.cancel()
+        retimeDebounceTasks[id] = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            guard let before = retimeBeforeByClip[id] else { return }
+            retimeBeforeByClip[id] = nil
+            retimeDebounceTasks[id] = nil
+            state.history.record(UndoableAction(
+                label: "Retime audio",
+                undo: {
+                    try await projectManager.updateAudioClip(
+                        audioId: id, startOffsetSeconds: before.offset, trimStartSeconds: before.trimStart, trimEndSeconds: before.trimEnd
+                    )
+                },
+                redo: {
+                    try await projectManager.updateAudioClip(
+                        audioId: id, startOffsetSeconds: after.offset, trimStartSeconds: after.trimStart, trimEndSeconds: after.trimEnd
+                    )
+                }
+            ))
         }
     }
 

@@ -60,6 +60,11 @@ final class EditorState {
     /// on every live magnification delta; existing frames just stretch until the pinch ends.
     var isZooming = false
 
+    /// Plan 13-21 F8: the Editor's undo/redo engine. Held here (not threaded as a separate param)
+    /// so every view that already receives `state: EditorState` gets it for free — mirrors
+    /// pxPerSecond/isZooming above.
+    let history = EditorHistory()
+
     init(project: EditProject) {
         self.project = project
         self.aspectRatio = project.aspectRatio

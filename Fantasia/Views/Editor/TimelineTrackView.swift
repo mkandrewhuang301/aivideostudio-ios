@@ -644,6 +644,7 @@ struct TimelineTrackView: View {
     private func handlePickedMedia(_ items: [PickedMedia]) {
         guard !items.isEmpty else { return }
         isAddingClip = true
+        let idsBefore = Set(state.project.clips.map(\.id))
         Task {
             for item in items {
                 do {
@@ -659,15 +660,57 @@ struct TimelineTrackView: View {
             }
             syncProjectFromManager()
             isAddingClip = false
+            // F8: one "add" record per NEW clip actually added (a multi-select add can add
+            // several at once) — undo soft-deletes it, redo restores it. Adding a clip back via
+            // re-import isn't attempted on redo (the source generation/upload may no longer be
+            // available) — restore is always possible since the R2 object is kept either way.
+            let newIds = Set(state.project.clips.map(\.id)).subtracting(idsBefore)
+            for newId in newIds {
+                state.history.record(UndoableAction(
+                    label: "Add clip",
+                    undo: { try await projectManager.deleteClip(clipId: newId) },
+                    redo: { try await projectManager.restoreClip(clipId: newId) }
+                ))
+            }
         }
     }
 
+    // F8: trim-handle drags fire `onTrimChange` CONTINUOUSLY (every `.onChanged`, not just on
+    // release) — recording an UndoableAction on every call would flood the history with dozens of
+    // near-duplicate entries per gesture. Debounced instead: the FIRST change of a drag captures
+    // the clip's pre-drag (start,end) as "before"; each subsequent change resets a short timer;
+    // once the timer fires (drag has settled), ONE record is committed spanning "before" →
+    // whatever the LATEST values were.
+    @State private var trimBeforeByClip: [String: (start: Double, end: Double)] = [:]
+    @State private var trimDebounceTasks: [String: Task<Void, Never>] = [:]
+
     private func updateClipTrim(clipId: String, start: Double, end: Double) async {
+        if trimBeforeByClip[clipId] == nil, let clip = state.project.clips.first(where: { $0.id == clipId }) {
+            let beforeEnd = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
+            trimBeforeByClip[clipId] = (clip.trimStartSeconds, beforeEnd)
+        }
         do {
             try await projectManager.updateClip(clipId: clipId, trimStart: start, trimEnd: end)
             syncProjectFromManager()
         } catch {
             print("[TimelineTrackView] updateClipTrim error: \(error)")
+        }
+        scheduleTrimUndoCommit(clipId: clipId, after: (start, end))
+    }
+
+    private func scheduleTrimUndoCommit(clipId: String, after: (start: Double, end: Double)) {
+        trimDebounceTasks[clipId]?.cancel()
+        trimDebounceTasks[clipId] = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            guard let before = trimBeforeByClip[clipId] else { return }
+            trimBeforeByClip[clipId] = nil
+            trimDebounceTasks[clipId] = nil
+            state.history.record(UndoableAction(
+                label: "Trim clip",
+                undo: { try await projectManager.updateClip(clipId: clipId, trimStart: before.start, trimEnd: before.end) },
+                redo: { try await projectManager.updateClip(clipId: clipId, trimStart: after.start, trimEnd: after.end) }
+            ))
         }
     }
 
@@ -701,10 +744,21 @@ struct TimelineTrackView: View {
         guard targetIndex != currentIndex, clips.indices.contains(targetIndex) else { return }
 
         let targetSortOrder = clips[targetIndex].sortOrder
+        // F8: reorder fires ONCE at drag release (unlike trim), so this records directly — no
+        // debounce needed. Best-effort undo: re-PATCHes the dragged clip's OWN sort_order back to
+        // its pre-drag value (a multi-clip reorder cascade on the server isn't fully replayed in
+        // reverse for every OTHER clip it may have resequenced — acceptable v1 tradeoff, matches
+        // typical editor undo scope).
+        let previousSortOrder = clip.sortOrder
         Task {
             do {
                 try await projectManager.updateClip(clipId: clip.id, sortOrder: targetSortOrder)
                 syncProjectFromManager()
+                state.history.record(UndoableAction(
+                    label: "Reorder clip",
+                    undo: { try await projectManager.updateClip(clipId: clip.id, sortOrder: previousSortOrder) },
+                    redo: { try await projectManager.updateClip(clipId: clip.id, sortOrder: targetSortOrder) }
+                ))
             } catch {
                 print("[TimelineTrackView] reorderClip error: \(error)")
             }

@@ -227,6 +227,20 @@ final class ProjectManager {
         loadedProject?.clips.removeAll { $0.id == clipId }
     }
 
+    /// Plan 13-21 F8: undoes a clip soft-delete (B1.3's restore endpoint). Maps a 404 (row
+    /// missing, never deleted, or purged past the 24h window) to `PurgedRestoreError` so
+    /// EditorHistory can show its dedicated "Can't undo — file was removed" toast instead of a
+    /// generic error.
+    func restoreClip(clipId: String) async throws {
+        guard let id = loadedProject?.id else { return }
+        do {
+            _ = try await APIClient.shared.restoreClip(projectId: id, clipId: clipId)
+            await refreshLoadedProjectURLs()
+        } catch APIError.unexpectedResponse(let statusCode, _) where statusCode == 404 {
+            throw PurgedRestoreError()
+        }
+    }
+
     /// Splits the clip at `atLocalSeconds` (in the clip's own trim-seconds space; 13-19 Task
     /// F/G1). Uses `ClipPillView.splitPoint` for the exact same bounds math the inline trim
     /// handles rely on — a nil result (split point not strictly inside the clip's trim range) is a
@@ -371,6 +385,18 @@ final class ProjectManager {
         guard let id = loadedProject?.id else { return }
         try await APIClient.shared.deleteAudioClip(projectId: id, audioId: audioId)
         loadedProject?.audioClips.removeAll { $0.id == audioId }
+    }
+
+    /// Plan 13-21 F8: undoes an audio clip soft-delete — same 404-means-purged contract as
+    /// restoreClip above.
+    func restoreAudioClip(audioId: String) async throws {
+        guard let id = loadedProject?.id else { return }
+        do {
+            _ = try await APIClient.shared.restoreAudioClip(projectId: id, audioId: audioId)
+            await refreshLoadedProjectURLs()
+        } catch APIError.unexpectedResponse(let statusCode, _) where statusCode == 404 {
+            throw PurgedRestoreError()
+        }
     }
 
     /// Splits the audio clip at `atLocalSeconds` (in the clip's own trim-seconds space; 13-19 Task

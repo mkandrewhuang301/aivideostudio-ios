@@ -70,6 +70,7 @@
 		8D9993E1A6CC16B7E52CC7FE /* ProjectTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8CA418865164B649AE53D1 /* ProjectTileView.swift */; };
 		98891B7B4E232C4194621D74 /* ConsentAttestationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D24724077CFB86BC490722 /* ConsentAttestationView.swift */; };
 		989874F0945BA7356528F19E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 449957FC49E746A99AC14325 /* RevenueCat */; };
+		99D1C25C5D0681A1D3A2F203 /* EditorHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA1EAE8480B4A8A377C4028 /* EditorHistory.swift */; };
 		9CBE3B9FE3090E3EB4DBFE1C /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93666B740F1CC44A352A2920 /* CameraPicker.swift */; };
 		9E8F4D64E56BB941F57A2634 /* BrandGradient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988EBFB034876308CEF701E2 /* BrandGradient.swift */; };
 		9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE46B720B299E8E732C4EA9 /* PushNotificationManager.swift */; };
@@ -230,6 +231,7 @@
 		E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		EA736381FE914D7303D5DE5E /* TransparentFullScreenBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparentFullScreenBackground.swift; sourceTree = "<group>"; };
 		ECED50C67563635C0B951853 /* EditProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditProject.swift; sourceTree = "<group>"; };
+		EEA1EAE8480B4A8A377C4028 /* EditorHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorHistory.swift; sourceTree = "<group>"; };
 		F1FB67BBB633D6485F16FC2A /* CaptionStyleSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptionStyleSheet.swift; sourceTree = "<group>"; };
 		F2D2823CAA0AD0C9A75CBC49 /* GenerationOptionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationOptionsPanel.swift; sourceTree = "<group>"; };
 		F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenVideoPlayerView.swift; sourceTree = "<group>"; };
@@ -545,6 +547,7 @@
 				E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */,
 				C4B4F501364C0B7DF4678081 /* EditorBottomBar.swift */,
 				B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */,
+				EEA1EAE8480B4A8A377C4028 /* EditorHistory.swift */,
 				045559253B09A54FC9E2075E /* EditorState.swift */,
 				A99DB73E4892B5ED65BA6190 /* EditorView.swift */,
 				A4CF6B60306B991418F1E2C1 /* FullscreenEditorPlayerView.swift */,
@@ -704,6 +707,7 @@
 				1AEAC0945F74B830EAE275CA /* EditProject.swift in Sources */,
 				2FC9392815EA53B33F919960 /* EditorBottomBar.swift in Sources */,
 				037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */,
+				99D1C25C5D0681A1D3A2F203 /* EditorHistory.swift in Sources */,
 				590205AB74ECD04778D8CDB9 /* EditorState.swift in Sources */,
 				E46F576F83D1D84CE86717DC /* EditorView.swift in Sources */,
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,

@@ -493,9 +493,21 @@ actor APIClient {
         return response.clip
     }
 
-    // DELETE /api/projects/:id/clips/:clipId
+    // DELETE /api/projects/:id/clips/:clipId — now a soft-delete server-side (Plan 13-21 B1); the
+    // R2 object and row are kept for 24h so restoreClip below can undo it.
     func deleteClip(projectId: String, clipId: String) async throws {
         try await authorizedRequestNoContent(path: "api/projects/\(projectId)/clips/\(clipId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/clips/:clipId/restore — undoes a clip soft-delete (Plan 13-21 B1.3/
+    // F8). A 404 (row missing, never deleted, or already purged past the 24h window) surfaces as
+    // APIError.unexpectedResponse(statusCode: 404, _) — ProjectManager.restoreClip maps that to
+    // PurgedRestoreError so EditorHistory can show the dedicated "file was removed" toast.
+    func restoreClip(projectId: String, clipId: String) async throws -> ProjectClip {
+        let response: ClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/clips/\(clipId)/restore", method: "POST", expectedStatus: [200]
+        )
+        return response.clip
     }
 
     // POST /api/projects/:id/clips/:clipId/split — T-13-19 Task G1/F. Server copies the source
@@ -658,6 +670,15 @@ actor APIClient {
     // DELETE /api/projects/:id/audio/:audioId
     func deleteAudioClip(projectId: String, audioId: String) async throws {
         try await authorizedRequestNoContent(path: "api/projects/\(projectId)/audio/\(audioId)", method: "DELETE")
+    }
+
+    // POST /api/projects/:id/audio/:audioId/restore — undoes an audio clip soft-delete (Plan
+    // 13-21 B1.3/F8). Same 404-means-purged contract as restoreClip above.
+    func restoreAudioClip(projectId: String, audioId: String) async throws -> AudioClip {
+        let response: AudioClipResponse = try await projectRequest(
+            path: "api/projects/\(projectId)/audio/\(audioId)/restore", method: "POST", expectedStatus: [200]
+        )
+        return response.audioClip
     }
 
     // POST /api/projects/:id/audio/:audioId/split — T-13-19 Task G2/F. Same copy-then-insert shape
