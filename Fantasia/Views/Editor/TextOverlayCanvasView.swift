@@ -220,6 +220,18 @@ private struct TextOverlayItemView: View {
     // then `.rotationEffect` is the LAST modifier applied, so every control rotates together as
     // one rigid unit around the box's center (CapCut-style), and `.overlay(alignment:)` below
     // aligns against the box's own (pre-rotation) bounds rather than a screen-axis-aligned one.
+    //
+    // F14 (Plan 13-21) corner-offset geometry: `.overlay(alignment:)` positions each button's
+    // OWN 44×44 (or 34×34 for the smaller resize handle) invisible hit frame so ITS corner
+    // coincides with the TEXT view's frame corner — but `selectionFrame` below draws the VISIBLE
+    // stroke `.padding(-8)` OUTSIDE that same text frame (an 8pt margin around the text, matching
+    // the sketch), so the visible stroke's actual corner sits 8pt further out than the text
+    // frame's corner. The circle glyph is centered inside its hit frame, so with a 44pt hit frame
+    // and a 13pt visible radius, the circle's UNADJUSTED center sits (22,22) inside the text-frame
+    // corner as the anchor — 8pt more once you account for the stroke's own outward expansion.
+    // Each offset below is `-(hitFrame/2 + strokeExpansion)` on both axes (toward the corner),
+    // computed to land the circle's center exactly ON the visible stroke's corner — VERIFIED via
+    // zoomed simulator screenshot (13-21 F14 verification gate), not eyeballed.
     private var displayView: some View {
         Text(overlay.text)
             .font(.system(size: baseFontSize * liveScale, weight: .heavy))
@@ -232,19 +244,23 @@ private struct TextOverlayItemView: View {
             .onTapGesture { onSelect() }
             .highPriorityGesture(moveDragGesture)
             .overlay(alignment: .topLeading) {
-                if isSelected { deleteButton.offset(x: -20, y: -20) }
+                if isSelected { deleteButton.offset(x: -30, y: -30) }
             }
             .overlay(alignment: .topTrailing) {
-                if isSelected { editButton.offset(x: 20, y: -20) }
+                if isSelected { editButton.offset(x: 30, y: -30) }
             }
             .overlay(alignment: .bottomLeading) {
-                if isSelected { duplicateButton.offset(x: -20, y: 20) }
+                if isSelected { duplicateButton.offset(x: -30, y: 30) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if isSelected { resizeHandle.offset(x: 20, y: 20) }
+                if isSelected { resizeHandle.offset(x: 25, y: 25) }
             }
             .overlay(alignment: .top) {
-                if isSelected { rotationHandle.offset(y: -36) }
+                // F14.2: stem's BOTTOM now lands exactly on the box's top border (line height 22,
+                // offset -30 → bottom at text-frame-y = -8, i.e. the selectionFrame's own top
+                // edge) — previously offset -36 with a 20pt line left an 8pt visible gap between
+                // the stem and the box.
+                if isSelected { rotationHandle.offset(y: -30) }
             }
             .rotationEffect(.degrees(liveRotation))
     }
@@ -331,21 +347,25 @@ private struct TextOverlayItemView: View {
         .accessibilityLabel("Resize text overlay")
     }
 
-    // MARK: - Rotation (NEW, 13-19 Task H) — short vertical line rising from the box's top-center
-    // to a small dot; press-drag the dot to rotate clockwise/counterclockwise. Continuous-drag
-    // control, exempt from the 44pt rule (same exemption resizeHandle already relies on).
+    // MARK: - Rotation (NEW, 13-19 Task H; geometry fixed 13-21 F14.2) — short vertical line
+    // rising from the box's top-center to a small dot; press-drag the dot to rotate clockwise/
+    // counterclockwise. Continuous-drag control, exempt from the 44pt rule (same exemption
+    // resizeHandle already relies on). Stem is now 22pt tall (was 20) and — combined with the
+    // container's `.offset(y: -30)` above — its BOTTOM lands exactly on the box's top border, no
+    // visible gap. Dot is now a WHITE fill (was black — invisible against light/white video
+    // backgrounds) with a thin dark outline so it still reads on light content too.
 
     private var rotationHandle: some View {
         VStack(spacing: 2) {
             Rectangle()
-                .fill(Color.white.opacity(0.85))
-                .frame(width: 1.5, height: 20)
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 1.5, height: 22)
             ZStack {
                 Color.white.opacity(0.001).frame(width: 34, height: 34)
                 Circle()
-                    .fill(Color.black.opacity(0.85))
-                    .frame(width: 12, height: 12)
-                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+                    .fill(Color.white)
+                    .frame(width: 11, height: 11)
+                    .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
             }
         }
         .contentShape(Rectangle())

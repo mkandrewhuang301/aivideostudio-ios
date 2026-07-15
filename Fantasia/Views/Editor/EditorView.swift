@@ -203,28 +203,49 @@ struct EditorView: View {
     }
 
     // MARK: - Top bar: close ✕ / tap-to-rename title (Delta 1) / Export
+    //
+    // F6 (Plan 13-21): rebuilt as a ZStack — the title layer is centered on the FULL bar width
+    // (screen center), with ✕/Export in a SEPARATE HStack layer on top. Previously the title sat
+    // inside the SAME HStack as ✕/Export (HStack(spacer, title, spacer, export)), which centers it
+    // between the two buttons, not on the screen — visibly off-center whenever the two buttons'
+    // widths differ (they do: Export becomes "Exporting…", wider, while dispatching). The title's
+    // available width is now explicitly capped so a long title truncates with "…" instead of ever
+    // pushing into (or being pushed by) either button — measured live via onGeometryChange so the
+    // cap self-adjusts if either button's width changes (e.g. Export → "Exporting…").
+
+    @State private var closeZoneWidth: CGFloat = 44
+    @State private var exportZoneWidth: CGFloat = 90
 
     private var topBar: some View {
         VStack(spacing: 2) {
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
+            GeometryReader { geo in
+                ZStack {
+                    titleView
+                        .frame(
+                            maxWidth: max(geo.size.width - 2 * max(closeZoneWidth, exportZoneWidth) - 16, 40)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Close editor")
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { closeZoneWidth = $0 }
+
+                        Spacer(minLength: 8)
+
+                        exportButton
+                            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { exportZoneWidth = $0 }
+                    }
                 }
-                .accessibilityLabel("Close editor")
-
-                Spacer(minLength: 8)
-
-                titleView
-
-                Spacer(minLength: 8)
-
-                exportButton
             }
+            .frame(height: 44)
 
             if let titleError {
                 Text(titleError)
@@ -235,7 +256,7 @@ struct EditorView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.bottom, 2) // F7 (Plan 13-21): 6 → 2, frees more vertical space for the preview
     }
 
     @ViewBuilder
@@ -255,13 +276,19 @@ struct EditorView: View {
                 isEditingTitle = true
             } label: {
                 HStack(spacing: 8) {
+                    // F6: lineLimit(1) + truncationMode(.tail) — the outer titleView.frame(maxWidth:)
+                    // above proposes a capped width to this HStack, which SwiftUI shrinks the
+                    // flexible Text into (the pencil icon, having no flexibility, stays full-size
+                    // and always visible next to the truncated text).
                     Text(displayTitle)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     Image(systemName: "pencil")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.6))
+                        .fixedSize()
                 }
             }
             .buttonStyle(.plain)
@@ -366,10 +393,11 @@ struct EditorView: View {
             let ratio = Self.aspectFraction(state.aspectRatio)
             // Task C: the preview is the hero — grows to fill whatever vertical space is left
             // over from topBar/controlsRow/TimelineTrackView/EditorBottomBar (all fixed-height),
-            // instead of a hard-coded 340pt. The letterbox math is unchanged; a non-matching
-            // source clip still correctly shows bars.
-            let maxHeight = max(geo.size.height - 24, 100)
-            let availWidth = geo.size.width - 24
+            // instead of a hard-coded 340pt. F7 (Plan 13-21): stage insets shrink 24 → 8pt (both
+            // axes) so the preview is visibly larger — the letterbox math itself is unchanged, a
+            // non-matching source clip still correctly shows bars.
+            let maxHeight = max(geo.size.height - 8, 100)
+            let availWidth = geo.size.width - 8
             let size: CGSize = {
                 if maxHeight * ratio <= availWidth {
                     return CGSize(width: maxHeight * ratio, height: maxHeight)
@@ -401,6 +429,13 @@ struct EditorView: View {
                         }
                     }
                 }
+                // F11 (Plan 13-21): tap-outside-deselects catcher — sits BEHIND
+                // TextOverlayCanvasView (added via `.overlay` below, which layers on top of this
+                // whole ZStack), so a tap on an actual text overlay's own hit target still wins;
+                // a tap anywhere else on the empty video area falls through to here and deselects.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { state.select(.none) }
             }
             .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -473,7 +508,12 @@ struct EditorView: View {
                 .accessibilityLabel("Caption style")
             }
 
+            // F11 (Plan 13-21): tapping the empty space between the aspect/caption-style buttons
+            // and the undo/redo buttons deselects — same tap-outside-deselects treatment as the
+            // preview stage and timeline background.
             Spacer()
+                .contentShape(Rectangle())
+                .onTapGesture { state.select(.none) }
 
             Button {
                 // Plan 12 wires real undo (timeline/edit history).
@@ -496,7 +536,7 @@ struct EditorView: View {
             .accessibilityLabel("Redo")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.vertical, 2) // F7 (Plan 13-21): 4 → 2, frees more vertical space for the preview
     }
 
     private func cycleAspectRatio() {

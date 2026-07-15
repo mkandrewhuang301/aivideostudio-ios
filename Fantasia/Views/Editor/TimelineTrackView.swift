@@ -129,11 +129,16 @@ struct TimelineTrackView: View {
                 trackBackground
 
                 // Fixed-region scrub background — unambiguous (no ScrollView competes here).
+                // F11 (Plan 13-21): a plain tap (no movement, so scrubGesture's DragGesture never
+                // fires) now also deselects — pills' own .onTapGesture still wins for taps that
+                // land on THEM specifically (SwiftUI's descendant-first hit-testing, same contract
+                // this whole file already relies on for drag-vs-scrub arbitration).
                 Color.white.opacity(0.04)
                     .frame(height: fixedRegionHeight)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .gesture(scrubGesture)
+                    .onTapGesture { state.select(.none) }
 
                 VStack(alignment: .leading, spacing: rulerToClipSpacing) {
                     ruler(contentWidth: contentWidth)
@@ -167,6 +172,7 @@ struct TimelineTrackView: View {
                 .clipped()
                 .contentShape(Rectangle())
                 .gesture(tracksGesture)
+                .onTapGesture { state.select(.none) } // F11: plain tap on empty tracks background deselects
                 .offset(y: fixedRegionHeight)
             }
             .clipped()
@@ -454,8 +460,16 @@ struct TimelineTrackView: View {
         for earlier in clips[..<index] { clipStart += duration(of: earlier) }
         let clipEnd = clipStart + duration(of: clip)
 
+        // F10 (Plan 13-21): keeps the EXACT "always snap to clipStart when outside" rule (not the
+        // generic nearest-boundary EditorState.snapPlayhead behavior every other pill type uses —
+        // clips are adjacent/back-to-back, so clipStart doubles as the boundary with the PREVIOUS
+        // clip; snapping there is intentional even if the playhead was already past clipEnd), now
+        // wrapped in the same animated-glide treatment (withAnimation — contentOffset derives from
+        // currentTime, so the timeline glides instead of jumping).
         if !(state.currentTime >= clipStart && state.currentTime < clipEnd) {
-            state.currentTime = clipStart
+            withAnimation(.easeInOut(duration: 0.25)) {
+                state.currentTime = clipStart
+            }
         }
         state.select(.clip(clip.id))
     }

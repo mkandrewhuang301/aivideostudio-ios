@@ -7,7 +7,7 @@
 //
 // Pattern: @Observable @MainActor final class (CLAUDE.md — all new iOS managers use this).
 
-import Foundation
+import SwiftUI
 
 /// What's currently selected on the timeline. Drives the contextual bottom bar (UI-SPEC Editor
 /// section) — `.none` shows the default Edit/Text/Audio/Captions bar, any other case swaps in
@@ -89,5 +89,21 @@ final class EditorState {
 
     func select(_ selection: EditorSelection) {
         self.selection = selection
+    }
+
+    /// Plan 13-21 F10: shared animated snap helper — if the playhead is currently OUTSIDE
+    /// `[start, end)`, glides it to whichever boundary is nearer (before → `start`, at/after `end`
+    /// → `end`); a no-op if it's already inside. Every selectable timeline item (clip/text/audio/
+    /// caption) calls this with its own window right before selecting itself, so tapping ANY pill
+    /// outside the current play position animates the timeline into view instead of jumping.
+    /// `contentOffset` (TimelineTrackView) derives from `currentTime`, so wrapping the assignment
+    /// in `withAnimation` is sufficient — the whole timeline glides, no separate animation plumbing
+    /// needed in the timeline view itself.
+    func snapPlayhead(toWindow start: Double, _ end: Double) {
+        guard !(currentTime >= start && currentTime < end) else { return }
+        let target = currentTime < start ? start : end
+        withAnimation(.easeInOut(duration: 0.25)) {
+            currentTime = min(max(target, 0), totalDuration)
+        }
     }
 }

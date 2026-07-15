@@ -50,7 +50,14 @@ struct AudioTrackRow: View {
                             clip: clip,
                             pxPerSecond: pxPerSecond,
                             isSelected: state.selection == .audio(clip.id),
-                            onSelect: { state.select(.audio(clip.id)) },
+                            onSelect: {
+                                // F10 (Plan 13-21): animated snap to this pill's own window BEFORE
+                                // selecting, mirroring TimelineTrackView.selectClip's snap.
+                                let start = clip.startOffsetSeconds
+                                let end = start + max(0, (clip.trimEndSeconds ?? clip.trimStartSeconds) - clip.trimStartSeconds)
+                                state.snapPlayhead(toWindow: start, end)
+                                state.select(.audio(clip.id))
+                            },
                             onRetime: { offset, trimStart, trimEnd in
                                 Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
                             }

@@ -42,7 +42,11 @@ struct TextOverlayTrackRow: View {
                             overlay: overlay,
                             pxPerSecond: pxPerSecond,
                             isSelected: state.selection == .text(overlay.id),
-                            onSelect: { state.select(.text(overlay.id)) },
+                            onSelect: {
+                                // F10 (Plan 13-21): animated snap to this pill's own window before selecting.
+                                state.snapPlayhead(toWindow: overlay.startSeconds, overlay.endSeconds)
+                                state.select(.text(overlay.id))
+                            },
                             onRetime: { start, end in
                                 Task { await retime(id: overlay.id, start: start, end: end) }
                             }

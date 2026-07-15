@@ -54,7 +54,11 @@ struct CaptionTrackRow: View {
                     pxPerSecond: pxPerSecond,
                     isSelected: state.selection == .caption(cue.id),
                     isEditing: editingCueId == cue.id,
-                    onSelect: { state.select(.caption(cue.id)) },
+                    onSelect: {
+                        // F10 (Plan 13-21): animated snap to this cue's own window before selecting.
+                        state.snapPlayhead(toWindow: cue.startSeconds, cue.endSeconds)
+                        state.select(.caption(cue.id))
+                    },
                     onRetime: { start, end in
                         Task { await retime(id: cue.id, start: start, end: end) }
                     },
