@@ -26,6 +26,9 @@ struct CoverPickerSheet: View {
     var onCoverSet: () -> Void
 
     @State private var composition: AVMutableComposition?
+    // 13-23 J4: applied to every AVAssetImageGenerator below so picked/strip frames render with
+    // the same per-clip aspect-fit the live preview and export use — never stretched.
+    @State private var videoComposition: AVMutableVideoComposition?
     @State private var ranges: [EditorCompositionBuilder.ClipRange] = []
     @State private var totalDuration: Double = 0
 
@@ -118,11 +121,14 @@ struct CoverPickerSheet: View {
 
     private func loadComposition() async {
         isLoadingComposition = true
-        guard let (built, builtRanges) = await EditorCompositionBuilder.build(clips: project.clips) else {
+        guard let (built, builtVideoComposition, builtRanges) = await EditorCompositionBuilder.build(
+            clips: project.clips, aspectRatio: project.aspectRatio
+        ) else {
             isLoadingComposition = false
             return
         }
         composition = built
+        videoComposition = builtVideoComposition
         ranges = builtRanges
         totalDuration = builtRanges.last?.end ?? 0
         isLoadingComposition = false
@@ -144,6 +150,7 @@ struct CoverPickerSheet: View {
         guard let composition else { return }
         let generator = AVAssetImageGenerator(asset: composition)
         generator.appliesPreferredTrackTransform = true
+        generator.videoComposition = videoComposition // J4: aspect-fit frames (nil = no video clips)
         generator.maximumSize = CGSize(width: 480, height: 480)
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
@@ -156,6 +163,7 @@ struct CoverPickerSheet: View {
         stripFrames = Array(repeating: nil, count: stripCount)
         let generator = AVAssetImageGenerator(asset: composition)
         generator.appliesPreferredTrackTransform = true
+        generator.videoComposition = videoComposition // J4: aspect-fit frames (nil = no video clips)
         generator.maximumSize = CGSize(width: 160, height: 200)
         for index in 0..<stripCount {
             if Task.isCancelled { return }

@@ -9,15 +9,26 @@
 // its own composition at all — it shares EditorView's own live AVPlayer instance outright. Also
 // used by F17's CoverPickerSheet (frame strip over the whole project timeline).
 //
+// Plan 13-23 J4: build() now ALSO returns an AVMutableVideoComposition that aspect-FITS each clip
+// segment into one shared canvas. AVMutableComposition alone SCALES every inserted segment to the
+// composition's natural size (the first segment's) — a portrait clip following a 16:9 clip was
+// STRETCHED to 16:9. The per-segment layer-instruction transforms here (preferredTransform
+// composed with a centered aspect-fit scale+translate into `renderSize`) pillarbox/letterbox it
+// instead, exactly like the backend export's scale+pad ffmpeg graph and CapCut (reference frame
+// g04). EditorView sets the returned videoComposition on its AVPlayerItem (fullscreen shares that
+// same item); CoverPickerSheet sets it on its AVAssetImageGenerators so picked frames match.
+//
 // KNOWN LIMITATION (unchanged from the original buildComposition, 13-20): only VIDEO clips
 // contribute actual frames to the composition (AVFoundation has no simple "insert a still image
 // as a video segment" primitive without a custom AVVideoCompositor). An image clip still reserves
 // its trimmed duration on the virtual timeline so state.totalDuration/the ruler/scrubbing stay
-// correct, but the composition itself shows the surrounding video content rather than the still —
-// EditorView's `currentImageClipURL` overlay compensates in the live inline preview; Export
-// (server-side, ffmpegProcessor.ts) renders images correctly regardless.
+// correct, but the composition itself shows black (J4: an explicit background-only instruction —
+// previously the surrounding video content bled through) rather than the still — EditorView's
+// `currentImageClipURL` overlay compensates in the live inline preview; Export (server-side,
+// ffmpegProcessor.ts) renders images correctly regardless.
 
 import AVFoundation
+import CoreGraphics
 
 enum EditorCompositionBuilder {
     struct ClipRange {
@@ -26,12 +37,35 @@ enum EditorCompositionBuilder {
         let end: Double
     }
 
+    // 13-23 J4: fixed-preset canvas sizes — mirrors the backend export's COMPOSE_CANVAS
+    // (ffmpegProcessor.ts), so the live preview letterboxes each clip into the SAME canvas shape
+    // the export render will.
+    private static let presetCanvasSizes: [String: CGSize] = [
+        "9:16": CGSize(width: 1080, height: 1920),
+        "4:5": CGSize(width: 1080, height: 1350),
+        "1:1": CGSize(width: 1080, height: 1080),
+        "16:9": CGSize(width: 1920, height: 1080),
+    ]
+
+    private static func forceEven(_ n: CGFloat) -> CGFloat {
+        let i = Int(n.rounded(.down))
+        return CGFloat(i % 2 == 0 ? i : i - 1)
+    }
+
     /// Builds one AVMutableComposition spanning every clip in `clips` (sorted by `sortOrder`),
     /// back-to-back, plus each clip's [start, end) window on that composition's timeline (global
     /// seconds) — the exact cumulative-duration walk every cross-clip helper in the Editor already
     /// does (TimelineTrackView.selectClip, CaptionTrackRow.clipIdUnderPlayhead, EditorView's split
     /// helpers). Returns nil for an empty clip list.
-    static func build(clips: [ProjectClip]) async -> (composition: AVMutableComposition, ranges: [ClipRange])? {
+    ///
+    /// 13-23 J4: also returns the per-clip aspect-fit `videoComposition` (see file header) — nil
+    /// when no video clip contributed a segment (an all-image project; an AVVideoComposition over
+    /// an empty video track is invalid and the image overlay handles rendering anyway).
+    static func build(clips: [ProjectClip], aspectRatio: String) async -> (
+        composition: AVMutableComposition,
+        videoComposition: AVMutableVideoComposition?,
+        ranges: [ClipRange]
+    )? {
         let sorted = clips.sorted { $0.sortOrder < $1.sortOrder }
         guard !sorted.isEmpty else { return nil }
 
@@ -39,13 +73,25 @@ enum EditorCompositionBuilder {
         let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
         let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
 
+        let renderSize = await resolveRenderSize(aspectRatio: aspectRatio, sortedClips: sorted)
+
         var cursor = CMTime.zero
         var ranges: [ClipRange] = []
+        // J4.2: ONE AVMutableVideoCompositionInstruction per clip segment. Video segments carry a
+        // layer instruction with the aspect-fit transform; image-clip ranges get a background-only
+        // instruction (no layer instructions → black) so the instruction timeline stays gap-free —
+        // AVFoundation requires instructions to cover the composition's full duration with no
+        // gaps/overlaps, and EditorView overlays the actual still on top exactly as before.
+        var instructions: [AVMutableVideoCompositionInstruction] = []
+        var hasVideoSegment = false
 
         for clip in sorted {
             let clipDuration = duration(of: clip)
             let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
             let start = cursor.seconds
+
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(start: cursor, duration: durationTime)
 
             if clip.mediaType == "video", let urlString = clip.url, let url = URL(string: urlString) {
                 let asset = AVURLAsset(url: url)
@@ -54,6 +100,15 @@ enum EditorCompositionBuilder {
                 do {
                     if let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first {
                         try videoTrack?.insertTimeRange(timeRange, of: assetVideoTrack, at: cursor)
+                        hasVideoSegment = true
+                        if let videoTrack {
+                            // The layer instruction references the COMPOSITION's video track (the
+                            // track the player actually renders), not the source asset's.
+                            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+                            let transform = await aspectFitTransform(for: assetVideoTrack, into: renderSize)
+                            layer.setTransform(transform, at: cursor)
+                            instruction.layerInstructions = [layer]
+                        }
                     }
                     if let assetAudioTrack = try await asset.loadTracks(withMediaType: .audio).first {
                         try audioTrack?.insertTimeRange(timeRange, of: assetAudioTrack, at: cursor)
@@ -65,13 +120,77 @@ enum EditorCompositionBuilder {
 
             cursor = cursor + durationTime
             ranges.append(ClipRange(clipId: clip.id, start: start, end: cursor.seconds))
+            instructions.append(instruction)
         }
 
-        return (composition, ranges)
+        var videoComposition: AVMutableVideoComposition?
+        if hasVideoSegment {
+            let vc = AVMutableVideoComposition()
+            vc.renderSize = renderSize
+            vc.frameDuration = CMTime(value: 1, timescale: 30)
+            vc.instructions = instructions
+            videoComposition = vc
+        }
+
+        return (composition, videoComposition, ranges)
     }
 
     static func duration(of clip: ProjectClip) -> Double {
         let end = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
         return max(0, end - clip.trimStartSeconds)
+    }
+
+    /// J4.1: the shared canvas the video composition renders into — the project's resolved aspect
+    /// (reuses 13-22 i1's resolution rule): fixed presets map to their 1080p-capped sizes
+    /// (matching the backend's COMPOSE_CANVAS); 'original' resolves to the FIRST (sortOrder)
+    /// clip's stored pixel dimensions, falling back to that clip's own rotation-corrected video
+    /// track naturalSize, then to 1080×1920. Always even-forced (h264 requirement, mirrors the
+    /// backend's forceEven).
+    private static func resolveRenderSize(aspectRatio: String, sortedClips: [ProjectClip]) async -> CGSize {
+        if let preset = presetCanvasSizes[aspectRatio] { return preset }
+        // "original" (or any unknown value)
+        guard let first = sortedClips.first else { return CGSize(width: 1080, height: 1920) }
+        if let w = first.width, let h = first.height, w > 0, h > 0 {
+            return CGSize(width: forceEven(CGFloat(w)), height: forceEven(CGFloat(h)))
+        }
+        if first.mediaType == "video", let urlString = first.url, let url = URL(string: urlString) {
+            let asset = AVURLAsset(url: url)
+            if let track = try? await asset.loadTracks(withMediaType: .video).first,
+               let naturalSize = try? await track.load(.naturalSize),
+               let transform = try? await track.load(.preferredTransform) {
+                let size = naturalSize.applying(transform)
+                let w = abs(size.width), h = abs(size.height)
+                if w > 0, h > 0 { return CGSize(width: forceEven(w), height: forceEven(h)) }
+            }
+        }
+        return CGSize(width: 1080, height: 1920)
+    }
+
+    /// J4.2: `preferredTransform` composed with a centered aspect-FIT scale+translate of the
+    /// clip's rotation-corrected natural size into `renderSize`. The origin fix-up
+    /// (`-displayRect.origin`) normalizes preferredTransforms whose rotation maps the frame into
+    /// negative coordinate space before the fit is applied — the standard robust recipe for
+    /// arbitrary capture orientations.
+    private static func aspectFitTransform(for track: AVAssetTrack, into renderSize: CGSize) async -> CGAffineTransform {
+        guard let naturalSize = try? await track.load(.naturalSize),
+              let preferred = try? await track.load(.preferredTransform),
+              naturalSize.width > 0, naturalSize.height > 0
+        else { return .identity }
+
+        // Rotation-corrected display rect, shifted back to the origin.
+        let displayRect = CGRect(origin: .zero, size: naturalSize).applying(preferred)
+        let originFix = CGAffineTransform(translationX: -displayRect.origin.x, y: -displayRect.origin.y)
+        let displayW = displayRect.width
+        let displayH = displayRect.height
+        guard displayW > 0, displayH > 0 else { return preferred }
+
+        let scale = min(renderSize.width / displayW, renderSize.height / displayH)
+        let tx = (renderSize.width - displayW * scale) / 2
+        let ty = (renderSize.height - displayH * scale) / 2
+
+        return preferred
+            .concatenating(originFix)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 }

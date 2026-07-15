@@ -89,6 +89,9 @@ struct EditorView: View {
             .onChange(of: state.isPlaying) { _, isPlaying in handlePlayingChange(isPlaying) }
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
+            // 13-23 J4: the videoComposition's renderSize derives from the project aspect — cycling
+            // the aspect toggle must rebuild the player item so the canvas shape follows.
+            .onChange(of: state.aspectRatio) { _, _ in Task { await rebuildPlayer() } }
             .sheet(isPresented: $showAddAudioSheet) {
                 // F8 (Plan 13-21): idsBefore snapshots at PRESENTATION time (this closure runs once
                 // per sheet presentation) — onAdded diffs against it to find the newly-added row
@@ -667,7 +670,9 @@ struct EditorView: View {
     private func rebuildPlayer() async {
         tearDownPlayerObserverOnly()
         await refreshOriginalAspectFraction()
-        guard let (composition, ranges) = await EditorCompositionBuilder.build(clips: state.project.clips) else { return }
+        guard let (composition, videoComposition, ranges) = await EditorCompositionBuilder.build(
+            clips: state.project.clips, aspectRatio: state.aspectRatio
+        ) else { return }
         clipRanges = ranges
         // 13-22 i3: the shared end-clamp's authoritative upper bound — the composition's REAL
         // duration, which can differ from state.totalDuration's logical sum by rounding/trim-math
@@ -675,6 +680,10 @@ struct EditorView: View {
         state.playableDuration = composition.duration.seconds
 
         let item = AVPlayerItem(asset: composition)
+        // 13-23 J4: per-clip aspect-fit into the project canvas — a mixed-dimension clip renders
+        // pillarboxed/letterboxed instead of stretched to the first clip's shape. Fullscreen
+        // shares this same item (13-22 i6.1), so it inherits the treatment automatically.
+        item.videoComposition = videoComposition
         let avPlayer = AVPlayer(playerItem: item)
         player = avPlayer
 
