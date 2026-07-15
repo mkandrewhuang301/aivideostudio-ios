@@ -67,7 +67,13 @@ struct EditorView: View {
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)                 // #8C59FF
     private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)          // #FF5470
 
-    private static let aspectOptions: [String] = ["9:16", "4:5", "1:1", "16:9"]
+    private static let aspectOptions: [String] = ["original", "9:16", "4:5", "1:1", "16:9"]
+
+    // 13-22 i1: resolved fraction for the "Original" canvas aspect — the first (sortOrder) clip's
+    // EXACT native ratio, not snapped to a preset. Cached here (recomputed whenever
+    // state.project.clips changes, alongside rebuildPlayer) rather than resolved synchronously in
+    // the view body, since the fallback path needs an async AVAsset track load.
+    @State private var originalAspectFraction: CGFloat = 9.0 / 16.0
 
     init(project: EditProject) {
         _state = State(initialValue: EditorState(project: project))
@@ -414,7 +420,7 @@ struct EditorView: View {
 
     private var previewStage: some View {
         GeometryReader { geo in
-            let ratio = Self.aspectFraction(state.aspectRatio)
+            let ratio = aspectFraction(state.aspectRatio)
             // Task C: the preview is the hero — grows to fill whatever vertical space is left
             // over from topBar/controlsRow/TimelineTrackView/EditorBottomBar (all fixed-height),
             // instead of a hard-coded 340pt. F7 (Plan 13-21): stage insets shrink 24 → 8pt (both
@@ -485,14 +491,50 @@ struct EditorView: View {
         .background(previewStageBackground)
     }
 
-    private static func aspectFraction(_ ratio: String) -> CGFloat {
+    // 13-22 i1: "original" resolves to the first clip's exact native ratio via
+    // `originalAspectFraction` (kept fresh by refreshOriginalAspectFraction(), called alongside
+    // rebuildPlayer() below). Every fixed preset is unchanged.
+    private func aspectFraction(_ ratio: String) -> CGFloat {
         switch ratio {
+        case "original": return originalAspectFraction
         case "9:16": return 9.0 / 16.0
         case "4:5": return 4.0 / 5.0
         case "1:1": return 1.0
         case "16:9": return 16.0 / 9.0
         default: return 9.0 / 16.0
         }
+    }
+
+    /// Resolves `originalAspectFraction` from the FIRST (sortOrder) clip's stored pixel
+    /// width/height (B1, self-healed server-side) — the common, synchronous-fast case. Falls back
+    /// to reading that clip's own AVAsset video track `naturalSize` (rotation-corrected via
+    /// `preferredTransform`) for the narrow race where width/height haven't been probed yet; falls
+    /// back to 9:16 if neither resolves (e.g. an all-image project whose asset has no video track).
+    private func refreshOriginalAspectFraction() async {
+        let sorted = state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
+        guard let first = sorted.first else {
+            originalAspectFraction = 9.0 / 16.0
+            return
+        }
+        if let w = first.width, let h = first.height, h > 0 {
+            originalAspectFraction = CGFloat(w) / CGFloat(h)
+            return
+        }
+        guard first.mediaType == "video", let urlString = first.url, let url = URL(string: urlString) else {
+            originalAspectFraction = 9.0 / 16.0
+            return
+        }
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let naturalSize = try? await track.load(.naturalSize),
+              let transform = try? await track.load(.preferredTransform)
+        else {
+            originalAspectFraction = 9.0 / 16.0
+            return
+        }
+        let size = naturalSize.applying(transform)
+        let width = abs(size.width), height = abs(size.height)
+        originalAspectFraction = height > 0 ? width / height : 9.0 / 16.0
     }
 
     // MARK: - Controls row: fullscreen + aspect-ratio toggle + undo/redo (sketch's controls-row)
@@ -512,7 +554,8 @@ struct EditorView: View {
             Button {
                 cycleAspectRatio()
             } label: {
-                Text(state.aspectRatio)
+                // 13-22 i1.2: shows "Original" (text, not a ratio) when in original mode.
+                Text(state.aspectRatio == "original" ? "Original" : state.aspectRatio)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(minWidth: 32, minHeight: 32)
@@ -630,8 +673,13 @@ struct EditorView: View {
 
     private func rebuildPlayer() async {
         tearDownPlayerObserverOnly()
+        await refreshOriginalAspectFraction()
         guard let (composition, ranges) = await EditorCompositionBuilder.build(clips: state.project.clips) else { return }
         clipRanges = ranges
+        // 13-22 i3: the shared end-clamp's authoritative upper bound — the composition's REAL
+        // duration, which can differ from state.totalDuration's logical sum by rounding/trim-math
+        // slop. Every scrub/seek path now routes through state.clampTime(_:), which reads this.
+        state.playableDuration = composition.duration.seconds
 
         let item = AVPlayerItem(asset: composition)
         let avPlayer = AVPlayer(playerItem: item)
@@ -640,10 +688,11 @@ struct EditorView: View {
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
             Task { @MainActor in
-                // i4.2 (Plan 13-20): the divider can never read before 00:00 or past the total —
-                // state.seek and the scrub gesture already clamp; this closes the last gap
-                // (periodic playback writes were unclamped).
-                state.currentTime = min(max(time.seconds, 0), state.totalDuration)
+                // i4.2 (Plan 13-20), extended 13-22 i3: the divider can never read before 00:00 or
+                // past the composition's real playable end — playing/scrubbing to the end now
+                // settles at `playableDuration - 0.03` and HOLDS that last frame instead of
+                // seeking to/past the exact end (which renders as a black frame).
+                state.currentTime = state.clampTime(time.seconds)
                 if state.isPlaying, time.seconds >= currentPlayEnd - 0.05 {
                     state.isPlaying = false
                 }
@@ -666,7 +715,10 @@ struct EditorView: View {
         if case .clip(let id) = state.selection, let range = clipRanges.first(where: { $0.clipId == id }) {
             return range.end
         }
-        return state.totalDuration
+        // 13-22 i3: clamp to the shared end-clamp bound, not the raw logical total — playing to
+        // the very end of the whole timeline now settles at the last real frame instead of trying
+        // to reach an exact boundary the composition may not have a frame for.
+        return state.clampTime(state.totalDuration)
     }
 
     private func duration(of clip: ProjectClip) -> Double {

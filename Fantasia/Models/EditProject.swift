@@ -76,6 +76,10 @@ struct ProjectClip: Codable, Identifiable, Equatable {
     var trimStartSeconds: Double
     var trimEndSeconds: Double?
     var originalDurationSeconds: Double?
+    // Plan 13-22 B1: pixel dimensions probed server-side (rotation-corrected), nullable — powers
+    // the "Original" canvas aspect ratio (EditorView.aspectFraction resolves it from clips[0]).
+    var width: Int?
+    var height: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -85,6 +89,8 @@ struct ProjectClip: Codable, Identifiable, Equatable {
         case trimStartSeconds = "trim_start_seconds"
         case trimEndSeconds = "trim_end_seconds"
         case originalDurationSeconds = "original_duration_seconds"
+        case width
+        case height
     }
 }
 

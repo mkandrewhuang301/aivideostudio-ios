@@ -39,6 +39,16 @@ final class EditorState {
     /// this back on failure — see EditorView's aspect-toggle handler).
     var aspectRatio: String
 
+    /// 13-22 i3: the ACTUAL AVComposition's real duration in seconds, set by EditorView right after
+    /// building the player (`composition.duration.seconds`). `totalDuration` below is the
+    /// project's LOGICAL duration (sum of trimmed clip durations) — the two can drift apart by a
+    /// few fractional seconds' rounding, and clip-row `HStack` spacing/pixel math has its own
+    /// approximation error. `clampTime(_:)` is the single source of truth every scrub/seek path
+    /// uses so the playhead can never reach a time the composition has no frame for (the "black
+    /// frame at the end" bug). Defaults to `.infinity` so clamping is a no-op (falls back to
+    /// `totalDuration` alone) before the first composition ever finishes building.
+    var playableDuration: Double = .infinity
+
     var selection: EditorSelection = .none
 
     /// Transient "please enter edit mode" signals from the contextual bottom bar's Edit action
@@ -89,11 +99,33 @@ final class EditorState {
     }
 
     func seek(to time: Double) {
-        currentTime = min(max(time, 0), totalDuration)
+        currentTime = clampTime(time)
     }
 
+    /// 13-22 i3: shared clamp helper — EVERY scrub/seek/snap path in the Editor routes through
+    /// this (scrubGesture, tracksGesture, snapPlayhead, the periodic playback observer, the
+    /// fullscreen scrubber) instead of clamping against `totalDuration` alone. Playing/scrubbing to
+    /// the end now settles at `playableDuration - 0.03` and HOLDS that last real frame, rather than
+    /// seeking to/past the composition's exact end (which AVFoundation renders as a black frame).
+    func clampTime(_ time: Double) -> Double {
+        let upperBound = max(0, min(totalDuration, playableDuration - 0.03))
+        return min(max(time, 0), upperBound)
+    }
+
+    // 13-22 i5: selection must NEVER animate — trim handles/stroke must appear INSTANTLY on the
+    // selected pill. Every pill's onSelect path calls this in the SAME update as
+    // `snapPlayhead(toWindow:_:)` (which DOES animate `currentTime`, gliding the timeline into
+    // view) — without an explicit no-animation transaction here, SwiftUI was observed sweeping
+    // this mutation into that ambient animated transaction too, so the newly-selected pill's
+    // handles visibly slid in from the old selection's position instead of appearing immediately.
+    // Wrapping in `disablesAnimations` makes selection instant regardless of what animated
+    // transaction (if any) is active when a caller invokes this.
     func select(_ selection: EditorSelection) {
-        self.selection = selection
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            self.selection = selection
+        }
     }
 
     /// Plan 13-21 F10: shared animated snap helper — if the playhead is currently OUTSIDE
@@ -108,7 +140,7 @@ final class EditorState {
         guard !(currentTime >= start && currentTime < end) else { return }
         let target = currentTime < start ? start : end
         withAnimation(.easeInOut(duration: 0.25)) {
-            currentTime = min(max(target, 0), totalDuration)
+            currentTime = clampTime(target)
         }
     }
 }

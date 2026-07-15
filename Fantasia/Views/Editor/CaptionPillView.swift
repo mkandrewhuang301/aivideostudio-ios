@@ -46,11 +46,24 @@ struct CaptionPillView: View {
     @State private var rightDragStartTime: Double? = nil
     @State private var editingText: String = ""
     @FocusState private var isTextFieldFocused: Bool
+    // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
+    // width/offset render from them); onRetime fires ONCE in .onEnded with the final values.
+    // Previously onRetime fired on every onChanged (a network PATCH + full re-sync per finger
+    // movement). nil = idle, render from `cue`'s committed values.
+    @State private var previewStart: Double? = nil
+    @State private var previewEnd: Double? = nil
 
     private let blue = Color(red: 0.169, green: 0.561, blue: 0.851)         // #2B8FD9
     private let pillHeight: CGFloat = 28
 
-    private var width: Double { max((cue.endSeconds - cue.startSeconds) * pxPerSecond, 30) }
+    private var effectiveStart: Double { previewStart ?? cue.startSeconds }
+    private var effectiveEnd: Double { previewEnd ?? cue.endSeconds }
+    private var width: Double { max((effectiveEnd - effectiveStart) * pxPerSecond, 30) }
+    // The parent row positions this pill via `.offset(x: cue.startSeconds * pxPerSecond)` using
+    // the COMMITTED startSeconds (unchanged until onRetime fires at release) — this local offset
+    // compensates during a left-handle drag so the leading edge tracks the finger while the
+    // trailing edge stays visually fixed. Zero during a right-handle or body drag.
+    private var trimHandleOffsetX: CGFloat { CGFloat(effectiveStart - cue.startSeconds) * pxPerSecond }
 
     private var joinedWords: String {
         let text = cue.words.map(\.text).joined(separator: " ")
@@ -66,7 +79,7 @@ struct CaptionPillView: View {
             }
         }
         .frame(width: width, height: pillHeight)
-        .offset(x: dragTranslation)
+        .offset(x: dragTranslation + trimHandleOffsetX)
         .onChange(of: isEditing) { _, newValue in
             if newValue {
                 editingText = joinedWords
@@ -182,10 +195,18 @@ struct CaptionPillView: View {
                 if leftDragStartTime == nil { leftDragStartTime = cue.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? cue.startSeconds) + deltaSeconds
-                newStart = max(0, min(newStart, cue.endSeconds - 0.3))
-                onRetime(newStart, cue.endSeconds)
+                let endBound = previewEnd ?? cue.endSeconds
+                newStart = max(0, min(newStart, endBound - 0.3))
+                previewStart = newStart
             }
-            .onEnded { _ in leftDragStartTime = nil }
+            .onEnded { _ in
+                let finalStart = previewStart ?? cue.startSeconds
+                let finalEnd = previewEnd ?? cue.endSeconds
+                leftDragStartTime = nil
+                onRetime(finalStart, finalEnd)
+                previewStart = nil
+                previewEnd = nil
+            }
     }
 
     private var rightHandleGesture: some Gesture {
@@ -194,10 +215,18 @@ struct CaptionPillView: View {
                 onSelect()
                 if rightDragStartTime == nil { rightDragStartTime = cue.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
-                let newEnd = max(cue.startSeconds + 0.3, (rightDragStartTime ?? cue.endSeconds) + deltaSeconds)
-                onRetime(cue.startSeconds, newEnd)
+                let startBound = previewStart ?? cue.startSeconds
+                let newEnd = max(startBound + 0.3, (rightDragStartTime ?? cue.endSeconds) + deltaSeconds)
+                previewEnd = newEnd
             }
-            .onEnded { _ in rightDragStartTime = nil }
+            .onEnded { _ in
+                let finalStart = previewStart ?? cue.startSeconds
+                let finalEnd = previewEnd ?? cue.endSeconds
+                rightDragStartTime = nil
+                onRetime(finalStart, finalEnd)
+                previewStart = nil
+                previewEnd = nil
+            }
     }
 
     // MARK: - Tap-to-edit commit (Spike 002's validated pattern, adapted to this timeline pill)

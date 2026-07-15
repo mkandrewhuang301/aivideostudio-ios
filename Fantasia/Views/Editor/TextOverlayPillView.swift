@@ -25,11 +25,25 @@ struct TextOverlayPillView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStartTime: Double? = nil
     @State private var rightDragStartTime: Double? = nil
+    // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
+    // width/offset render from them); onRetime fires ONCE in .onEnded with the final values.
+    // Previously onRetime fired on every onChanged (a network PATCH + full re-sync per finger
+    // movement). nil = idle, render from `overlay`'s committed values.
+    @State private var previewStart: Double? = nil
+    @State private var previewEnd: Double? = nil
 
     private let amber = Color(red: 0.851, green: 0.478, blue: 0.169)      // #D97A2B
     private let pillHeight: CGFloat = 28
 
-    private var width: Double { max((overlay.endSeconds - overlay.startSeconds) * pxPerSecond, 30) }
+    private var effectiveStart: Double { previewStart ?? overlay.startSeconds }
+    private var effectiveEnd: Double { previewEnd ?? overlay.endSeconds }
+    private var width: Double { max((effectiveEnd - effectiveStart) * pxPerSecond, 30) }
+    // The parent row positions this pill via `.offset(x: overlay.startSeconds * pxPerSecond)`
+    // using the COMMITTED startSeconds (unchanged until onRetime fires at release) — this local
+    // offset compensates during a left-handle drag so the leading edge tracks the finger while the
+    // trailing edge stays visually fixed, matching every trim-handle UX convention. Zero during a
+    // right-handle or body drag (effectiveStart stays at its committed value in both cases).
+    private var trimHandleOffsetX: CGFloat { CGFloat(effectiveStart - overlay.startSeconds) * pxPerSecond }
 
     var body: some View {
         ZStack {
@@ -56,7 +70,7 @@ struct TextOverlayPillView: View {
             if isSelected { handle.highPriorityGesture(rightHandleGesture) }
         }
         // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
-        .offset(x: dragTranslation)
+        .offset(x: dragTranslation + trimHandleOffsetX)
     }
 
     private var handle: some View {
@@ -96,10 +110,18 @@ struct TextOverlayPillView: View {
                 if leftDragStartTime == nil { leftDragStartTime = overlay.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? overlay.startSeconds) + deltaSeconds
-                newStart = max(0, min(newStart, overlay.endSeconds - 0.3))
-                onRetime(newStart, overlay.endSeconds)
+                let endBound = previewEnd ?? overlay.endSeconds
+                newStart = max(0, min(newStart, endBound - 0.3))
+                previewStart = newStart
             }
-            .onEnded { _ in leftDragStartTime = nil }
+            .onEnded { _ in
+                let finalStart = previewStart ?? overlay.startSeconds
+                let finalEnd = previewEnd ?? overlay.endSeconds
+                leftDragStartTime = nil
+                onRetime(finalStart, finalEnd)
+                previewStart = nil
+                previewEnd = nil
+            }
     }
 
     private var rightHandleGesture: some Gesture {
@@ -108,9 +130,17 @@ struct TextOverlayPillView: View {
                 onSelect()
                 if rightDragStartTime == nil { rightDragStartTime = overlay.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
-                let newEnd = max(overlay.startSeconds + 0.3, (rightDragStartTime ?? overlay.endSeconds) + deltaSeconds)
-                onRetime(overlay.startSeconds, newEnd)
+                let startBound = previewStart ?? overlay.startSeconds
+                let newEnd = max(startBound + 0.3, (rightDragStartTime ?? overlay.endSeconds) + deltaSeconds)
+                previewEnd = newEnd
             }
-            .onEnded { _ in rightDragStartTime = nil }
+            .onEnded { _ in
+                let finalStart = previewStart ?? overlay.startSeconds
+                let finalEnd = previewEnd ?? overlay.endSeconds
+                rightDragStartTime = nil
+                onRetime(finalStart, finalEnd)
+                previewStart = nil
+                previewEnd = nil
+            }
     }
 }

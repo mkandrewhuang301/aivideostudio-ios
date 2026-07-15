@@ -45,14 +45,28 @@ struct AudioPillView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStart: (offset: Double, trimStart: Double)? = nil
     @State private var rightDragStartTrimEnd: Double? = nil
+    // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
+    // width/offset render from them); onRetime fires ONCE in .onEnded with the final values.
+    // Previously onRetime fired on every onChanged (a network PATCH + full re-sync per finger
+    // movement). nil = idle, render from `clip`'s committed values.
+    @State private var previewOffset: Double? = nil
+    @State private var previewTrimStart: Double? = nil
+    @State private var previewTrimEnd: Double? = nil
 
     private let green = Color(red: 0.184, green: 0.620, blue: 0.420)          // #2F9E6B
     private let pillHeight: CGFloat = 28
 
-    private var trimStart: Double { clip.trimStartSeconds }
-    private var trimEnd: Double { clip.trimEndSeconds ?? clip.trimStartSeconds }
+    private var trimStart: Double { previewTrimStart ?? clip.trimStartSeconds }
+    private var trimEnd: Double { previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds) }
     private var duration: Double { max(0, trimEnd - trimStart) }
     private var width: Double { max(duration * pxPerSecond, 30) }
+    private var offsetSeconds: Double { previewOffset ?? clip.startOffsetSeconds }
+    // The parent row positions this pill via `.offset(x: clip.startOffsetSeconds * pxPerSecond)`
+    // using the COMMITTED offset (unchanged until onRetime fires at release) — this local offset
+    // compensates during a left-handle drag (which shifts BOTH startOffsetSeconds and trimStart by
+    // the same delta) so the leading edge tracks the finger while the trailing edge stays visually
+    // fixed. Zero during a right-handle or body drag.
+    private var trimHandleOffsetX: CGFloat { CGFloat(offsetSeconds - clip.startOffsetSeconds) * pxPerSecond }
 
     private var icon: String {
         switch clip.sourceType {
@@ -85,7 +99,7 @@ struct AudioPillView: View {
             if isSelected { handle.highPriorityGesture(rightHandleGesture) }
         }
         // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
-        .offset(x: dragTranslation)
+        .offset(x: dragTranslation + trimHandleOffsetX)
     }
 
     private var handle: some View {
@@ -122,30 +136,53 @@ struct AudioPillView: View {
             .onChanged { value in
                 onSelect()
                 if leftDragStart == nil {
-                    leftDragStart = (clip.startOffsetSeconds, trimStart)
+                    leftDragStart = (clip.startOffsetSeconds, clip.trimStartSeconds)
                 }
                 guard let start = leftDragStart else { return }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newTrimStart = start.trimStart + deltaSeconds
-                newTrimStart = max(0, min(newTrimStart, trimEnd - 0.3))
+                let endBound = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)
+                newTrimStart = max(0, min(newTrimStart, endBound - 0.3))
                 let appliedDelta = newTrimStart - start.trimStart
                 let newOffset = max(0, start.offset + appliedDelta)
-                onRetime(newOffset, newTrimStart, trimEnd)
+                previewOffset = newOffset
+                previewTrimStart = newTrimStart
             }
-            .onEnded { _ in leftDragStart = nil }
+            .onEnded { _ in
+                let finalOffset = previewOffset ?? clip.startOffsetSeconds
+                let finalTrimStart = previewTrimStart ?? clip.trimStartSeconds
+                let finalTrimEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)
+                leftDragStart = nil
+                onRetime(finalOffset, finalTrimStart, finalTrimEnd)
+                previewOffset = nil
+                previewTrimStart = nil
+                previewTrimEnd = nil
+            }
     }
 
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 onSelect()
-                if rightDragStartTrimEnd == nil { rightDragStartTrimEnd = trimEnd }
+                if rightDragStartTrimEnd == nil {
+                    rightDragStartTrimEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
+                }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 // No client-known upper bound (T-13-34) — server validates against the real
                 // source duration; only guard against inverting past trimStart here.
-                let newEnd = max(trimStart + 0.3, (rightDragStartTrimEnd ?? trimEnd) + deltaSeconds)
-                onRetime(clip.startOffsetSeconds, trimStart, newEnd)
+                let startBound = previewTrimStart ?? clip.trimStartSeconds
+                let newEnd = max(startBound + 0.3, (rightDragStartTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)) + deltaSeconds)
+                previewTrimEnd = newEnd
             }
-            .onEnded { _ in rightDragStartTrimEnd = nil }
+            .onEnded { _ in
+                let finalOffset = previewOffset ?? clip.startOffsetSeconds
+                let finalTrimStart = previewTrimStart ?? clip.trimStartSeconds
+                let finalTrimEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)
+                rightDragStartTrimEnd = nil
+                onRetime(finalOffset, finalTrimStart, finalTrimEnd)
+                previewOffset = nil
+                previewTrimStart = nil
+                previewTrimEnd = nil
+            }
     }
 }

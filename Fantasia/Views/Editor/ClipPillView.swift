@@ -41,6 +41,13 @@ struct ClipPillView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
+    // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
+    // width/offset render from them); onTrimChange fires ONCE in .onEnded with the final values.
+    // Previously onTrimChange fired on every onChanged, which drove a network PATCH +
+    // syncProjectFromManager() (full composition rebuild) per finger movement — the "generates at
+    // the divider and slides over" video glitch. nil = idle, render from `clip`'s committed values.
+    @State private var previewTrimStart: Double? = nil
+    @State private var previewTrimEnd: Double? = nil
     @State private var filmstripFrames: [Int: UIImage] = [:]
     // F5: the cell count actually rendered/loaded — only syncs to the live `cellCount` when NOT
     // mid-pinch (see `isZooming` doc comment above).
@@ -52,11 +59,19 @@ struct ClipPillView: View {
     private static let filmstripCache = NSCache<NSString, UIImage>()
     private let cellWidth: CGFloat = 46
 
-    private var trimStart: Double { clip.trimStartSeconds }
+    private var trimStart: Double { previewTrimStart ?? clip.trimStartSeconds }
     private var trimEnd: Double {
-        clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
+        previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
     }
     private var width: Double { max((trimEnd - trimStart) * pxPerSecond, 30) }
+    // 13-22 i4: this pill sits in a plain leading-anchored HStack (clipRow) — growing/shrinking
+    // its OWN `.frame(width:)` only ever moves the TRAILING edge (HStack repositions subsequent
+    // siblings, but this pill's own leading edge is fixed by the cumulative width of EARLIER
+    // siblings). A left-handle drag needs the LEADING edge to visually track the finger instead —
+    // this local `.offset` compensates by exactly the trimStart delta, which also happens to keep
+    // the trailing edge visually fixed (matches every trim-handle UX convention). Zero during a
+    // right-handle or body drag (trimStart stays at its committed value in both cases).
+    private var trimHandleOffsetX: CGFloat { CGFloat(trimStart - clip.trimStartSeconds) * pxPerSecond }
     private var cellCount: Int { max(1, Int((width / cellWidth).rounded(.up))) }
     private var effectiveCellCount: Int { isZooming ? committedCellCount : cellCount }
 
@@ -72,6 +87,12 @@ struct ClipPillView: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? accent : .clear, lineWidth: 2)
         )
+        // 13-22 i3: with the clip row's HStack spacing now 0 (adjacent clips, CapCut has no gaps),
+        // this 1pt leading-edge divider is what visually separates consecutive pills instead of a
+        // real gap (harmless on the very first clip too — nothing sits immediately left of it).
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1)
+        }
         .frame(width: width, height: 58)
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
@@ -87,7 +108,7 @@ struct ClipPillView: View {
         // a body drag. Previously offset was applied BEFORE the overlays, so only the pill body
         // moved live while the handles stayed pinned to the pre-drag layout position until the
         // drag ended and the whole view re-rendered ("handles snap into place after release").
-        .offset(x: dragTranslation)
+        .offset(x: dragTranslation + trimHandleOffsetX)
         .task(id: "\(clip.id)-\(clip.url ?? "")-\(effectiveCellCount)") {
             guard clip.mediaType != "image" else { return }
             await loadFilmstripIfNeeded()
@@ -207,27 +228,45 @@ struct ClipPillView: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 onSelect()
-                if leftDragStartTrim == nil { leftDragStartTrim = trimStart }
+                if leftDragStartTrim == nil { leftDragStartTrim = clip.trimStartSeconds }
                 let deltaSec = value.translation.width / pxPerSecond
-                var newStart = (leftDragStartTrim ?? trimStart) + deltaSec
-                newStart = max(0, min(newStart, trimEnd - 0.2))
-                onTrimChange(newStart, trimEnd)
+                var newStart = (leftDragStartTrim ?? clip.trimStartSeconds) + deltaSec
+                let endBound = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
+                newStart = max(0, min(newStart, endBound - 0.2))
+                previewTrimStart = newStart
             }
-            .onEnded { _ in leftDragStartTrim = nil }
+            .onEnded { _ in
+                let finalStart = previewTrimStart ?? clip.trimStartSeconds
+                let finalEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
+                leftDragStartTrim = nil
+                onTrimChange(finalStart, finalEnd)
+                previewTrimStart = nil
+                previewTrimEnd = nil
+            }
     }
 
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 onSelect()
-                if rightDragStartTrim == nil { rightDragStartTrim = trimEnd }
+                if rightDragStartTrim == nil {
+                    rightDragStartTrim = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
+                }
                 let deltaSec = value.translation.width / pxPerSecond
                 let cap = clip.originalDurationSeconds ?? .greatestFiniteMagnitude
-                var newEnd = (rightDragStartTrim ?? trimEnd) + deltaSec
-                newEnd = min(cap, max(newEnd, trimStart + 0.2))
-                onTrimChange(trimStart, newEnd)
+                let startBound = previewTrimStart ?? clip.trimStartSeconds
+                var newEnd = (rightDragStartTrim ?? clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds) + deltaSec
+                newEnd = min(cap, max(newEnd, startBound + 0.2))
+                previewTrimEnd = newEnd
             }
-            .onEnded { _ in rightDragStartTrim = nil }
+            .onEnded { _ in
+                let finalStart = previewTrimStart ?? clip.trimStartSeconds
+                let finalEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
+                rightDragStartTrim = nil
+                onTrimChange(finalStart, finalEnd)
+                previewTrimStart = nil
+                previewTrimEnd = nil
+            }
     }
 
     // MARK: - Split primitive (T-13-30: clamps both resulting ranges to non-negative,

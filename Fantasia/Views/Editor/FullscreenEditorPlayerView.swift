@@ -50,6 +50,10 @@ private final class EditorFullscreenPlayerViewModel {
     /// editor's playhead already is (the shared clock), not to 0.
     func load() async {
         guard let (composition, _) = await EditorCompositionBuilder.build(clips: state.project.clips) else { return }
+        // 13-22 i3: defensive — normally already set by EditorView.rebuildPlayer() before
+        // fullscreen can even open, but keeps the shared clamp correct if this is ever reached
+        // first (both compositions are built from the same clips, so the value matches either way).
+        state.playableDuration = composition.duration.seconds
 
         let item = AVPlayerItem(asset: composition)
         let avPlayer = AVPlayer(playerItem: item)
@@ -63,11 +67,13 @@ private final class EditorFullscreenPlayerViewModel {
         timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self, !self.isScrubbing else { return }
-                let total = self.state.totalDuration
-                // Clamp instead of writing the raw observer time (F1) — no looper means this can
-                // briefly read past the end right before AVPlayer settles at the item boundary.
-                self.state.currentTime = min(max(time.seconds, 0), total)
-                if self.state.isPlaying, total > 0, time.seconds >= total - 0.05 {
+                // 13-22 i3: routes through the shared clampTime (playableDuration-aware) instead
+                // of totalDuration alone — no looper means this can briefly read past the end
+                // right before AVPlayer settles at the item boundary; clamping holds the last real
+                // frame instead of ever landing on/past the composition's exact end.
+                self.state.currentTime = self.state.clampTime(time.seconds)
+                let playableEnd = self.state.clampTime(self.state.totalDuration)
+                if self.state.isPlaying, playableEnd > 0, time.seconds >= playableEnd - 0.05 {
                     self.state.isPlaying = false
                     self.player?.pause()
                 }
@@ -82,7 +88,7 @@ private final class EditorFullscreenPlayerViewModel {
         } else {
             // Replay from the top if we're already sitting at (or past) the end — mirrors CapCut/
             // every video app's "tap play after it finished" convention.
-            if state.currentTime >= state.totalDuration - 0.05 {
+            if state.currentTime >= state.clampTime(state.totalDuration) - 0.05 {
                 state.currentTime = 0
                 let time = CMTime(seconds: 0, preferredTimescale: 600)
                 player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
@@ -106,7 +112,7 @@ private final class EditorFullscreenPlayerViewModel {
     /// not just the fullscreen player's original single asset.
     func updateScrub(fraction: Double, totalDuration: Double) {
         guard totalDuration > 0 else { return }
-        state.currentTime = min(max(fraction * totalDuration, 0), totalDuration)
+        state.currentTime = state.clampTime(fraction * totalDuration)
     }
 
     func endScrubbing() {

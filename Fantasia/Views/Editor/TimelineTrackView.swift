@@ -68,7 +68,11 @@ struct TimelineTrackView: View {
 
     // F4 (Plan 13-21): play-box/cur-time dock background is now trackBackground everywhere — they
     // match the surrounding timeline block instead of the darker canvasBackground shade.
-    private let trackBackground = Color(red: 0.078, green: 0.078, blue: 0.098) // #141419 — overall block backdrop
+    // 13-22 i2: this IS what the block looked like with the old #141419 base PLUS the fixed
+    // region's separate `Color.white.opacity(0.04)` overlay (the two colors pre-blended) — that
+    // overlay is now deleted and every consumer (block backdrop, playBox, curTimeReadout, tracks
+    // region) reads this ONE value, so nothing reads "darker" than anything else anymore.
+    private let trackBackground = Color(red: 0.115, green: 0.115, blue: 0.134) // ~#1D1D22
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)              // #8C59FF
     private let rulerDotColor = Color(red: 0.227, green: 0.227, blue: 0.275)   // #3A3A46
     // F12: left rail tile fill (~#1E1E22) — reference image IMG_0428 2.jpg's ♪/T icon squares.
@@ -132,14 +136,20 @@ struct TimelineTrackView: View {
             let contentWidth = max(state.totalDuration * pxPerSecond, viewportWidth)
 
             ZStack(alignment: .topLeading) {
+                // 13-22 i2: ONE uniform gray backs the whole 200pt block now — this single fill
+                // covers ruler row / clip row / tracks viewport alike (see trackBackground's doc
+                // comment). The old separate `Color.white.opacity(0.04)` rectangle that used to
+                // sit OVER just the fixed region is gone; its gesture/tap responsibility moves to
+                // the transparent hit-target immediately below (paints nothing — trackBackground
+                // above already covers this area visually).
                 trackBackground
 
-                // Fixed-region scrub background — unambiguous (no ScrollView competes here).
+                // Fixed-region scrub hit-target — unambiguous (no ScrollView competes here).
                 // F11 (Plan 13-21): a plain tap (no movement, so scrubGesture's DragGesture never
                 // fires) now also deselects — pills' own .onTapGesture still wins for taps that
                 // land on THEM specifically (SwiftUI's descendant-first hit-testing, same contract
                 // this whole file already relies on for drag-vs-scrub arbitration).
-                Color.white.opacity(0.04)
+                Color.clear
                     .frame(height: fixedRegionHeight)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -148,7 +158,7 @@ struct TimelineTrackView: View {
 
                 VStack(alignment: .leading, spacing: rulerToClipSpacing) {
                     ruler(contentWidth: contentWidth)
-                    clipRow
+                    clipRow(viewportWidth: viewportWidth)
                 }
                 .frame(width: contentWidth, alignment: .leading)
                 .offset(x: contentOffset, y: topInset)
@@ -196,12 +206,14 @@ struct TimelineTrackView: View {
                 // (sketch's .playhead-line::before). i4: the line now reaches the bottom of the
                 // whole 200pt block.
                 ZStack {
+                    // 13-22 i9: nub shrunk 11×8 → 8×6 and moved up 2pt so it reads as a small cap
+                    // sitting just above the ruler row, its bottom edge meeting the line's top.
                     UnevenRoundedRectangle(
                         topLeadingRadius: 0, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 0
                     )
                     .fill(Color.white)
-                    .frame(width: 11, height: 8)
-                    .position(x: viewportWidth / 2, y: playheadTopY)
+                    .frame(width: 8, height: 6)
+                    .position(x: viewportWidth / 2, y: playheadTopY - 2)
 
                     Rectangle()
                         .fill(Color.white)
@@ -266,7 +278,7 @@ struct TimelineTrackView: View {
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
                 let deltaTime = -value.translation.width / pxPerSecond
-                state.currentTime = min(max(startTime + deltaTime, 0), state.totalDuration)
+                state.currentTime = state.clampTime(startTime + deltaTime)
             }
             .onEnded { _ in scrubDragStartTime = nil }
     }
@@ -295,7 +307,7 @@ struct TimelineTrackView: View {
                 case .horizontal:
                     guard let startTime = tracksScrubStartTime else { return }
                     let deltaTime = -value.translation.width / pxPerSecond
-                    state.currentTime = min(max(startTime + deltaTime, 0), state.totalDuration)
+                    state.currentTime = state.clampTime(startTime + deltaTime)
                 case .vertical:
                     guard let startY = tracksScrollStartY else { return }
                     let newY = startY - value.translation.height
@@ -361,7 +373,9 @@ struct TimelineTrackView: View {
                 Circle()
                     .fill(rulerDotColor)
                     .frame(width: 3, height: 3)
-                    .position(x: midSec * pxPerSecond, y: 16)
+                    // 13-22 i9: dots now sit on the SAME centerline as the labels (y:7) — one row
+                    // reading label · dot · label · dot, instead of a separate lower dot row.
+                    .position(x: midSec * pxPerSecond, y: 7)
             }
         }
         .frame(width: contentWidth, height: rulerHeight, alignment: .topLeading)
@@ -404,10 +418,15 @@ struct TimelineTrackView: View {
             + Text(" / \(Self.formatTime(state.totalDuration))")
                 .foregroundColor(.white.opacity(0.5))
         )
-        .font(.system(size: 11, design: .monospaced))
+        // 13-22 i9: 11 → 9pt, identical to the ruler labels' font, and vertically repositioned so
+        // its text sits on the SAME line as the ruler labels (center y ≈ 7 within the 20pt ruler
+        // row) instead of centering in the full row height (which read "too low").
+        .font(.system(size: 9, design: .monospaced))
         .lineLimit(1)
         .padding(.horizontal, 10)
+        .padding(.top, 2)
         .fixedSize()
+        .frame(height: rulerHeight, alignment: .top)
         .background(trackBackground) // F4: matches playBox/the timeline block, not canvasBackground
         .overlay(alignment: .trailing) {
             // Trailing 12pt fade so scrolling ruler content slides under it like the sketch's
@@ -435,8 +454,13 @@ struct TimelineTrackView: View {
         state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private var clipRow: some View {
-        HStack(spacing: 3) {
+    private func clipRow(viewportWidth: CGFloat) -> some View {
+        // 13-22 i3: spacing 3 → 0 — every clip-gap pixel the old `spacing: 3` inserted was pixel
+        // math the time↔pixel conversion never accounted for, so the visual strip end drifted
+        // `3×(N−1)`pt past `totalDuration*pxPerSecond` (compounding with clip count) and the
+        // playhead could never quite reach the last scene. Visual separation between adjacent
+        // clips now comes from ClipPillView's own 1pt leading-edge divider instead of a real gap.
+        HStack(spacing: 0) {
             ForEach(sortedClips) { clip in
                 ClipPillView(
                     clip: clip,
@@ -453,18 +477,27 @@ struct TimelineTrackView: View {
         }
         .frame(height: clipRowHeight, alignment: .leading)
         .overlay(alignment: .leading) {
-            // F16 (Plan 13-21): cover card in CONTENT coordinates just left of t=0 — scrolls WITH
-            // the clips (contentOffset already applies to the whole ruler+clipRow VStack this
-            // clipRow lives in) so at t=00:00 it exactly fills the dead gap between the play-box
-            // dock and the first clip.
-            coverCard.offset(x: -(coverCardWidth + coverCardGap))
+            // F16 (Plan 13-21), repositioned 13-22 i10: cover card in CONTENT coordinates just
+            // left of t=0 — scrolls WITH the clips (contentOffset already applies to the whole
+            // ruler+clipRow VStack this clipRow lives in). The gap is now COMPUTED from the
+            // viewport so at t=00:00 the card's LEFT edge lands ~8pt right of the play-box
+            // (previously a fixed 6pt gap sat the card almost flush against the play-box).
+            coverCard.offset(x: -(coverCardWidth + coverCardGap(viewportWidth: viewportWidth)))
         }
     }
 
     // MARK: - F16: cover card (content-space, just left of t=0)
 
     private let coverCardWidth: CGFloat = 52
-    private let coverCardGap: CGFloat = 6
+
+    // 13-22 i10: at t=0, contentOffset == viewportWidth/2 (the playhead sits screen-centered), so
+    // content-x 0 (the first clip's leading edge) renders at screen-x viewportWidth/2. The
+    // play-box dock occupies screen-x [0, playBoxWidth]. Solving for the gap that lands the cover
+    // card's LEFT edge at screen-x (playBoxWidth + 8) yields this formula; `max(6, ...)` keeps a
+    // sane minimum gap on very narrow viewports.
+    private func coverCardGap(viewportWidth: CGFloat) -> CGFloat {
+        max(6, viewportWidth / 2 - playBoxWidth - coverCardWidth - 8)
+    }
 
     private var coverCard: some View {
         Button {
@@ -525,7 +558,7 @@ struct TimelineTrackView: View {
         // currentTime, so the timeline glides instead of jumping).
         if !(state.currentTime >= clipStart && state.currentTime < clipEnd) {
             withAnimation(.easeInOut(duration: 0.25)) {
-                state.currentTime = clipStart
+                state.currentTime = state.clampTime(clipStart)
             }
         }
         state.select(.clip(clip.id))
