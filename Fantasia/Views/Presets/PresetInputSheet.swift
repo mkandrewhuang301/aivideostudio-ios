@@ -267,8 +267,10 @@ struct PresetInputSheet: View {
     private var coverSection: some View {
         // Cover box (screenHeight * 0.42, full width) is proportionally much wider/shorter
         // than the source 9:16 loops — a center crop (the old default) chopped the subject's
-        // hair off entirely (user-reported 2026-07-08). focalTop 0 keeps the whole top
-        // (hairline in frame); no zoom (full source width shown).
+        // hair off entirely (user-reported 2026-07-08). focalTop 0.1 trims most of the dead
+        // ceiling/background above the hairline (2026-07-14, user-reported "lot of space between
+        // top of head and top of card") while keeping a ~3% margin above the hairline (source
+        // hair starts ~13% down) so hair still stays in frame; no zoom (full source width shown).
         //
         // No bottom gradient: the user wants a HARD LINE between the cover image and the
         // header/background below it (2026-07-08 "blur between the image and the effect, I want
@@ -280,7 +282,7 @@ struct PresetInputSheet: View {
         // dismissing this sheet released+paused the tile's player too, freezing it (2026-07-08,
         // see PresetLoopBackground's usesPool doc comment). Standalone playback here can't
         // disrupt Home no matter when it mounts/dismisses.
-        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.0, usesPool: false)
+        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.1, usesPool: false)
             .allowsHitTesting(false)
             .frame(height: UIScreen.main.bounds.height * 0.42)
             .clipped()
@@ -861,7 +863,7 @@ struct PresetInputSheet: View {
 
     private func filteredStyles(_ styles: [PresetStyle]) -> [PresetStyle] {
         guard let styleGenderFilter else { return styles }
-        return styles.filter { $0.genderTag == styleGenderFilter || $0.genderTag == nil }
+        return styles.filter { $0.genderTag == styleGenderFilter || $0.genderTag == nil || $0.genderTag == .unisex }
     }
 
     @ViewBuilder
@@ -894,7 +896,7 @@ struct PresetInputSheet: View {
                 // cell size, row height, and visual structure stay identical across All/Feminine/
                 // Masculine.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHGrid(rows: [GridItem(.fixed(168), spacing: 10), GridItem(.fixed(168), spacing: 10)], spacing: 10) {
+                    LazyHGrid(rows: [GridItem(.fixed(200), spacing: 10), GridItem(.fixed(200), spacing: 10)], spacing: 10) {
                         ForEach(visibleStyles, id: \.id) { style in
                             styleCell(style)
                         }
@@ -964,12 +966,19 @@ struct PresetInputSheet: View {
             VStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(theme.surface)
-                    .frame(height: 140)
+                    .frame(height: 170)
                     .overlay {
                         if let thumbURL = style.thumbURL {
-                            // "-lg" keeps this cache entry distinct from any pre-existing lower-res
-                            // entry the old (smaller) cell size may have cached under the plain key.
-                            StyleThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)-lg", url: thumbURL)
+                            // Cache key includes the URL's last path component (which carries the
+                            // upload script's version suffix, e.g. "waves-v1.jpg") rather than just
+                            // style.id — otherwise swapping a style's reference photo server-side
+                            // (new thumb_url, e.g. soft-waves-v1 -> waves-v1) keeps serving the OLD
+                            // cached bitmap forever, since the disk cache layer persists across
+                            // launches and was never keyed on anything that changes when the photo
+                            // does (2026-07-15, user-reported: "Waves" card didn't reflect the
+                            // reframed photo after a hairstyle photo swap). "-xl" size marker kept
+                            // so a future cell-size change still gets its own cache entry too.
+                            StyleThumbnailImage(cacheKey: "\(preset.id)-style-\(style.id)-\(thumbURL.lastPathComponent)-xl", url: thumbURL)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                     }
@@ -982,7 +991,7 @@ struct PresetInputSheet: View {
                     .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: 130)
+            .frame(width: 155)
         }
         .buttonStyle(PressableButtonStyle())
     }
@@ -1540,7 +1549,7 @@ private struct StyleThumbnailImage: View {
             if let cached = await ThumbnailCache.shared.image(for: cacheKey) { image = cached; return }
             guard let url, let (data, _) = try? await URLSession.shared.data(from: url),
                   let downloaded = UIImage(data: data) else { return }
-            let thumb = downloaded.preparingThumbnail(of: CGSize(width: 260, height: 280)) ?? downloaded
+            let thumb = downloaded.preparingThumbnail(of: CGSize(width: 310, height: 340)) ?? downloaded
             ThumbnailCache.shared[cacheKey] = thumb
             image = thumb
         }
