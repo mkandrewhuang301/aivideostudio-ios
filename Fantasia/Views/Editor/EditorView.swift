@@ -58,7 +58,7 @@ struct EditorView: View {
     // [start, end) on that composition's timeline (global seconds) — rebuilt whenever
     // `state.project.clips` changes. `currentPlayEnd` is the play-range boundary the periodic
     // time observer auto-pauses at (recomputed from `state.selection` each time Play is pressed).
-    @State private var clipRanges: [(clipId: String, start: Double, end: Double)] = []
+    @State private var clipRanges: [EditorCompositionBuilder.ClipRange] = []
     @State private var currentPlayEnd: Double = .infinity
 
     // Forced-dark palette (13-UI-SPEC.md Color contract) — NOT theme.background/theme.surface.
@@ -513,22 +513,18 @@ struct EditorView: View {
         }
     }
 
-    // MARK: - Player plumbing (13-19 Task C0): assembles ALL clips into ONE AVMutableComposition
-    // for real back-to-back playback (analog: FullScreenVideoPlayerView's AVPlayer setup, no
-    // pan-to-dismiss/zoom here). Text/caption overlays stay synced to state.currentTime as
-    // separate SwiftUI layers on top (already the case) — they are NOT baked into this live
-    // preview composition, matching the plan's explicit out-of-scope note (that's Export's job).
-    //
-    // KNOWN LIMITATION: only VIDEO clips contribute actual frames to the composition (AVFoundation
-    // has no simple "insert a still image as a video segment" primitive without a custom
-    // AVVideoCompositor, out of scope here). An image clip still reserves its trimmed duration on
-    // the virtual timeline (so state.totalDuration / the ruler / scrubbing stay correct), but the
-    // live inline preview shows the surrounding video content rather than the still — Export
-    // (already implemented server-side, ffmpegProcessor.ts) renders images correctly.
+    // MARK: - Player plumbing (13-19 Task C0, extracted to EditorCompositionBuilder.swift in
+    // Plan 13-21 F1): assembles ALL clips into ONE AVMutableComposition for real back-to-back
+    // playback (analog: FullScreenVideoPlayerView's AVPlayer setup, no pan-to-dismiss/zoom here).
+    // Text/caption overlays stay synced to state.currentTime as separate SwiftUI layers on top
+    // (already the case) — they are NOT baked into this live preview composition, matching the
+    // plan's explicit out-of-scope note (that's Export's job). The SAME composition builder now
+    // also backs the fullscreen player (FullscreenEditorPlayerView) — see
+    // EditorCompositionBuilder.swift's KNOWN LIMITATION doc comment for the image-clip caveat.
 
     private func rebuildPlayer() async {
         tearDownPlayerObserverOnly()
-        guard let (composition, ranges) = await buildComposition() else { return }
+        guard let (composition, ranges) = await EditorCompositionBuilder.build(clips: state.project.clips) else { return }
         clipRanges = ranges
 
         let item = AVPlayerItem(asset: composition)
@@ -556,48 +552,6 @@ struct EditorView: View {
         }
     }
 
-    /// Builds the composition + each clip's [start, end) window on its assembled timeline (global
-    /// seconds) — the exact cumulative-duration walk every other cross-clip helper in this feature
-    /// (TimelineTrackView.selectClip, CaptionTrackRow.clipIdUnderPlayhead) already does.
-    private func buildComposition() async -> (AVMutableComposition, [(clipId: String, start: Double, end: Double)])? {
-        let clips = state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
-        guard !clips.isEmpty else { return nil }
-
-        let composition = AVMutableComposition()
-        let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-        let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-
-        var cursor = CMTime.zero
-        var ranges: [(clipId: String, start: Double, end: Double)] = []
-
-        for clip in clips {
-            let clipDuration = duration(of: clip)
-            let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
-            let start = cursor.seconds
-
-            if clip.mediaType == "video", let urlString = clip.url, let url = URL(string: urlString) {
-                let asset = AVURLAsset(url: url)
-                let trimStart = CMTime(seconds: clip.trimStartSeconds, preferredTimescale: 600)
-                let timeRange = CMTimeRange(start: trimStart, duration: durationTime)
-                do {
-                    if let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first {
-                        try videoTrack?.insertTimeRange(timeRange, of: assetVideoTrack, at: cursor)
-                    }
-                    if let assetAudioTrack = try await asset.loadTracks(withMediaType: .audio).first {
-                        try audioTrack?.insertTimeRange(timeRange, of: assetAudioTrack, at: cursor)
-                    }
-                } catch {
-                    print("[EditorView] buildComposition insert error for clip \(clip.id): \(error)")
-                }
-            }
-
-            cursor = cursor + durationTime
-            ranges.append((clipId: clip.id, start: start, end: cursor.seconds))
-        }
-
-        return (composition, ranges)
-    }
-
     /// Play-range end for the CURRENT selection (13-19 Task C0, exact user spec): nothing selected
     /// plays to the end of the whole timeline; a selected clip plays only to that clip's own end
     /// (its start, if the playhead needed to snap there, was already applied by
@@ -610,8 +564,7 @@ struct EditorView: View {
     }
 
     private func duration(of clip: ProjectClip) -> Double {
-        let end = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
-        return max(0, end - clip.trimStartSeconds)
+        EditorCompositionBuilder.duration(of: clip)
     }
 
     /// i5.3: the image clip (if any) whose [start, end) range the playhead currently sits inside,
