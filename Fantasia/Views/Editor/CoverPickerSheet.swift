@@ -1,33 +1,26 @@
 // CoverPickerSheet.swift
 // Fantasia
-// Plan 13-21 F17: scrub the WHOLE project timeline, pick a frame, set it as the project's cover
-// (thumbnail). Reuses EditorCompositionBuilder (F1's shared multi-clip AVMutableComposition
-// builder) + AVAssetImageGenerator for both the frame strip and the large scrubbed preview — the
-// exact same "build once, generate frames against it" pattern ClipPillView's filmstrip already
-// uses, just against the WHOLE-PROJECT composition instead of one clip's own asset.
+// Plan 13-24 K6: full-screen CapCut-style cover editor — gapless frame strip, ephemeral text/
+// photo overlays composited client-side, multipart JPEG upload (K-B1). Reuses
+// EditorCompositionBuilder + AVAssetImageGenerator for strip/preview frames.
 //
-// Picked global (composition) time resolves to a (clipId, localSeconds) pair via the SAME
-// composition's clip ranges: for a video clip, localSeconds is the clip's OWN SOURCE-FILE time
-// (trimStartSeconds + offset into that clip's segment) — extractVideoFrame (backend) operates on
-// the raw downloaded clip file, not composition-relative time. Image clips have no meaningful
-// "frame position" — they resolve to that clip's id with at_seconds: 0 (backend CopyObjects the
-// clip's own r2_key regardless of the value).
+// Cover overlays are EPHEMERAL: reopening the editor starts fresh from the frame strip; the
+// current cover thumbnail is not decomposed back into editable overlays.
 
 import SwiftUI
 import AVFoundation
+import PhotosUI
 
 struct CoverPickerSheet: View {
     @Environment(ProjectManager.self) private var projectManager
     @Environment(\.dismiss) private var dismiss
 
     let project: EditProject
-    /// Fires once the cover has actually been persisted — the caller (EditorView) reconciles
-    /// `state.project` from `projectManager.loadedProject` and shows the "Cover updated" toast.
+    /// Fires once the cover has actually been persisted — the caller reconciles project state and
+    /// shows the "Cover updated" toast.
     var onCoverSet: () -> Void
 
     @State private var composition: AVMutableComposition?
-    // 13-23 J4: applied to every AVAssetImageGenerator below so picked/strip frames render with
-    // the same per-clip aspect-fit the live preview and export use — never stretched.
     @State private var videoComposition: AVMutableVideoComposition?
     @State private var ranges: [EditorCompositionBuilder.ClipRange] = []
     @State private var totalDuration: Double = 0
@@ -35,86 +28,259 @@ struct CoverPickerSheet: View {
     @State private var scrubbedTime: Double = 0
     @State private var previewImage: UIImage?
     @State private var stripFrames: [UIImage?] = []
+    @State private var stripCellCount = 0
     @State private var isLoadingComposition = true
-    @State private var isSettingCover = false
+    @State private var isSaving = false
     @State private var errorMessage: String?
 
     @State private var previewGenerationTask: Task<Void, Never>?
+    @State private var stripDragStartTime: Double?
 
-    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)      // #8C59FF
-    private let stripCount = 10
+    // Ephemeral overlay state — never persisted; see file header.
+    @State private var coverOverlays: [CoverOverlay] = []
+    @State private var selectedOverlayId: UUID?
+    @State private var selectedTab: CoverEditorTab = .frame
+    @State private var selectedPhotoItem: PhotosPickerItem?
+
+    @State private var canvasPixelSize = CGSize(width: 1080, height: 1920)
+    @State private var canvasAspect: CGFloat = 9.0 / 16.0
+
+    private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051) // #0A0A0D
+    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)               // #8C59FF
+    private let stripCellWidth: CGFloat = 46
+    private let stripCellHeight: CGFloat = 64
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                if isLoadingComposition {
-                    Spacer()
-                    ProgressView().tint(.white)
-                    Spacer()
-                } else if totalDuration <= 0 {
-                    Spacer()
-                    Text("This project has no playable clips yet.")
-                        .foregroundStyle(.white.opacity(0.6))
-                    Spacer()
-                } else {
-                    largePreview
-                    frameStrip
-                    Slider(
-                        value: Binding(
-                            get: { scrubbedTime },
-                            set: { newValue in
-                                scrubbedTime = newValue
-                                schedulePreviewRegeneration()
-                            }
-                        ),
-                        in: 0...totalDuration
-                    )
-                    .tint(accent)
-                    .padding(.horizontal, 20)
+        VStack(spacing: 0) {
+            topBar
 
-                    Text(TimelineTrackView.formatTime(scrubbedTime))
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
+            if isLoadingComposition {
+                Spacer()
+                ProgressView().tint(.white)
+                Spacer()
+            } else if totalDuration <= 0 {
+                Spacer()
+                Text("This project has no playable clips yet.")
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+            } else {
+                previewSection
+                    .layoutPriority(1)
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color(red: 1.0, green: 0.329, blue: 0.439))
-                    }
+                frameStripSection
 
-                    Button {
-                        Task { await commitCover() }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isSettingCover { ProgressView().tint(.white) }
-                            Text(isSettingCover ? "Setting cover…" : "Set cover")
-                        }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(accent, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(isSettingCover)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                Text("Slide to select")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .padding(.top, 10)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(red: 1.0, green: 0.329, blue: 0.439))
+                        .padding(.top, 6)
                 }
-            }
-            .background(Color(red: 0.039, green: 0.039, blue: 0.051).ignoresSafeArea())
-            .navigationTitle("Choose Cover")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(red: 0.078, green: 0.078, blue: 0.098), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white)
-                }
+
+                bottomTabBar
             }
         }
+        .background(canvasBackground.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .task { await loadComposition() }
+        .onChange(of: selectedPhotoItem) { _, item in
+            Task { await handlePhotoSelection(item) }
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == .frame { selectedOverlayId = nil }
+        }
+    }
+
+    // MARK: - Top bar
+
+    private var topBar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Dismiss")
+
+            Spacer()
+
+            Button {
+                Task { await saveCover() }
+            } label: {
+                HStack(spacing: 6) {
+                    if isSaving { ProgressView().tint(.white).scaleEffect(0.85) }
+                    Text(isSaving ? "Saving…" : "Save")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(accent, in: Capsule())
+            }
+            .disabled(isSaving || previewImage == nil)
+            .accessibilityLabel("Save cover")
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+    }
+
+    // MARK: - Preview + overlays
+
+    private var previewSection: some View {
+        GeometryReader { geo in
+            let fitted = aspectFitRect(container: geo.size, contentAspect: canvasAspect)
+            ZStack {
+                Color.black
+                if let previewImage {
+                    Image(uiImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: fitted.width, height: fitted.height)
+                        .position(x: fitted.midX, y: fitted.midY)
+                } else {
+                    ProgressView().tint(.white)
+                }
+
+                CoverOverlayCanvas(
+                    overlays: coverOverlays,
+                    selectedOverlayId: selectedOverlayId,
+                    canvasSize: fitted.size,
+                    gestureOrigin: CGPoint(x: fitted.minX, y: fitted.minY),
+                    showsControls: true,
+                    onSelect: { selectedOverlayId = $0 },
+                    onUpdate: updateOverlay,
+                    onDelete: deleteOverlay,
+                    onDuplicateText: duplicateTextOverlay
+                )
+                .frame(width: fitted.width, height: fitted.height)
+                .position(x: fitted.midX, y: fitted.midY)
+            }
+            .coordinateSpace(name: "coverCanvas")
+            .contentShape(Rectangle())
+            .onTapGesture { selectedOverlayId = nil }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Frame strip
+
+    private var frameStripSection: some View {
+        GeometryReader { geo in
+            let viewportWidth = geo.size.width
+            let px = stripPixelsPerSecond(viewportWidth: viewportWidth)
+            let count = max(1, Int(ceil(totalDuration * px / stripCellWidth)))
+            let stripOffset = viewportWidth / 2 - scrubbedTime * px
+
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: 0) {
+                    ForEach(0..<count, id: \.self) { index in
+                        stripCellView(index: index, stripPx: px)
+                            .frame(width: stripCellWidth, height: stripCellHeight)
+                    }
+                }
+                .offset(x: stripOffset)
+
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: 1.5, height: stripCellHeight + 8)
+                    .position(x: viewportWidth / 2, y: stripCellHeight / 2)
+                    .allowsHitTesting(false)
+            }
+            .frame(height: stripCellHeight)
+            .clipped()
+            .contentShape(Rectangle())
+            .gesture(stripDragGesture(stripPx: px))
+            .onAppear {
+                if stripCellCount != count {
+                    stripCellCount = count
+                    Task { await generateStrip(cellCount: count, stripPx: px) }
+                }
+            }
+            .onChange(of: count) { _, newCount in
+                stripCellCount = newCount
+                Task { await generateStrip(cellCount: newCount, stripPx: px) }
+            }
+        }
+        .frame(height: stripCellHeight)
+    }
+
+    private func stripCellView(index: Int, stripPx: CGFloat) -> some View {
+        Group {
+            if index < stripFrames.count, let frame = stripFrames[index] {
+                Image(uiImage: frame)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.white.opacity(0.05)
+            }
+        }
+        .frame(width: stripCellWidth, height: stripCellHeight)
+        .clipped()
+    }
+
+    private func stripDragGesture(stripPx: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if stripDragStartTime == nil { stripDragStartTime = scrubbedTime }
+                let start = stripDragStartTime ?? scrubbedTime
+                let next = start - value.translation.width / stripPx
+                scrubbedTime = min(max(0, next), totalDuration)
+                schedulePreviewRegeneration()
+            }
+            .onEnded { _ in
+                stripDragStartTime = nil
+            }
+    }
+
+    // MARK: - Bottom tabs
+
+    private var bottomTabBar: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+            HStack(spacing: 0) {
+                coverTab(icon: "film", label: "Frame", tab: .frame) {
+                    selectedTab = .frame
+                    selectedOverlayId = nil
+                }
+                coverTab(icon: "textformat", label: "Text", tab: .text) {
+                    selectedTab = .text
+                    addTextOverlay()
+                }
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    coverTabLabel(icon: "photo", label: "Add photo", isSelected: selectedTab == .addPhoto)
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+        }
+        .background(canvasBackground)
+    }
+
+    private func coverTab(icon: String, label: String, tab: CoverEditorTab, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            coverTabLabel(icon: icon, label: label, isSelected: selectedTab == tab)
+        }
+        .accessibilityLabel(label)
+    }
+
+    private func coverTabLabel(icon: String, label: String, isSelected: Bool) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 19))
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+        }
+        .foregroundStyle(isSelected ? accent : .white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Composition + preview generation
@@ -131,16 +297,27 @@ struct CoverPickerSheet: View {
         videoComposition = builtVideoComposition
         ranges = builtRanges
         totalDuration = builtRanges.last?.end ?? 0
+
+        if let renderSize = builtVideoComposition?.renderSize, renderSize.width > 0, renderSize.height > 0 {
+            canvasPixelSize = capLongEdge(renderSize, maxEdge: 1440)
+            canvasAspect = renderSize.width / renderSize.height
+        } else {
+            canvasAspect = aspectFraction(for: project.aspectRatio)
+            canvasPixelSize = capLongEdge(
+                CGSize(width: 1080, height: 1080 / canvasAspect),
+                maxEdge: 1440
+            )
+        }
+
         isLoadingComposition = false
         await generatePreview(at: scrubbedTime)
-        await generateStrip()
     }
 
     private func schedulePreviewRegeneration() {
         previewGenerationTask?.cancel()
         let target = scrubbedTime
         previewGenerationTask = Task {
-            try? await Task.sleep(for: .milliseconds(120)) // debounce continuous slider drags
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             await generatePreview(at: target)
         }
@@ -150,106 +327,760 @@ struct CoverPickerSheet: View {
         guard let composition else { return }
         let generator = AVAssetImageGenerator(asset: composition)
         generator.appliesPreferredTrackTransform = true
-        generator.videoComposition = videoComposition // J4: aspect-fit frames (nil = no video clips)
-        generator.maximumSize = CGSize(width: 480, height: 480)
+        generator.videoComposition = videoComposition
+        generator.maximumSize = canvasPixelSize
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
         if Task.isCancelled { return }
         previewImage = UIImage(cgImage: cgImage)
     }
 
-    private func generateStrip() async {
+    private func generateStrip(cellCount: Int, stripPx: CGFloat) async {
         guard let composition, totalDuration > 0 else { return }
-        stripFrames = Array(repeating: nil, count: stripCount)
+        stripFrames = Array(repeating: nil, count: cellCount)
         let generator = AVAssetImageGenerator(asset: composition)
         generator.appliesPreferredTrackTransform = true
-        generator.videoComposition = videoComposition // J4: aspect-fit frames (nil = no video clips)
+        generator.videoComposition = videoComposition
         generator.maximumSize = CGSize(width: 160, height: 200)
-        for index in 0..<stripCount {
+
+        for index in 0..<cellCount {
             if Task.isCancelled { return }
-            let t = totalDuration * Double(index) / Double(max(stripCount - 1, 1))
+            let cellCenter = (Double(index) + 0.5) * Double(stripCellWidth)
+            let t = min(totalDuration, max(0, cellCenter / Double(stripPx)))
             let cmTime = CMTime(seconds: t, preferredTimescale: 600)
             guard let (cgImage, _) = try? await generator.image(at: cmTime) else { continue }
             if Task.isCancelled { return }
-            stripFrames[index] = UIImage(cgImage: cgImage)
+            if index < stripFrames.count {
+                stripFrames[index] = UIImage(cgImage: cgImage)
+            }
         }
     }
 
-    // MARK: - Commit
+    // MARK: - Overlays
 
-    private func commitCover() async {
-        guard let target = resolveCoverTarget(scrubbedTime: scrubbedTime) else {
-            errorMessage = "Couldn't resolve a clip at this position."
+    private func addTextOverlay() {
+        let overlay = CoverOverlay.text(
+            id: UUID(),
+            text: "Text",
+            xNorm: 0.5,
+            yNorm: 0.5,
+            scale: 1.0,
+            rotation: 0
+        )
+        coverOverlays.append(overlay)
+        selectedOverlayId = overlay.id
+    }
+
+    private func handlePhotoSelection(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        selectedTab = .addPhoto
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            selectedPhotoItem = nil
             return
         }
-        isSettingCover = true
+        let overlay = CoverOverlay.photo(
+            id: UUID(),
+            image: image,
+            xNorm: 0.5,
+            yNorm: 0.5,
+            scale: 1.0,
+            rotation: 0,
+            mirrored: false
+        )
+        coverOverlays.append(overlay)
+        selectedOverlayId = overlay.id
+        selectedPhotoItem = nil
+    }
+
+    private func updateOverlay(_ overlay: CoverOverlay) {
+        guard let index = coverOverlays.firstIndex(where: { $0.id == overlay.id }) else { return }
+        coverOverlays[index] = overlay
+    }
+
+    private func deleteOverlay(id: UUID) {
+        coverOverlays.removeAll { $0.id == id }
+        if selectedOverlayId == id { selectedOverlayId = nil }
+    }
+
+    private func duplicateTextOverlay(_ overlay: CoverOverlay) {
+        guard case .text(let text, let x, let y, let scale, let rotation) = overlay.kind else { return }
+        let duplicate = CoverOverlay.text(
+            id: UUID(),
+            text: text,
+            xNorm: min(0.94, x + 0.04),
+            yNorm: min(0.94, y + 0.04),
+            scale: scale,
+            rotation: rotation
+        )
+        coverOverlays.append(duplicate)
+        selectedOverlayId = duplicate.id
+    }
+
+    // MARK: - Save
+
+    private func saveCover() async {
+        guard let previewImage else {
+            errorMessage = "No frame selected."
+            return
+        }
+        isSaving = true
         errorMessage = nil
+        guard let jpeg = renderCompositeJPEG(frameImage: previewImage) else {
+            isSaving = false
+            errorMessage = "Couldn't render cover — try again."
+            return
+        }
         do {
-            try await projectManager.setCover(clipId: target.clipId, atSeconds: target.atSeconds)
-            isSettingCover = false
+            try await projectManager.setCoverImage(data: jpeg)
+            isSaving = false
             onCoverSet()
             dismiss()
         } catch {
-            print("[CoverPickerSheet] setCover error: \(error)")
-            isSettingCover = false
-            errorMessage = "Couldn't set cover — try again."
+            print("[CoverPickerSheet] setCoverImage error: \(error)")
+            isSaving = false
+            errorMessage = "Couldn't save cover — try again."
         }
     }
 
-    /// Resolves the picked GLOBAL (composition) time into a (clipId, localSeconds) pair. Video
-    /// clips: localSeconds is the clip's OWN SOURCE-FILE time (trimStartSeconds + offset into its
-    /// segment) — extractVideoFrame (backend) operates on the raw clip file, not composition-
-    /// relative time. Image clips: at_seconds is irrelevant server-side (CopyObject, not a frame
-    /// extraction), always 0.
-    private func resolveCoverTarget(scrubbedTime: Double) -> (clipId: String, atSeconds: Double)? {
-        let range = ranges.first(where: { scrubbedTime >= $0.start && scrubbedTime < $0.end }) ?? ranges.last
-        guard let range, let clip = project.clips.first(where: { $0.id == range.clipId }) else { return nil }
-        if clip.mediaType == "image" {
-            return (clip.id, 0)
-        }
-        let localSourceSeconds = clip.trimStartSeconds + (scrubbedTime - range.start)
-        return (clip.id, max(0, localSourceSeconds))
+    @MainActor
+    private func renderCompositeJPEG(frameImage: UIImage) -> Data? {
+        let view = CoverCompositeView(
+            frameImage: frameImage,
+            canvasSize: canvasPixelSize,
+            overlays: coverOverlays
+        )
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = ProposedViewSize(canvasPixelSize)
+        renderer.scale = 1.0
+        guard let uiImage = renderer.uiImage else { return nil }
+        return uiImage.jpegData(compressionQuality: 0.9)
     }
 
-    // MARK: - Subviews
+    // MARK: - Helpers
 
-    private var largePreview: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.black)
-            if let previewImage {
-                Image(uiImage: previewImage)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                ProgressView().tint(.white)
+    private func stripPixelsPerSecond(viewportWidth: CGFloat) -> CGFloat {
+        guard totalDuration > 0 else { return 44 }
+        return max(44, viewportWidth / CGFloat(totalDuration))
+    }
+
+    private func aspectFitRect(container: CGSize, contentAspect: CGFloat) -> CGRect {
+        guard container.width > 0, container.height > 0, contentAspect > 0 else {
+            return CGRect(origin: .zero, size: container)
+        }
+        let containerAspect = container.width / container.height
+        if containerAspect > contentAspect {
+            let height = container.height
+            let width = height * contentAspect
+            return CGRect(x: (container.width - width) / 2, y: 0, width: width, height: height)
+        } else {
+            let width = container.width
+            let height = width / contentAspect
+            return CGRect(x: 0, y: (container.height - height) / 2, width: width, height: height)
+        }
+    }
+
+    private func capLongEdge(_ size: CGSize, maxEdge: CGFloat) -> CGSize {
+        let long = max(size.width, size.height)
+        guard long > maxEdge else { return size }
+        let scale = maxEdge / long
+        return CGSize(
+            width: (size.width * scale).rounded(.down),
+            height: (size.height * scale).rounded(.down)
+        )
+    }
+
+    private func aspectFraction(for ratio: String) -> CGFloat {
+        switch ratio {
+        case "9:16": return 9.0 / 16.0
+        case "4:5": return 4.0 / 5.0
+        case "1:1": return 1.0
+        case "16:9": return 16.0 / 9.0
+        default:
+            let sorted = project.clips.sorted { $0.sortOrder < $1.sortOrder }
+            if let first = sorted.first, let w = first.width, let h = first.height, h > 0 {
+                return CGFloat(w) / CGFloat(h)
             }
+            return 9.0 / 16.0
         }
-        .frame(height: 260)
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-    }
-
-    private var frameStrip: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<stripFrames.count, id: \.self) { index in
-                Group {
-                    if let frame = stripFrames[index] {
-                        Image(uiImage: frame).resizable().scaledToFill()
-                    } else {
-                        Color.white.opacity(0.06)
-                    }
-                }
-                .frame(height: 52)
-                .clipped()
-                .onTapGesture {
-                    scrubbedTime = totalDuration * Double(index) / Double(max(stripCount - 1, 1))
-                    schedulePreviewRegeneration()
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(.horizontal, 20)
     }
 }
+
+// MARK: - Tabs + overlay model
+
+private enum CoverEditorTab {
+    case frame, text, addPhoto
+}
+
+private struct CoverOverlay: Identifiable {
+    let id: UUID
+    enum Kind {
+        case text(String, xNorm: Double, yNorm: Double, scale: Double, rotation: Double)
+        case photo(UIImage, xNorm: Double, yNorm: Double, scale: Double, rotation: Double, mirrored: Bool)
+    }
+    var kind: Kind
+
+    static func text(
+        id: UUID, text: String, xNorm: Double, yNorm: Double, scale: Double, rotation: Double
+    ) -> CoverOverlay {
+        CoverOverlay(id: id, kind: .text(text, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation))
+    }
+
+    static func photo(
+        id: UUID, image: UIImage, xNorm: Double, yNorm: Double,
+        scale: Double, rotation: Double, mirrored: Bool
+    ) -> CoverOverlay {
+        CoverOverlay(id: id, kind: .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation, mirrored: mirrored))
+    }
+}
+
+// MARK: - Interactive overlay canvas
+
+private struct CoverOverlayCanvas: View {
+    let overlays: [CoverOverlay]
+    let selectedOverlayId: UUID?
+    let canvasSize: CGSize
+    /// Offset of this canvas within the named `coverCanvas` coordinate space (`.zero` for export).
+    let gestureOrigin: CGPoint
+    let showsControls: Bool
+    let onSelect: (UUID) -> Void
+    let onUpdate: (CoverOverlay) -> Void
+    let onDelete: (UUID) -> Void
+    let onDuplicateText: (CoverOverlay) -> Void
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(overlays) { overlay in
+                switch overlay.kind {
+                case .text(let text, let xNorm, let yNorm, let scale, let rotation):
+                    CoverTextOverlayItemView(
+                        text: text,
+                        xNorm: xNorm,
+                        yNorm: yNorm,
+                        scale: scale,
+                        rotation: rotation,
+                        canvasSize: canvasSize,
+                        gestureOrigin: gestureOrigin,
+                        isSelected: selectedOverlayId == overlay.id,
+                        showsControls: showsControls,
+                        onSelect: { onSelect(overlay.id) },
+                        onMove: { x, y in
+                            var updated = overlay
+                            updated.kind = .text(text, xNorm: x, yNorm: y, scale: scale, rotation: rotation)
+                            onUpdate(updated)
+                        },
+                        onResize: { newScale in
+                            var updated = overlay
+                            updated.kind = .text(text, xNorm: xNorm, yNorm: yNorm, scale: newScale, rotation: rotation)
+                            onUpdate(updated)
+                        },
+                        onRotate: { newRotation in
+                            var updated = overlay
+                            updated.kind = .text(text, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: newRotation)
+                            onUpdate(updated)
+                        },
+                        onEditCommit: { newText in
+                            var updated = overlay
+                            updated.kind = .text(newText, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation)
+                            onUpdate(updated)
+                        },
+                        onDelete: { onDelete(overlay.id) },
+                        onDuplicate: { onDuplicateText(overlay) }
+                    )
+
+                case .photo(let image, let xNorm, let yNorm, let scale, let rotation, let mirrored):
+                    CoverPhotoOverlayItemView(
+                        image: image,
+                        xNorm: xNorm,
+                        yNorm: yNorm,
+                        scale: scale,
+                        rotation: rotation,
+                        mirrored: mirrored,
+                        canvasSize: canvasSize,
+                        gestureOrigin: gestureOrigin,
+                        isSelected: selectedOverlayId == overlay.id,
+                        showsControls: showsControls,
+                        onSelect: { onSelect(overlay.id) },
+                        onMove: { x, y in
+                            var updated = overlay
+                            updated.kind = .photo(image, xNorm: x, yNorm: y, scale: scale, rotation: rotation, mirrored: mirrored)
+                            onUpdate(updated)
+                        },
+                        onResize: { newScale in
+                            var updated = overlay
+                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: newScale, rotation: rotation, mirrored: mirrored)
+                            onUpdate(updated)
+                        },
+                        onRotate: { newRotation in
+                            var updated = overlay
+                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: newRotation, mirrored: mirrored)
+                            onUpdate(updated)
+                        },
+                        onMirror: {
+                            var updated = overlay
+                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation, mirrored: !mirrored)
+                            onUpdate(updated)
+                        },
+                        onDelete: { onDelete(overlay.id) }
+                    )
+                }
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
+        .allowsHitTesting(showsControls)
+    }
+}
+
+// MARK: - Static composite (ImageRenderer export)
+
+private struct CoverCompositeView: View {
+    let frameImage: UIImage
+    let canvasSize: CGSize
+    let overlays: [CoverOverlay]
+
+    var body: some View {
+        ZStack {
+            Color.black
+            Image(uiImage: frameImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: canvasSize.width, height: canvasSize.height)
+
+            CoverOverlayCanvas(
+                overlays: overlays,
+                selectedOverlayId: nil,
+                canvasSize: canvasSize,
+                gestureOrigin: .zero,
+                showsControls: false,
+                onSelect: { _ in },
+                onUpdate: { _ in },
+                onDelete: { _ in },
+                onDuplicateText: { _ in }
+            )
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+    }
+}
+
+// MARK: - Text overlay (faithful sibling of TextOverlayItemView)
+
+private struct CoverTextOverlayItemView: View {
+    let text: String
+    let xNorm: Double
+    let yNorm: Double
+    let scale: Double
+    let rotation: Double
+    let canvasSize: CGSize
+    let gestureOrigin: CGPoint
+    let isSelected: Bool
+    let showsControls: Bool
+    let onSelect: () -> Void
+    let onMove: (Double, Double) -> Void
+    let onResize: (Double) -> Void
+    let onRotate: (Double) -> Void
+    let onEditCommit: (String) -> Void
+    let onDelete: () -> Void
+    let onDuplicate: () -> Void
+
+    @State private var dragOffset: CGSize = .zero
+    @State private var scaleDelta: Double = 0
+    @State private var rotationDelta: Double = 0
+    @State private var rotationGrabAngle: Double?
+    @State private var isEditing = false
+    @State private var editDraft = ""
+    @FocusState private var editFieldFocused: Bool
+
+    private let baseFontSize: CGFloat = 26
+    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)
+
+    private var liveScale: Double { min(3.0, max(0.5, scale + scaleDelta)) }
+    private var liveRotation: Double { rotation + rotationDelta }
+
+    private var basePosition: CGPoint {
+        CGPoint(x: xNorm * canvasSize.width, y: yNorm * canvasSize.height)
+    }
+
+    var body: some View {
+        Group {
+            if isEditing {
+                TextField("Text", text: $editDraft)
+                    .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .focused($editFieldFocused)
+                    .submitLabel(.done)
+                    .fixedSize()
+                    .frame(minWidth: 60)
+                    .onSubmit { commitEdit() }
+                    .onChange(of: editFieldFocused) { _, focused in
+                        if !focused { commitEdit() }
+                    }
+                    .onAppear { editFieldFocused = true }
+            } else {
+                Text(text)
+                    .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
+                    .fixedSize()
+                    .padding(6)
+                    .overlay(selectionFrame)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onSelect() }
+                    .highPriorityGesture(moveDragGesture)
+                    .overlay(alignment: .topLeading) {
+                        if showsControls && isSelected { deleteButton.offset(x: -30, y: -30) }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if showsControls && isSelected { editButton.offset(x: 30, y: -30) }
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        if showsControls && isSelected { duplicateButton.offset(x: -30, y: 30) }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if showsControls && isSelected { resizeHandle.offset(x: 25, y: 25) }
+                    }
+                    .overlay(alignment: .top) {
+                        if showsControls && isSelected {
+                            rotationHandle.offset(y: -(rotationStemHeight + rotationDotDiameter / 2 + 8))
+                        }
+                    }
+                    .rotationEffect(.degrees(liveRotation))
+            }
+        }
+        .position(x: basePosition.x + dragOffset.width, y: basePosition.y + dragOffset.height)
+        .onAppear { editDraft = text }
+        .onChange(of: text) { _, newValue in
+            if !isEditing { editDraft = newValue }
+        }
+    }
+
+    private var selectionFrame: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .stroke(Color.white, lineWidth: 1.5)
+            .padding(-8)
+            .opacity(showsControls && isSelected ? 1 : 0)
+    }
+
+    private var deleteButton: some View {
+        cornerButton(systemName: "xmark", background: destructive, action: onDelete)
+    }
+
+    private var editButton: some View {
+        cornerButton(systemName: "pencil") {
+            editDraft = text
+            isEditing = true
+        }
+    }
+
+    private var duplicateButton: some View {
+        cornerButton(systemName: "square.on.square", action: onDuplicate)
+    }
+
+    private func cornerButton(
+        systemName: String,
+        background: Color = Color.black.opacity(0.85),
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack {
+                Color.clear.frame(width: 44, height: 44)
+                Image(systemName: systemName)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(background, in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var resizeHandle: some View {
+        ZStack {
+            Color.white.opacity(0.001).frame(width: 34, height: 34)
+            Circle()
+                .fill(Color.black.opacity(0.85))
+                .frame(width: 22, height: 22)
+                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .contentShape(Rectangle())
+        .highPriorityGesture(resizeDragGesture)
+    }
+
+    private let rotationStemHeight: CGFloat = 18
+    private let rotationDotDiameter: CGFloat = 10
+
+    private var rotationHandle: some View {
+        ZStack(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 1.5, height: rotationStemHeight)
+            Circle()
+                .fill(Color.white)
+                .frame(width: rotationDotDiameter, height: rotationDotDiameter)
+                .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
+                .offset(y: -(rotationStemHeight - rotationDotDiameter / 2))
+        }
+        .frame(width: 28, height: rotationStemHeight + rotationDotDiameter / 2, alignment: .bottom)
+        .contentShape(Rectangle())
+        .highPriorityGesture(rotationDragGesture)
+    }
+
+    private var rotationDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("coverCanvas"))
+            .onChanged { value in
+                onSelect()
+                let center = CGPoint(
+                    x: gestureOrigin.x + basePosition.x + dragOffset.width,
+                    y: gestureOrigin.y + basePosition.y + dragOffset.height
+                )
+                let angle = atan2(value.location.y - center.y, value.location.x - center.x)
+                if rotationGrabAngle == nil { rotationGrabAngle = angle }
+                guard let grab = rotationGrabAngle else { return }
+                rotationDelta = (angle - grab) * 180 / .pi
+            }
+            .onEnded { _ in
+                var finalRotation = liveRotation
+                finalRotation = finalRotation.truncatingRemainder(dividingBy: 360)
+                if finalRotation > 180 { finalRotation -= 360 }
+                if finalRotation <= -180 { finalRotation += 360 }
+                rotationDelta = 0
+                rotationGrabAngle = nil
+                onRotate(finalRotation)
+            }
+    }
+
+    private var moveDragGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                onSelect()
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let deltaX = value.translation.width / max(canvasSize.width, 1)
+                let deltaY = value.translation.height / max(canvasSize.height, 1)
+                let newX = min(0.98, max(0.02, xNorm + deltaX))
+                let newY = min(0.98, max(0.02, yNorm + deltaY))
+                dragOffset = .zero
+                onMove(newX, newY)
+            }
+    }
+
+    private var resizeDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                onSelect()
+                scaleDelta = Double(value.translation.width) / 120.0
+            }
+            .onEnded { _ in
+                onResize(liveScale)
+                scaleDelta = 0
+            }
+    }
+
+    private func commitEdit() {
+        guard isEditing else { return }
+        isEditing = false
+        editFieldFocused = false
+        let trimmed = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed != text {
+            onEditCommit(trimmed)
+        } else {
+            editDraft = text
+        }
+    }
+}
+
+// MARK: - Photo overlay
+
+private struct CoverPhotoOverlayItemView: View {
+    let image: UIImage
+    let xNorm: Double
+    let yNorm: Double
+    let scale: Double
+    let rotation: Double
+    let mirrored: Bool
+    let canvasSize: CGSize
+    let gestureOrigin: CGPoint
+    let isSelected: Bool
+    let showsControls: Bool
+    let onSelect: () -> Void
+    let onMove: (Double, Double) -> Void
+    let onResize: (Double) -> Void
+    let onRotate: (Double) -> Void
+    let onMirror: () -> Void
+    let onDelete: () -> Void
+
+    @State private var dragOffset: CGSize = .zero
+    @State private var scaleDelta: Double = 0
+    @State private var rotationDelta: Double = 0
+    @State private var rotationGrabAngle: Double?
+
+    private let baseWidthFraction: CGFloat = 0.4
+    private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)
+
+    private var liveScale: Double { min(3.0, max(0.2, scale + scaleDelta)) }
+    private var liveRotation: Double { rotation + rotationDelta }
+
+    private var boxSize: CGSize {
+        let width = canvasSize.width * baseWidthFraction * CGFloat(liveScale)
+        let aspect = image.size.width / max(image.size.height, 1)
+        return CGSize(width: width, height: width / aspect)
+    }
+
+    private var basePosition: CGPoint {
+        CGPoint(x: xNorm * canvasSize.width, y: yNorm * canvasSize.height)
+    }
+
+    var body: some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(x: mirrored ? -1 : 1, y: 1)
+            .frame(width: boxSize.width, height: boxSize.height)
+            .overlay(selectionFrame)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect() }
+            .highPriorityGesture(moveDragGesture)
+            .overlay(alignment: .topLeading) {
+                if showsControls && isSelected { deleteButton.offset(x: -30, y: -30) }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if showsControls && isSelected { mirrorButton.offset(x: -30, y: 30) }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if showsControls && isSelected { resizeHandle.offset(x: 25, y: 25) }
+            }
+            .overlay(alignment: .top) {
+                if showsControls && isSelected {
+                    rotationHandle.offset(y: -(rotationStemHeight + rotationDotDiameter / 2 + 8))
+                }
+            }
+            .rotationEffect(.degrees(liveRotation))
+            .position(x: basePosition.x + dragOffset.width, y: basePosition.y + dragOffset.height)
+    }
+
+    private var selectionFrame: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .stroke(Color.white, lineWidth: 1.5)
+            .padding(-8)
+            .opacity(showsControls && isSelected ? 1 : 0)
+    }
+
+    private var deleteButton: some View {
+        cornerButton(systemName: "xmark", background: destructive, action: onDelete)
+    }
+
+    private var mirrorButton: some View {
+        cornerButton(systemName: "arrow.left.and.right", action: onMirror)
+    }
+
+    private func cornerButton(
+        systemName: String,
+        background: Color = Color.black.opacity(0.85),
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack {
+                Color.clear.frame(width: 44, height: 44)
+                Image(systemName: systemName)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(background, in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var resizeHandle: some View {
+        ZStack {
+            Color.white.opacity(0.001).frame(width: 34, height: 34)
+            Circle()
+                .fill(Color.black.opacity(0.85))
+                .frame(width: 22, height: 22)
+                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .contentShape(Rectangle())
+        .highPriorityGesture(resizeDragGesture)
+    }
+
+    private let rotationStemHeight: CGFloat = 18
+    private let rotationDotDiameter: CGFloat = 10
+
+    private var rotationHandle: some View {
+        ZStack(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 1.5, height: rotationStemHeight)
+            Circle()
+                .fill(Color.white)
+                .frame(width: rotationDotDiameter, height: rotationDotDiameter)
+                .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
+                .offset(y: -(rotationStemHeight - rotationDotDiameter / 2))
+        }
+        .frame(width: 28, height: rotationStemHeight + rotationDotDiameter / 2, alignment: .bottom)
+        .contentShape(Rectangle())
+        .highPriorityGesture(rotationDragGesture)
+    }
+
+    private var rotationDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("coverCanvas"))
+            .onChanged { value in
+                onSelect()
+                let center = CGPoint(
+                    x: gestureOrigin.x + basePosition.x + dragOffset.width,
+                    y: gestureOrigin.y + basePosition.y + dragOffset.height
+                )
+                let angle = atan2(value.location.y - center.y, value.location.x - center.x)
+                if rotationGrabAngle == nil { rotationGrabAngle = angle }
+                guard let grab = rotationGrabAngle else { return }
+                rotationDelta = (angle - grab) * 180 / .pi
+            }
+            .onEnded { _ in
+                var finalRotation = liveRotation
+                finalRotation = finalRotation.truncatingRemainder(dividingBy: 360)
+                if finalRotation > 180 { finalRotation -= 360 }
+                if finalRotation <= -180 { finalRotation += 360 }
+                rotationDelta = 0
+                rotationGrabAngle = nil
+                onRotate(finalRotation)
+            }
+    }
+
+    private var moveDragGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                onSelect()
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let deltaX = value.translation.width / max(canvasSize.width, 1)
+                let deltaY = value.translation.height / max(canvasSize.height, 1)
+                let newX = min(0.98, max(0.02, xNorm + deltaX))
+                let newY = min(0.98, max(0.02, yNorm + deltaY))
+                dragOffset = .zero
+                onMove(newX, newY)
+            }
+    }
+
+    private var resizeDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                onSelect()
+                scaleDelta = Double(value.translation.width) / 120.0
+            }
+            .onEnded { _ in
+                onResize(liveScale)
+                scaleDelta = 0
+            }
+    }
+}
+

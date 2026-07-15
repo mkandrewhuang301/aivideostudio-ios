@@ -332,7 +332,7 @@ struct TimelineTrackView: View {
         .sheet(isPresented: $showAddMediaSheet) {
             MediaPickerSheet(onAdd: handlePickedMedia)
         }
-        .sheet(isPresented: $showCoverPicker) {
+        .fullScreenCover(isPresented: $showCoverPicker) {
             CoverPickerSheet(project: state.project, onCoverSet: onCoverUpdated)
         }
     }

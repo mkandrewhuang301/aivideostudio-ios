@@ -431,11 +431,24 @@ actor APIClient {
     // seconds-within-that-clip value by the caller (CoverPickerSheet, via the composition's clip
     // ranges) — the backend clamps it into the clip's own real duration server-side either way.
     // Returns a fresh presigned thumbnail_url.
+    // unused since 13-24 K6, kept for API parity
     func setProjectCover(id: String, clipId: String, atSeconds: Double) async throws -> String {
         let body: [String: Any] = ["clip_id": clipId, "at_seconds": atSeconds]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let response: CoverResponse = try await projectRequest(
             path: "api/projects/\(id)/cover", method: "POST", body: bodyData, expectedStatus: [200]
+        )
+        return response.thumbnailUrl
+    }
+
+    // Plan 13-24 K-B1/K6: multipart cover image upload (client-composited JPEG).
+    func setProjectCoverImage(id: String, imageData: Data) async throws -> String {
+        let response: CoverResponse = try await multipartProjectRequest(
+            path: "api/projects/\(id)/cover",
+            fileName: "cover.jpg",
+            mimeType: "image/jpeg",
+            fileData: imageData,
+            expectedStatus: [200]
         )
         return response.thumbnailUrl
     }

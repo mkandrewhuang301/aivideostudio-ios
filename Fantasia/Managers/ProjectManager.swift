@@ -189,9 +189,20 @@ final class ProjectManager {
     /// (clipId, seconds-within-that-clip) pair by the caller (CoverPickerSheet). Merges just the
     /// new `thumbnailUrl` into `loadedProject` in place, same convention as updateProjectTitle/
     /// updateAspectRatio/updateCaptionStyle above.
+    // unused since 13-24 K6, kept for API parity
     func setCover(clipId: String, atSeconds: Double) async throws {
         guard let id = loadedProject?.id else { return }
         let thumbnailUrl = try await APIClient.shared.setProjectCover(id: id, clipId: clipId, atSeconds: atSeconds)
+        loadedProject?.thumbnailUrl = thumbnailUrl
+        if let index = projects.firstIndex(where: { $0.id == id }) {
+            projects[index].thumbnailUrl = thumbnailUrl
+        }
+    }
+
+    /// Plan 13-24 K6: upload a client-composited cover JPEG (multipart K-B1 branch).
+    func setCoverImage(data: Data) async throws {
+        guard let id = loadedProject?.id else { return }
+        let thumbnailUrl = try await APIClient.shared.setProjectCoverImage(id: id, imageData: data)
         loadedProject?.thumbnailUrl = thumbnailUrl
         if let index = projects.firstIndex(where: { $0.id == id }) {
             projects[index].thumbnailUrl = thumbnailUrl
