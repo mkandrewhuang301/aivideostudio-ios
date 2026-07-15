@@ -203,10 +203,16 @@ struct EditorView: View {
         }
     }
 
-    // Task C: seek-on-scrub. Compares against the PLAYER's own current time rather than a
-    // "player-originated write" boolean flag (the plan's sanctioned alternative) — the periodic
-    // time observer's own writes always land within epsilon of the player's actual position, so
-    // only a genuine external scrub (timeline drag) triggers a seek.
+    // Task C / 13-25 L4: seek-on-scrub. Compares against the PLAYER's own current time rather than
+    // a "player-originated write" boolean flag — the periodic time observer's own writes always
+    // land within epsilon of the player's actual position, so only a genuine external scrub
+    // (timeline drag) triggers a seek.
+    //
+    // IMPORTANT: do NOT use `.positiveInfinity` tolerance during scrub. That snaps to the nearest
+    // keyframe only, so on long-GOP H.264 the main preview freezes on one frame while the
+    // timeline scrolls (the reported "images don't change" bug). cancelPendingSeeks + a SMALL
+    // tolerance (~0.2s) keeps seeks latest-wins and still updates the picture as you drag.
+    // Exact frame lands on scrub-end via the isScrubbing→false zero-tolerance seek above.
     private func handleScrubSeek(_ newValue: Double) {
         guard let player else { return }
         let playerSeconds = player.currentTime().seconds
@@ -215,7 +221,8 @@ struct EditorView: View {
             let target = CMTime(seconds: newValue, preferredTimescale: 600)
             if state.isScrubbing {
                 player.currentItem?.cancelPendingSeeks()
-                player.seek(to: target, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+                let scrubTolerance = CMTime(seconds: 0.2, preferredTimescale: 600)
+                player.seek(to: target, toleranceBefore: scrubTolerance, toleranceAfter: scrubTolerance)
             } else {
                 player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
             }
