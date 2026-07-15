@@ -9,145 +9,56 @@
 // item's own LOOPED LOCAL time straight onto the shared `state.currentTime` — for any multi-clip
 // project this fought the inline player's real back-to-back composition and looked like
 // "overlapping media" (clip 0 looping forever under/over whatever the timeline said should be
-// playing). Now builds the SAME EditorCompositionBuilder composition the inline player uses
-// (F1's whole point: ONE shared assembly, not two divergent ones), on a plain `AVPlayer` — no
-// looper. It plays through the WHOLE project sequentially exactly once and auto-pauses at the
-// end; the periodic time observer clamps to `[0, totalDuration]` instead of writing a raw
-// (possibly looped-negative-or-huge) local time.
+// playing). That rewrite built the SAME EditorCompositionBuilder composition the inline player
+// uses, but on its OWN separate AVPlayer instance.
+//
+// Plan 13-22 F6 REWRITE (this version): stops building ANYTHING — EditorView now passes its OWN
+// live `player` (the SAME AVPlayer instance the inline surface already drives) straight through.
+// No new AVPlayerItem, no re-buffer, no re-download: this view opens on the EXACT current frame
+// instantly, because it's the identical player object, just rendered through a second
+// AVPlayerLayer-backed `FillingVideoPlayerView`. EditorView's own periodic time observer (already
+// running on this player) keeps clamping/advancing `state.currentTime` regardless of which
+// surface is visible — this view has NO time observer of its own, only play/pause/seek calls
+// forwarded onto the shared player, plus a local `isScrubbing` flag so its own scrub drag doesn't
+// fight that periodic observer mid-gesture (the observer doesn't fire repeatedly while paused).
+// On minimize there is nothing to reconcile — same player, same clock, throughout.
 //
 // Still bound to the SAME shared `EditorState.currentTime`/`isPlaying` clock instead of a
-// separate, locally-owned time/isPlaying pair, so scrubbing here always stays in sync with the
-// inline editor once the user minimizes back. No pan-to-dismiss/zoom (not required here per
-// 13-UI-SPEC.md) — a single explicit minimize control instead.
-//
-// EditorView pauses its own inline AVPlayer while this is presented (and reconciles position back
-// on minimize) so the two players' periodic time observers never race writes onto the same
-// `EditorState.currentTime` at once — confirmed still correct with this rewrite: only ONE of the
-// two AVPlayers (inline XOR fullscreen) is ever playing/observing at a time.
+// separate, locally-owned time/isPlaying pair.
 //
 // Layers CaptionOverlayView (SC5, live karaoke) and TextOverlayCanvasView (SC3) on top of the
 // video, exactly per Delta 6 — the fullscreen surface renders the same overlays the inline preview
-// does. TextOverlayCanvasView is read-only here (`.allowsHitTesting(false)`) since fullscreen is a
-// preview-only surface, not an editing one.
+// does. TextOverlayCanvasView passes `showsControls: false` (13-22 i6.2) — plain text on video,
+// never selection frames/corner buttons/rotation handle, regardless of `state.selection` (this is
+// a preview-only surface, not an editing one).
+//
+// 13-22 i6.3/i13: the minimize button moved OFF its own top-trailing row and INTO the bottom
+// playback control bar as the last element (icon `arrow.down.right.and.arrow.up.left`, 24pt
+// frame) — the old separate top row is gone entirely.
 
 import SwiftUI
 import AVFoundation
 
-@Observable
-@MainActor
-private final class EditorFullscreenPlayerViewModel {
-    private(set) var player: AVPlayer?
-    private var timeObserverToken: Any?
-    private var isScrubbing = false
-    private let state: EditorState
-
-    init(state: EditorState) {
-        self.state = state
-    }
-
-    /// Async setup (composition assembly awaits each clip's tracks) — builds the SAME multi-clip
-    /// composition EditorView.rebuildPlayer() uses (F1), then seeks to wherever the inline
-    /// editor's playhead already is (the shared clock), not to 0.
-    func load() async {
-        guard let (composition, _) = await EditorCompositionBuilder.build(clips: state.project.clips) else { return }
-        // 13-22 i3: defensive — normally already set by EditorView.rebuildPlayer() before
-        // fullscreen can even open, but keeps the shared clamp correct if this is ever reached
-        // first (both compositions are built from the same clips, so the value matches either way).
-        state.playableDuration = composition.duration.seconds
-
-        let item = AVPlayerItem(asset: composition)
-        let avPlayer = AVPlayer(playerItem: item)
-        player = avPlayer
-
-        let seekTime = CMTime(seconds: state.currentTime, preferredTimescale: 600)
-        await avPlayer.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        if state.isPlaying { avPlayer.play() }
-
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            Task { @MainActor in
-                guard let self, !self.isScrubbing else { return }
-                // 13-22 i3: routes through the shared clampTime (playableDuration-aware) instead
-                // of totalDuration alone — no looper means this can briefly read past the end
-                // right before AVPlayer settles at the item boundary; clamping holds the last real
-                // frame instead of ever landing on/past the composition's exact end.
-                self.state.currentTime = self.state.clampTime(time.seconds)
-                let playableEnd = self.state.clampTime(self.state.totalDuration)
-                if self.state.isPlaying, playableEnd > 0, time.seconds >= playableEnd - 0.05 {
-                    self.state.isPlaying = false
-                    self.player?.pause()
-                }
-            }
-        }
-    }
-
-    func togglePlayback() {
-        if state.isPlaying {
-            state.pause()
-            player?.pause()
-        } else {
-            // Replay from the top if we're already sitting at (or past) the end — mirrors CapCut/
-            // every video app's "tap play after it finished" convention.
-            if state.currentTime >= state.clampTime(state.totalDuration) - 0.05 {
-                state.currentTime = 0
-                let time = CMTime(seconds: 0, preferredTimescale: 600)
-                player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-            }
-            state.play()
-            player?.play()
-        }
-    }
-
-    // Pauses playback while the user drags the scrubber, mirroring FullScreenVideoPlayerView's
-    // beginScrubbing/endScrubbing so the periodic time observer doesn't fight the live drag.
-    func beginScrubbing() {
-        guard !isScrubbing else { return }
-        isScrubbing = true
-        player?.pause()
-    }
-
-    /// Live-updates the shared clock as the finger moves — the scrubber view reads
-    /// `state.currentTime` directly, so this is the ONLY write needed during the drag itself.
-    /// `totalDuration` here is the WHOLE project's duration (F1) — the scrubber spans every clip,
-    /// not just the fullscreen player's original single asset.
-    func updateScrub(fraction: Double, totalDuration: Double) {
-        guard totalDuration > 0 else { return }
-        state.currentTime = state.clampTime(fraction * totalDuration)
-    }
-
-    func endScrubbing() {
-        let time = CMTime(seconds: state.currentTime, preferredTimescale: 600)
-        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-        isScrubbing = false
-        if state.isPlaying { player?.play() }
-    }
-
-    func tearDown() {
-        if let timeObserverToken { player?.removeTimeObserver(timeObserverToken) }
-        timeObserverToken = nil
-        player?.pause()
-    }
-}
-
 struct FullscreenEditorPlayerView: View {
     let state: EditorState
+    /// The SAME AVPlayer EditorView's inline surface drives — see file header. Optional only for
+    /// the (should-never-happen) case fullscreen opens before EditorView.rebuildPlayer() has ever
+    /// finished once.
+    let player: AVPlayer?
     let onMinimize: () -> Void
 
-    @State private var viewModel: EditorFullscreenPlayerViewModel?
+    @State private var isScrubbing = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                // F1: `vm.player` is now optional (composition assembly is async) — both the
-                // player surface AND the control bar wait on it, not just the view model's own
-                // presence, so nothing renders a stale/blank player mid-load.
-                if let vm = viewModel, let avPlayer = vm.player {
-                    FillingVideoPlayerView(player: avPlayer, videoGravity: .resizeAspect)
+                if let player {
+                    FillingVideoPlayerView(player: player, videoGravity: .resizeAspect)
                         .ignoresSafeArea()
                         .overlay {
-                            TextOverlayCanvasView(state: state)
+                            TextOverlayCanvasView(state: state, showsControls: false)
                                 .allowsHitTesting(false)
                         }
                         .overlay {
@@ -158,52 +69,25 @@ struct FullscreenEditorPlayerView: View {
                 }
 
                 VStack {
-                    HStack {
-                        Spacer()
-                        minimizeButton
-                    }
-                    .padding(.top, geo.safeAreaInsets.top + 8)
-                    .padding(.trailing, 12)
-
                     Spacer()
-
-                    if let vm = viewModel, vm.player != nil {
-                        playbackControlBar(vm: vm)
+                    if let player {
+                        playbackControlBar(player: player)
                             .padding(.bottom, max(geo.safeAreaInsets.bottom, 16))
                     }
                 }
             }
         }
         .statusBar(hidden: true)
-        .onAppear {
-            let vm = EditorFullscreenPlayerViewModel(state: state)
-            viewModel = vm
-            Task { await vm.load() }
-        }
-        .onDisappear {
-            viewModel?.tearDown()
-            viewModel = nil
-        }
     }
 
-    private var minimizeButton: some View {
-        Button(action: onMinimize) {
-            Image(systemName: "arrow.down.right.and.arrow.up.left")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(Color.black.opacity(0.45), in: Circle())
-        }
-        .accessibilityLabel("Minimize")
-    }
+    // MARK: - Playback control bar: play/pause + scrubber + elapsed/total + minimize (i6.3/i13 —
+    // minimize is now the LAST element here, right of the time text; the capsule's horizontal
+    // padding shrank 16 → 12 to make room, the scrubber flexes to fill whatever's left).
 
-    // MARK: - Playback control bar: play/pause + scrubber + elapsed/total (mirrors
-    // FullScreenVideoPlayerView's playbackControlBar, bound to the shared EditorState clock)
-
-    private func playbackControlBar(vm: EditorFullscreenPlayerViewModel) -> some View {
-        HStack(spacing: 12) {
+    private func playbackControlBar(player: AVPlayer) -> some View {
+        HStack(spacing: 10) {
             Button {
-                vm.togglePlayback()
+                togglePlayback(player: player)
             } label: {
                 Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -212,21 +96,30 @@ struct FullscreenEditorPlayerView: View {
             }
             .buttonStyle(.plain)
 
-            scrubber(vm: vm)
+            scrubber(player: player)
 
             Text("\(formatTime(state.currentTime)) / \(formatTime(state.totalDuration))")
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
                 .fixedSize()
+
+            Button(action: onMinimize) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Minimize")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial, in: Capsule())
         .padding(.horizontal, 16)
     }
 
-    private func scrubber(vm: EditorFullscreenPlayerViewModel) -> some View {
+    private func scrubber(player: AVPlayer) -> some View {
         GeometryReader { geo in
             let width = max(geo.size.width, 1)
             let total = state.totalDuration
@@ -243,14 +136,60 @@ struct FullscreenEditorPlayerView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        vm.beginScrubbing()
+                        beginScrubbing(player: player)
                         let fraction = min(max(value.location.x / width, 0), 1)
-                        vm.updateScrub(fraction: fraction, totalDuration: total)
+                        updateScrub(fraction: fraction, totalDuration: total)
                     }
-                    .onEnded { _ in vm.endScrubbing() }
+                    .onEnded { _ in endScrubbing(player: player) }
             )
         }
         .frame(height: 24)
+    }
+
+    // MARK: - Playback (forwards directly onto the SHARED player — no view-model layer needed
+    // once there's no composition to own)
+
+    private func togglePlayback(player: AVPlayer) {
+        if state.isPlaying {
+            state.pause()
+            player.pause()
+        } else {
+            // Replay from the top if we're already sitting at (or past) the end — mirrors CapCut/
+            // every video app's "tap play after it finished" convention.
+            if state.currentTime >= state.clampTime(state.totalDuration) - 0.05 {
+                state.currentTime = 0
+                let time = CMTime(seconds: 0, preferredTimescale: 600)
+                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+            state.play()
+            player.play()
+        }
+    }
+
+    // Pauses playback while the user drags the scrubber — the periodic time observer (owned by
+    // EditorView, not this view) only fires on actual time changes, so pausing the shared player
+    // is enough to stop it from fighting a live drag; no isScrubbing guard needed on that
+    // observer's side.
+    private func beginScrubbing(player: AVPlayer) {
+        guard !isScrubbing else { return }
+        isScrubbing = true
+        player.pause()
+    }
+
+    /// Live-updates the shared clock as the finger moves — the scrubber view reads
+    /// `state.currentTime` directly, so this is the ONLY write needed during the drag itself.
+    /// Routes through the shared `state.clampTime(_:)` (13-22 i3) so a drag to the very end
+    /// settles on the last real frame instead of overshooting the composition's playable range.
+    private func updateScrub(fraction: Double, totalDuration: Double) {
+        guard totalDuration > 0 else { return }
+        state.currentTime = state.clampTime(fraction * totalDuration)
+    }
+
+    private func endScrubbing(player: AVPlayer) {
+        let time = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        isScrubbing = false
+        if state.isPlaying { player.play() }
     }
 
     private func formatTime(_ seconds: Double) -> String {

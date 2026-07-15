@@ -107,9 +107,13 @@ struct EditorView: View {
                 })
             }
             .overlay(alignment: .bottom) { barToastOverlay }
-            .onChange(of: showFullscreenPlayer) { _, isShowing in handleFullscreenChange(isShowing) }
+            // 13-22 i6.1: fullscreen now shares this SAME AVPlayer instance (no more separate
+            // composition/player pair to reconcile) — the inline surface is simply occluded
+            // behind the fullScreenCover the whole time and keeps ticking its own periodic
+            // observer regardless of which surface is visible, so there is nothing to pause or
+            // reconcile on open/minimize anymore (see FullscreenEditorPlayerView's file header).
             .fullScreenCover(isPresented: $showFullscreenPlayer) {
-                FullscreenEditorPlayerView(state: state, onMinimize: { showFullscreenPlayer = false })
+                FullscreenEditorPlayerView(state: state, player: player, onMinimize: { showFullscreenPlayer = false })
             }
             .sheet(isPresented: $showCaptionStyleSheet) {
                 CaptionStyleSheet(state: state)
@@ -212,19 +216,6 @@ struct EditorView: View {
         }
     }
 
-    // The fullscreen player (plan 16) owns its own AVPlayer bound to the same EditorState clock —
-    // pause the inline player while fullscreen is up so both players' periodic time observers
-    // never race writes onto state.currentTime at once, then reconcile the inline player's
-    // position/playback back on minimize.
-    private func handleFullscreenChange(_ isShowing: Bool) {
-        if isShowing {
-            player?.pause()
-        } else if let player {
-            let time = CMTime(seconds: state.currentTime, preferredTimescale: 600)
-            player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-            if state.isPlaying { player.play() }
-        }
-    }
 
     // MARK: - Top bar: close ✕ / tap-to-rename title (Delta 1) / Export
     //
@@ -470,11 +461,14 @@ struct EditorView: View {
             .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay {
-                // Plan 13: on-video Text overlays (SC3), sized/clipped to the same letterboxed
-                // canvas frame the AVPlayer surface renders in so overlay coordinates line up 1:1.
+                // Plan 13: on-video Text overlays (SC3), sized to the same letterboxed canvas
+                // frame the AVPlayer surface renders in so overlay coordinates line up 1:1.
+                // 13-22 i7.1: NO `.clipShape` here (unlike the video/caption layers) — the
+                // rotation handle ALWAYS extends above a selected box, and corner buttons clip
+                // too near the edges; text controls may draw over the letterbox bars, exactly like
+                // CapCut. This was the actual root cause of "rotation dot invisible."
                 TextOverlayCanvasView(state: state)
                     .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .overlay {
                 // Plan 16: live karaoke captions (SC5's render half — Delta 6), same letterboxed
@@ -582,34 +576,32 @@ struct EditorView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { state.select(.none) }
 
-            // F8 (Plan 13-21): undo HIDDEN until the stack is non-empty, redo HIDDEN until ITS
-            // stack is non-empty (exact user spec — redo only ever appears after an undo). Both
-            // disabled while an undo/redo is already in flight (EditorHistory.isProcessing).
-            if state.history.canUndo {
-                Button {
-                    Task { await performUndo() }
-                } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .frame(width: 32, height: 32)
-                }
-                .disabled(state.history.isProcessing)
-                .accessibilityLabel("Undo")
+            // 13-22 i8: ALWAYS rendered now (was hidden entirely via `if canUndo`/`if canRedo`,
+            // which made the pair appear/disappear as history changed) — `.disabled` +
+            // `.opacity` communicate availability instead, matching standard undo/redo
+            // conventions: fresh project → both grayed; after an action → undo lit, redo grayed;
+            // after an undo → both lit (redo lit only while redoable).
+            Button {
+                Task { await performUndo() }
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(state.history.canUndo ? 0.85 : 0.3))
+                    .frame(width: 32, height: 32)
             }
+            .disabled(!state.history.canUndo || state.history.isProcessing)
+            .accessibilityLabel("Undo")
 
-            if state.history.canRedo {
-                Button {
-                    Task { await performRedo() }
-                } label: {
-                    Image(systemName: "arrow.uturn.forward")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .frame(width: 32, height: 32)
-                }
-                .disabled(state.history.isProcessing)
-                .accessibilityLabel("Redo")
+            Button {
+                Task { await performRedo() }
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(state.history.canRedo ? 0.85 : 0.3))
+                    .frame(width: 32, height: 32)
             }
+            .disabled(!state.history.canRedo || state.history.isProcessing)
+            .accessibilityLabel("Redo")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 2) // F7 (Plan 13-21): 4 → 2, frees more vertical space for the preview

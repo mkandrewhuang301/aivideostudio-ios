@@ -1,12 +1,13 @@
 // EditorCompositionBuilder.swift
 // Fantasia
 // Plan 13-21 F1: extracts EditorView's buildComposition() (13-19 Task C0) into a shared helper so
-// BOTH the inline preview player (EditorView.rebuildPlayer) AND the fullscreen player
-// (EditorFullscreenPlayerViewModel) play the SAME back-to-back multi-clip composition — the root
-// cause of "fullscreen plays overlapping media" was the fullscreen player instead looping just
-// `clips.first` via AVPlayerLooper while writing its own looped LOCAL time onto the shared
-// `state.currentTime`, fighting the inline player's global multi-clip timeline. Also used by
-// F17's CoverPickerSheet (frame strip over the whole project timeline).
+// the inline preview player (EditorView.rebuildPlayer) builds ONE back-to-back multi-clip
+// composition — the root cause of "fullscreen plays overlapping media" was an earlier fullscreen
+// player looping just `clips.first` via AVPlayerLooper while writing its own looped LOCAL time
+// onto the shared `state.currentTime`, fighting the inline player's global multi-clip timeline.
+// Plan 13-22 F6 went further: the fullscreen player (FullscreenEditorPlayerView) no longer builds
+// its own composition at all — it shares EditorView's own live AVPlayer instance outright. Also
+// used by F17's CoverPickerSheet (frame strip over the whole project timeline).
 //
 // KNOWN LIMITATION (unchanged from the original buildComposition, 13-20): only VIDEO clips
 // contribute actual frames to the composition (AVFoundation has no simple "insert a still image

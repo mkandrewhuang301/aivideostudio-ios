@@ -23,6 +23,10 @@ struct TextOverlayCanvasView: View {
     @Environment(ProjectManager.self) private var projectManager
 
     let state: EditorState
+    /// 13-22 i6.2: `false` in the fullscreen preview (a preview-only surface, never editing) —
+    /// renders plain text on video regardless of `state.selection`, no selectionFrame/corner
+    /// buttons/rotation handle. Defaults to `true` (the inline editor's existing behavior).
+    var showsControls: Bool = true
 
     var body: some View {
         GeometryReader { geo in
@@ -32,6 +36,7 @@ struct TextOverlayCanvasView: View {
                         overlay: overlay,
                         canvasSize: geo.size,
                         isSelected: state.selection == .text(overlay.id),
+                        showsControls: showsControls,
                         startEditing: state.editRequestedTextId == overlay.id,
                         onSelect: { state.select(.text(overlay.id)) },
                         onMove: { xNorm, yNorm in
@@ -225,6 +230,9 @@ private struct TextOverlayItemView: View {
     let overlay: TextOverlay
     let canvasSize: CGSize
     let isSelected: Bool
+    /// 13-22 i6.2: gates selectionFrame/corner buttons/rotation handle — `false` in the fullscreen
+    /// preview surface (see TextOverlayCanvasView.showsControls's doc comment).
+    let showsControls: Bool
     /// Flips true when the contextual bottom bar's "Edit" action targets this overlay (13-19 Task
     /// A) — mirrors tapping the ✎ corner button. Consumed via `onEditTriggerConsumed` immediately.
     let startEditing: Bool
@@ -311,23 +319,22 @@ private struct TextOverlayItemView: View {
             .onTapGesture { onSelect() }
             .highPriorityGesture(moveDragGesture)
             .overlay(alignment: .topLeading) {
-                if isSelected { deleteButton.offset(x: -30, y: -30) }
+                if showsControls && isSelected { deleteButton.offset(x: -30, y: -30) }
             }
             .overlay(alignment: .topTrailing) {
-                if isSelected { editButton.offset(x: 30, y: -30) }
+                if showsControls && isSelected { editButton.offset(x: 30, y: -30) }
             }
             .overlay(alignment: .bottomLeading) {
-                if isSelected { duplicateButton.offset(x: -30, y: 30) }
+                if showsControls && isSelected { duplicateButton.offset(x: -30, y: 30) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if isSelected { resizeHandle.offset(x: 25, y: 25) }
+                if showsControls && isSelected { resizeHandle.offset(x: 25, y: 25) }
             }
             .overlay(alignment: .top) {
-                // F14.2: stem's BOTTOM now lands exactly on the box's top border (line height 22,
-                // offset -30 → bottom at text-frame-y = -8, i.e. the selectionFrame's own top
-                // edge) — previously offset -36 with a 20pt line left an 8pt visible gap between
-                // the stem and the box.
-                if isSelected { rotationHandle.offset(y: -30) }
+                // F14.2, geometry fixed 13-22 i7.2: stem's BOTTOM lands exactly on the box's top
+                // border (selectionFrame's own top edge, text-frame-y = -8) — see
+                // rotationHandle's own doc comment for the derivation with the new 18pt stem.
+                if showsControls && isSelected { rotationHandle.offset(y: -26) }
             }
             .rotationEffect(.degrees(liveRotation))
     }
@@ -352,7 +359,7 @@ private struct TextOverlayItemView: View {
         RoundedRectangle(cornerRadius: 2)
             .stroke(Color.white, lineWidth: 1.5)
             .padding(-8)
-            .opacity(isSelected ? 1 : 0)
+            .opacity(showsControls && isSelected ? 1 : 0)
     }
 
     // MARK: - Corner controls (delete / edit / duplicate = discrete tap, 44pt target;
@@ -377,6 +384,13 @@ private struct TextOverlayItemView: View {
         }
     }
 
+    // 13-22 i7.3: visible circles 26 → 22pt, glyphs 11 → 9pt (the ✕ especially — it read as
+    // oversized). Hit targets are UNCHANGED (44pt discrete-tap here, 34pt continuous-drag on
+    // resizeHandle below) — the corner-offset math (deleteButton/editButton/duplicateButton/
+    // resizeHandle's `.offset` values above) is `-(hitFrame/2 + strokeExpansion)`, which depends
+    // ONLY on the hit frame's size, not the visible circle's diameter (the circle is centered
+    // WITHIN the unchanged hit frame either way) — so those offsets need no recomputation; the
+    // circle's center still lands exactly on the selection-frame's corner.
     private func cornerButton(
         systemName: String,
         label: String,
@@ -387,9 +401,9 @@ private struct TextOverlayItemView: View {
             ZStack {
                 Color.clear.frame(width: 44, height: 44)
                 Image(systemName: systemName)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
                     .background(background, in: Circle())
                     .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
             }
@@ -403,10 +417,10 @@ private struct TextOverlayItemView: View {
             Color.white.opacity(0.001).frame(width: 34, height: 34)
             Circle()
                 .fill(Color.black.opacity(0.85))
-                .frame(width: 26, height: 26)
+                .frame(width: 22, height: 22)
                 .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
             Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.white)
         }
         .contentShape(Rectangle())
@@ -414,27 +428,42 @@ private struct TextOverlayItemView: View {
         .accessibilityLabel("Resize text overlay")
     }
 
-    // MARK: - Rotation (NEW, 13-19 Task H; geometry fixed 13-21 F14.2) — short vertical line
-    // rising from the box's top-center to a small dot; press-drag the dot to rotate clockwise/
-    // counterclockwise. Continuous-drag control, exempt from the 44pt rule (same exemption
-    // resizeHandle already relies on). Stem is now 22pt tall (was 20) and — combined with the
-    // container's `.offset(y: -30)` above — its BOTTOM lands exactly on the box's top border, no
-    // visible gap. Dot is now a WHITE fill (was black — invisible against light/white video
-    // backgrounds) with a thin dark outline so it still reads on light content too.
+    // MARK: - Rotation (NEW, 13-19 Task H; geometry fixed 13-21 F14.2, redone 13-22 i7.1/i7.2) —
+    // short vertical line rising from the box's top-center to a small dot; press-drag the dot to
+    // rotate clockwise/counterclockwise. Continuous-drag control, hit area 28pt (was 34pt),
+    // exempt from the 44pt rule (same exemption resizeHandle relies on).
+    //
+    // i7.1: the ROOT CAUSE of "rotation dot invisible" was EditorView.previewStage clipping
+    // TextOverlayCanvasView's whole overlay to the letterbox frame (`.clipShape`) — this handle
+    // ALWAYS extends above the selected box, so it got amputated whenever the box sat near the
+    // top of the canvas. Fixed at the call site (EditorView.swift) by removing that clipShape from
+    // the text-overlay overlay ONLY (video/caption layers stay clipped).
+    //
+    // i7.2: the dot previously sat BELOW the stem (a VStack[stem, dot] with the dot listed
+    // second) — that put the dot OVERLAPPING the selected box's own top edge instead of at the
+    // handle's far tip, which read as "geometry has a gap" between the visible stem and where a
+    // grabbable dot should be. Rebuilt as a bottom-anchored ZStack: the stem's BOTTOM is the fixed
+    // reference point (touches the selectionFrame's top edge, text-frame-y = -8 — same anchor
+    // math as before, now solved for an 18pt stem: `.offset(y: -(8 + stemHeight))` on the whole
+    // assembly below), and the dot is a SEPARATE layer offset UP by the full stem height so its
+    // CENTER (not edge) sits exactly at the stem's top.
+    private let rotationStemHeight: CGFloat = 18
 
     private var rotationHandle: some View {
-        VStack(spacing: 2) {
+        ZStack(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.9))
-                .frame(width: 1.5, height: 22)
+                .frame(width: 1.5, height: rotationStemHeight)
             ZStack {
-                Color.white.opacity(0.001).frame(width: 34, height: 34)
+                Color.white.opacity(0.001).frame(width: 28, height: 28) // hit area
                 Circle()
                     .fill(Color.white)
-                    .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
             }
+            .offset(y: -rotationStemHeight) // dot's CENTER at the stem's top
         }
+        .frame(height: rotationStemHeight, alignment: .bottom)
         .contentShape(Rectangle())
         .highPriorityGesture(rotationDragGesture)
         .accessibilityLabel("Rotate text overlay")
