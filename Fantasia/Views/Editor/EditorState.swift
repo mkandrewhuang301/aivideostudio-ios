@@ -90,6 +90,26 @@ final class EditorState {
         }
     }
 
+    /// 13-24 K3: clip pills enforce `max(trimmedDuration · pxPerSecond, 30)` — so the VISUAL
+    /// strip end can exceed `totalDuration · pxPerSecond` whenever any short clip hits the 30pt
+    /// floor. Audio placeholders/pills and interaction caps must clamp against THIS edge so the
+    /// audio trailing edge lands exactly on the last clip's right edge at every zoom.
+    static let clipPillMinWidthPt: Double = 30
+
+    func visualStripEndPx(pxPerSecond: Double) -> Double {
+        let px = max(pxPerSecond, 0.0001)
+        return project.clips.reduce(0.0) { partial, clip in
+            let end = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
+            let trimmed = max(0, end - clip.trimStartSeconds)
+            return partial + max(trimmed * px, Self.clipPillMinWidthPt)
+        }
+    }
+
+    func visualStripEndSeconds(pxPerSecond: Double) -> Double {
+        let px = max(pxPerSecond, 0.0001)
+        return visualStripEndPx(pxPerSecond: px) / px
+    }
+
     func play() {
         isPlaying = true
     }
@@ -107,8 +127,13 @@ final class EditorState {
     /// fullscreen scrubber) instead of clamping against `totalDuration` alone. Playing/scrubbing to
     /// the end now settles at `playableDuration - 0.03` and HOLDS that last real frame, rather than
     /// seeking to/past the composition's exact end (which AVFoundation renders as a black frame).
+    ///
+    /// 13-24 K3: the visual/interaction domain may extend slightly past `totalDuration` when short
+    /// clips hit the 30pt min-width floor — scrubbing can reach that visual end. The PLAYER still
+    /// holds at `playableDuration - 0.03` via the same min().
     func clampTime(_ time: Double) -> Double {
-        let upperBound = max(0, min(totalDuration, playableDuration - 0.03))
+        let visualEnd = visualStripEndSeconds(pxPerSecond: pxPerSecond)
+        let upperBound = max(0, min(max(totalDuration, visualEnd), playableDuration - 0.03))
         return min(max(time, 0), upperBound)
     }
 

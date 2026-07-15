@@ -64,6 +64,7 @@ struct TextOverlayCanvasView: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .coordinateSpace(name: "overlayCanvas")
         }
         .allowsHitTesting(true)
     }
@@ -255,6 +256,8 @@ private struct TextOverlayItemView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var scaleDelta: Double = 0
     @State private var rotationDelta: Double = 0
+    /// 13-24 K4: absolute angle of the finger at grab time in the non-rotating canvas space.
+    @State private var rotationGrabAngle: Double? = nil
     @State private var isEditing = false
     @State private var editDraft = ""
     @FocusState private var editFieldFocused: Bool
@@ -475,29 +478,30 @@ private struct TextOverlayItemView: View {
         .accessibilityLabel("Rotate text overlay")
     }
 
-    // Approximate distance (points) from the box's CENTER to the handle's rest position — the box
-    // varies in height with font size/scale, so this is a fixed, "close enough" constant rather
-    // than exact per-overlay geometry (same pragmatic tradeoff resizeHandle's /120 divisor makes).
-    private let rotationHandleRadius: Double = 62
-
-    // SwiftUI delivers DragGesture translation in the GESTURE-ATTACHED view's own local coordinate
-    // space, already adjusted for any ancestor `.rotationEffect` — so at the CURRENT (possibly
-    // already-rotated) orientation, "straight up" from the handle's rest point is still (0, -R) in
-    // this local frame. The finger's current vector from box-center is therefore
-    // (0, -R) + translation; atan2(x, -y) of that vector gives the ADDITIONAL clockwise angle
-    // (SwiftUI's .rotationEffect convention) relative to the box's current rotation — i.e. exactly
-    // `rotationDelta`, added to `overlay.rotation` by `liveRotation` above.
+    // 13-24 K4: measure rotation in the NAMED canvas coordinate space, which does NOT rotate with
+    // the box. Local-space DragGesture previously fed back into itself (handle sits inside
+    // `.rotationEffect`), causing jitter. Grab the absolute angle around basePosition on first
+    // touch, then track the delta; normalize persisted degrees into (−180, 180].
     private var rotationDragGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("overlayCanvas"))
             .onChanged { value in
                 onSelect()
-                let vectorX = value.translation.width
-                let vectorY = -rotationHandleRadius + value.translation.height
-                rotationDelta = atan2(vectorX, -vectorY) * 180 / .pi
+                let center = basePosition
+                let angle = atan2(value.location.y - center.y, value.location.x - center.x)
+                if rotationGrabAngle == nil {
+                    rotationGrabAngle = angle
+                }
+                guard let grab = rotationGrabAngle else { return }
+                rotationDelta = (angle - grab) * 180 / .pi
             }
             .onEnded { _ in
-                let finalRotation = liveRotation
+                var finalRotation = liveRotation
+                // Normalize into (−180, 180] so repeated spins don't accumulate unbounded degrees.
+                finalRotation = finalRotation.truncatingRemainder(dividingBy: 360)
+                if finalRotation > 180 { finalRotation -= 360 }
+                if finalRotation <= -180 { finalRotation += 360 }
                 rotationDelta = 0
+                rotationGrabAngle = nil
                 onRotate(finalRotation)
             }
     }

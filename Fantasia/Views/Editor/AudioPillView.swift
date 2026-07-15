@@ -36,9 +36,8 @@ struct AudioPillView: View {
     let clip: AudioClip
     let pxPerSecond: Double
     let isSelected: Bool
-    /// 13-23 J5: the project's total (video) duration — an audio clip can never render or drag
-    /// past this bound; nothing clamped it before, so a long audio track under a short video drew
-    /// (and retimed) past the visible end of the timeline.
+    /// 13-23 J5 / 13-24 K3: visual strip end in seconds (accounts for clip 30pt min-width floors).
+    /// An audio clip can never render or drag past this bound.
     let totalDuration: Double
     let onSelect: () -> Void
     /// Fires once, on drag release (body move OR either edge-handle retrim), with the final
@@ -73,11 +72,14 @@ struct AudioPillView: View {
     private var trimEnd: Double { previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds) }
     private var duration: Double { max(0, trimEnd - trimStart) }
     private var offsetSeconds: Double { previewOffset ?? clip.startOffsetSeconds }
-    // 13-23 J5: the pill can never draw past the timeline end — clamps the RENDERED duration to
-    // whatever room is left between this clip's own start offset and `totalDuration`, independent
-    // of how long the underlying trimmed source audio actually is.
+    // 13-23 J5 / 13-24 K3: clamp rendered duration to remaining visual-strip room; width never
+    // exceeds the strip end (the 30pt floor yields when remaining room is smaller).
     private var clampedDuration: Double { max(0, min(duration, totalDuration - offsetSeconds)) }
-    private var width: Double { max(clampedDuration * pxPerSecond, 30) }
+    private var width: Double {
+        let maxPx = max(0, (totalDuration - offsetSeconds) * pxPerSecond)
+        let natural = clampedDuration * pxPerSecond
+        return min(max(natural, min(EditorState.clipPillMinWidthPt, maxPx)), maxPx)
+    }
     // The parent row positions this pill via `.offset(x: clip.startOffsetSeconds * pxPerSecond)`
     // using the COMMITTED offset (unchanged until onRetime fires at release) — this local offset
     // compensates during a left-handle drag (which shifts BOTH startOffsetSeconds and trimStart by

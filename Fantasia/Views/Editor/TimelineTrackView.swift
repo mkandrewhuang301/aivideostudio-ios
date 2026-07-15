@@ -176,7 +176,7 @@ struct TimelineTrackView: View {
         GeometryReader { geo in
             let viewportWidth = geo.size.width
             let contentOffset = viewportWidth / 2 - state.currentTime * pxPerSecond
-            let contentWidth = max(state.totalDuration * pxPerSecond, viewportWidth)
+            let contentWidth = max(state.visualStripEndPx(pxPerSecond: pxPerSecond), viewportWidth)
 
             ZStack(alignment: .topLeading) {
                 // 13-22 i2: ONE uniform gray backs the whole 200pt block now — this single fill
@@ -789,40 +789,36 @@ struct TimelineTrackView: View {
     // "＋ Add audio" — grey rounded pill spanning [0, video end], tap opens the SAME AddAudioSheet
     // the bottom bar's Audio action opens (onAddAudio, owned by EditorView).
     //
-    // 13-23 J3: the row-height `.frame` + an explicit `.contentShape` are now BOTH attached here,
-    // directly on the button's own view chain, INSIDE this view rather than as an external wrapper
-    // at the railOverlay call site — "attach the gesture/Button to the pill shape itself... never
-    // to a row/HStack wrapper with extra vertical padding" (13-23 J3). This guarantees the drawn
-    // bounds and the hit-test bounds are defined by the exact same `.frame`/`.contentShape` pair,
-    // so they can never drift apart.
+    // 13-24 K5: the Button's label IS the pill and nothing more — `.contentShape` last, at pill
+    // bounds. The row-centering `.frame(height: trackRowHeight)` wraps OUTSIDE the Button so a tap
+    // 3pt below the pill's bottom edge hits the tracks background (deselect only), never the sheet.
     private var audioPlaceholderPill: some View {
         Button(action: onAddAudio) {
             Text("＋ Add audio")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
-                .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight, alignment: .leading)
+                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: placeholderPillHeight, alignment: .leading)
                 .padding(.leading, 10)
                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                .frame(height: trackRowHeight, alignment: .center)
-                .contentShape(Rectangle())
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+        .frame(height: trackRowHeight, alignment: .center)
         .accessibilityLabel("Add audio")
     }
 
     // Empty grey rounded row spanning [0, video end], tap adds the default "Text" overlay at the
     // playhead (onAddDefaultText, owned by EditorView — the exact same call EditorBottomBar's Text
-    // action already makes). 13-23 J3: same row-height-frame-then-contentShape treatment as
-    // audioPlaceholderPill above.
+    // action already makes). 13-24 K5: same pill-only hit target as audioPlaceholderPill.
     private var textPlaceholderRow: some View {
         Button(action: onAddDefaultText) {
             Color.white.opacity(0.06)
-                .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight)
+                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: placeholderPillHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .frame(height: trackRowHeight, alignment: .center)
-                .contentShape(Rectangle())
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+        .frame(height: trackRowHeight, alignment: .center)
         .accessibilityLabel("Add text")
     }
 
