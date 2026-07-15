@@ -837,12 +837,16 @@ struct EditorView: View {
 
     /// "Text" (default bar) — the exact canonical add TextOverlayTrackRow's row-level "+" used to
     /// make (now removed from that row per Task E; this is its sole surviving call site).
+    /// 13-26 M8.3: the new overlay auto-assigns to the LOWEST text row where
+    /// [currentTime, currentTime + 3] doesn't overlap any existing overlay (possibly a brand-new
+    /// row below the last), and that row is PERSISTED via row_index on the add call.
     private func addDefaultTextOverlay() async {
         let start = state.currentTime, end = state.currentTime + 3
+        let row = lowestFreeTextRow(start: start, end: end)
         let idsBefore = Set(state.project.textOverlays.map(\.id))
         do {
             try await projectManager.addTextOverlay(
-                text: "Text", xNorm: 0.5, yNorm: 0.5, startSeconds: start, endSeconds: end
+                text: "Text", xNorm: 0.5, yNorm: 0.5, rowIndex: row, startSeconds: start, endSeconds: end
             )
             syncProjectFromManager()
             // F8: "add" record — undo deletes the just-created row; redo re-creates it (gets a
@@ -854,7 +858,7 @@ struct EditorView: View {
                     undo: { try await projectManager.deleteTextOverlay(textId: newId) },
                     redo: {
                         try await projectManager.addTextOverlay(
-                            text: "Text", xNorm: 0.5, yNorm: 0.5, startSeconds: start, endSeconds: end
+                            text: "Text", xNorm: 0.5, yNorm: 0.5, rowIndex: row, startSeconds: start, endSeconds: end
                         )
                         if let recreated = projectManager.loadedProject?.textOverlays.last { newId = recreated.id }
                     }
@@ -863,6 +867,22 @@ struct EditorView: View {
         } catch {
             print("[EditorView] addDefaultTextOverlay error: \(error)")
         }
+    }
+
+    /// 13-26 M8.3: lowest text row where [start, end] fits without overlapping any existing
+    /// overlay's time range in that row — rows resolved via the SAME effectiveRows helper the
+    /// track lays out with. May return one row below the current last (creates a new row).
+    private func lowestFreeTextRow(start: Double, end: Double) -> Int {
+        let rowsById = TextOverlayTrackRow.effectiveRows(for: state.project.textOverlays)
+        var intervalsByRow: [Int: [(Double, Double)]] = [:]
+        for overlay in state.project.textOverlays {
+            intervalsByRow[rowsById[overlay.id] ?? 0, default: []].append((overlay.startSeconds, overlay.endSeconds))
+        }
+        var row = 0
+        while (intervalsByRow[row] ?? []).contains(where: { start < $0.1 && end > $0.0 }) {
+            row += 1
+        }
+        return row
     }
 
     /// "Captions" (default bar) — disabled state is enforced by EditorBottomBar itself

@@ -98,7 +98,10 @@ struct TimelineTrackView: View {
     // empty-state placeholder occupies it when there are zero items), captions stays its own
     // fixed single shared rail (CaptionTrackRow's own internal `rowHeight`, 30pt).
     private var audioRowCount: Int { max(1, state.project.audioClips.count) }
-    private var textRowCount: Int { max(1, state.project.textOverlays.count) }
+    // 13-26 M8: text rows are SHARED now — non-overlapping texts sit side-by-side in one row, so
+    // the section height is (max occupied row + 1) × 28, not one row per overlay. Reads the SAME
+    // helper TextOverlayTrackRow lays its pills out with, so the two can never drift.
+    private var textRowCount: Int { TextOverlayTrackRow.rowCount(for: state.project.textOverlays) }
     private var audioSectionHeight: CGFloat { CGFloat(audioRowCount) * trackRowHeight }
     private var textSectionHeight: CGFloat { CGFloat(textRowCount) * trackRowHeight }
     private let captionRailHeight: CGFloat = 30

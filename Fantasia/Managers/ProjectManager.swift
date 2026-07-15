@@ -329,13 +329,15 @@ final class ProjectManager {
         yNorm: Double,
         widthNorm: Double? = nil,
         rotation: Double? = nil,
+        rowIndex: Int? = nil,
         startSeconds: Double,
         endSeconds: Double
     ) async throws {
         guard let id = loadedProject?.id else { return }
         let overlay = try await APIClient.shared.addTextOverlay(
             projectId: id, text: text, xNorm: xNorm, yNorm: yNorm,
-            widthNorm: widthNorm, rotation: rotation, startSeconds: startSeconds, endSeconds: endSeconds
+            widthNorm: widthNorm, rotation: rotation, rowIndex: rowIndex,
+            startSeconds: startSeconds, endSeconds: endSeconds
         )
         loadedProject?.textOverlays.append(overlay)
     }
@@ -347,13 +349,15 @@ final class ProjectManager {
         yNorm: Double? = nil,
         widthNorm: Double? = nil,
         rotation: Double? = nil,
+        rowIndex: Int? = nil,
         startSeconds: Double? = nil,
         endSeconds: Double? = nil
     ) async throws {
         guard let id = loadedProject?.id else { return }
         let overlay = try await APIClient.shared.updateTextOverlay(
             projectId: id, textId: textId, text: text, xNorm: xNorm, yNorm: yNorm,
-            widthNorm: widthNorm, rotation: rotation, startSeconds: startSeconds, endSeconds: endSeconds
+            widthNorm: widthNorm, rotation: rotation, rowIndex: rowIndex,
+            startSeconds: startSeconds, endSeconds: endSeconds
         )
         if let index = loadedProject?.textOverlays.firstIndex(where: { $0.id == textId }) {
             loadedProject?.textOverlays[index] = overlay
@@ -384,6 +388,9 @@ final class ProjectManager {
             yNorm: overlay.yNorm,
             widthNorm: overlay.widthNorm,
             rotation: overlay.rotation,
+            // 13-26 M8: the split-off second half stays on the SAME row — its [split, end] range
+            // can't overlap the shrunk original's [start, split], so the row invariant holds.
+            rowIndex: overlay.rowIndex,
             startSeconds: atLocalSeconds,
             endSeconds: originalEnd
         )

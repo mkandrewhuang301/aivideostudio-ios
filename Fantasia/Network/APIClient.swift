@@ -557,6 +557,7 @@ actor APIClient {
         yNorm: Double,
         widthNorm: Double? = nil,
         rotation: Double? = nil,
+        rowIndex: Int? = nil,
         startSeconds: Double,
         endSeconds: Double
     ) async throws -> TextOverlay {
@@ -566,6 +567,7 @@ actor APIClient {
         ]
         if let widthNorm { body["width_norm"] = widthNorm }
         if let rotation { body["rotation"] = rotation }
+        if let rowIndex { body["row_index"] = rowIndex }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let response: TextOverlayResponse = try await projectRequest(
             path: "api/projects/\(projectId)/text", method: "POST", body: bodyData, expectedStatus: [201]
@@ -582,6 +584,7 @@ actor APIClient {
         yNorm: Double? = nil,
         widthNorm: Double? = nil,
         rotation: Double? = nil,
+        rowIndex: Int? = nil,
         startSeconds: Double? = nil,
         endSeconds: Double? = nil
     ) async throws -> TextOverlay {
@@ -591,6 +594,7 @@ actor APIClient {
         if let yNorm { body["y_norm"] = yNorm }
         if let widthNorm { body["width_norm"] = widthNorm }
         if let rotation { body["rotation"] = rotation }
+        if let rowIndex { body["row_index"] = rowIndex }
         if let startSeconds { body["start_seconds"] = startSeconds }
         if let endSeconds { body["end_seconds"] = endSeconds }
         let bodyData = try JSONSerialization.data(withJSONObject: body)

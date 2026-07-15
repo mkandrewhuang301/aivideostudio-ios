@@ -103,6 +103,10 @@ struct TextOverlay: Codable, Identifiable, Equatable {
     // Degrees, CLOCKWISE-positive (matches SwiftUI .rotationEffect) — 13-19 Task G3/H. Defaults to
     // 0 when absent so decoding a pre-migration row (or a slim mutation response) never crashes.
     var rotation: Double
+    // Plan 13-26 M8: which timeline text row this overlay is pinned to (0-based). Nullable —
+    // legacy rows (and overlays never explicitly placed) fall back to the client-side greedy row
+    // assignment (TextOverlayTrackRow.effectiveRows).
+    var rowIndex: Int?
     var startSeconds: Double
     var endSeconds: Double
 
@@ -112,6 +116,7 @@ struct TextOverlay: Codable, Identifiable, Equatable {
         case yNorm = "y_norm"
         case widthNorm = "width_norm"
         case rotation
+        case rowIndex = "row_index"
         case startSeconds = "start_seconds"
         case endSeconds = "end_seconds"
     }
@@ -124,6 +129,7 @@ struct TextOverlay: Codable, Identifiable, Equatable {
         yNorm = try container.decode(Double.self, forKey: .yNorm)
         widthNorm = try container.decodeIfPresent(Double.self, forKey: .widthNorm)
         rotation = (try? container.decodeIfPresent(Double.self, forKey: .rotation)) ?? 0
+        rowIndex = try? container.decodeIfPresent(Int.self, forKey: .rowIndex)
         startSeconds = try container.decode(Double.self, forKey: .startSeconds)
         endSeconds = try container.decode(Double.self, forKey: .endSeconds)
     }
@@ -135,6 +141,7 @@ struct TextOverlay: Codable, Identifiable, Equatable {
         yNorm: Double,
         widthNorm: Double? = nil,
         rotation: Double = 0,
+        rowIndex: Int? = nil,
         startSeconds: Double,
         endSeconds: Double
     ) {
@@ -144,6 +151,7 @@ struct TextOverlay: Codable, Identifiable, Equatable {
         self.yNorm = yNorm
         self.widthNorm = widthNorm
         self.rotation = rotation
+        self.rowIndex = rowIndex
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
     }
