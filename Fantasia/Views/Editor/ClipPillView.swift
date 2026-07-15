@@ -1,11 +1,11 @@
 // ClipPillView.swift
 // Fantasia
-// Phase 13, Plan 12: one clip rendered as a filmstrip pill (SC2) — select / body-drag reorder /
-// edge-handle trim / delete. Gesture layering reproduces Spike 001's CuePillView.swift verbatim
+// Phase 13, Plan 12: one clip rendered as a filmstrip pill (SC2) — select / edge-handle trim /
+// delete. Gesture layering reproduces Spike 001's CuePillView.swift verbatim
 // (.planning/spikes/001-caption-timing-drag/Sources/CuePillView.swift, VALIDATED on-device):
-// `.contentShape(Rectangle()).onTapGesture{onSelect()}.highPriorityGesture(bodyDragGesture)`, plus
-// a `.highPriorityGesture` on each 22pt-wide invisible edge-handle overlay — SwiftUI's topmost-
-// view-at-touch-point hit-testing is what keeps body-drag/edge-handle/background-scrub from
+// `.contentShape(Rectangle()).onTapGesture{onSelect()}.highPriorityGesture(...)`, plus a
+// `.highPriorityGesture` on each 22pt-wide invisible edge-handle overlay — SwiftUI's topmost-
+// view-at-touch-point hit-testing is what keeps a pill's own gestures / background-scrub from
 // stealing each other's touches, no manual gesture-priority juggling needed.
 //
 // 22pt edge handles / this pill's 58pt height are EXEMPT from the 44pt HIG minimum (13-UI-SPEC.md
@@ -17,9 +17,20 @@
 // this needs many small per-clip/per-cell frames that never need to survive an app relaunch).
 // Image clips render a single AsyncImage fill. While loading or on failure, the original
 // gradient+glyph placeholder still shows.
+//
+// 13-22 i12: CapCut-style long-press reorder REPLACES the old plain-drag body reorder entirely.
+// A plain drag on a clip's body no longer attaches to anything here — it falls through to
+// TimelineTrackView's background scrubGesture (CapCut behavior: dragging a clip scrubs). Only a
+// LongPressGesture(minimumDuration: 0.35).sequenced(before: DragGesture()) engages reorder mode;
+// TimelineTrackView (the caller, which alone knows the full clip list) owns ALL cross-clip state
+// (reorderingClipId/liveOrder/slot math) — this view only reports lift/drag/end events up and
+// renders itself differently (collapsed uniform square, floating+scaled+shadowed if it's the
+// dragged one) based on the `isReordering`/`isBeingDragged`/`dragOffsetX` inputs the caller feeds
+// back down.
 
 import SwiftUI
 import AVFoundation
+import UIKit
 
 struct ClipPillView: View {
     let clip: ProjectClip
@@ -30,15 +41,30 @@ struct ClipPillView: View {
     /// live magnification delta (which would otherwise thrash AVAssetImageGenerator on every
     /// frame of the pinch). Cell count recomputes/reloads once the pinch ends.
     let isZooming: Bool
+    /// 13-22 i12: true for EVERY clip while ANY clip is in reorder mode — collapses this pill to
+    /// the uniform 46×58 square regardless of whether IT is the one being dragged.
+    let isReordering: Bool
+    /// 13-22 i12: true ONLY for the one clip currently lifted — applies the floating/scaled/
+    /// shadowed/z-raised treatment + the duration badge.
+    let isBeingDragged: Bool
+    /// 13-22 i12: the CALLER's computed visual offset for the dragged clip (already compensated
+    /// for however much its own slot has shifted in the caller's `liveOrder` — see
+    /// TimelineTrackView.draggedClipVisualOffsetX's doc comment). Ignored unless `isBeingDragged`.
+    let dragOffsetX: CGFloat
     let onSelect: () -> Void
-    /// Fires once, on drag release, with the final horizontal translation (points) — the CALLER
-    /// (TimelineTrackView) resolves this into a target index + `sort_order` PATCH; this view never
-    /// mutates `sort_order` itself, only previews the live drag.
-    let onReorder: (CGFloat) -> Void
     /// Fires live, on every edge-handle drag change, with the clip's updated (trimStart, trimEnd)
     /// in seconds — the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
     let onTrimChange: (Double, Double) -> Void
-    @State private var dragTranslation: CGFloat = 0
+    /// 13-22 i12: fires once the long-press succeeds (before any drag movement) — the caller
+    /// enters reorder mode, selects this clip, and gives the medium haptic.
+    let onReorderLift: () -> Void
+    /// Fires on every drag-phase change once reorder mode is active, with the RAW horizontal
+    /// translation (points) from the lift point — the caller updates its live slot math.
+    let onReorderChanged: (CGFloat) -> Void
+    /// Fires once, on release (or cancellation) — the caller commits the drop (or no-ops if
+    /// nothing moved) and exits reorder mode.
+    let onReorderEnded: () -> Void
+
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
     // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
@@ -58,19 +84,23 @@ struct ClipPillView: View {
     // Tiny in-memory-only cache — deliberately NOT ThumbnailCache.shared (see file header).
     private static let filmstripCache = NSCache<NSString, UIImage>()
     private let cellWidth: CGFloat = 46
+    // 13-22 i12: uniform collapsed size while reordering (46×58, per spec).
+    private let reorderSlotWidth: CGFloat = 46
 
     private var trimStart: Double { previewTrimStart ?? clip.trimStartSeconds }
     private var trimEnd: Double {
         previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
     }
-    private var width: Double { max((trimEnd - trimStart) * pxPerSecond, 30) }
+    private var duration: Double { max(0, trimEnd - trimStart) }
+    private var width: Double { max(duration * pxPerSecond, 30) }
+    private var effectiveWidth: Double { isReordering ? reorderSlotWidth : width }
     // 13-22 i4: this pill sits in a plain leading-anchored HStack (clipRow) — growing/shrinking
     // its OWN `.frame(width:)` only ever moves the TRAILING edge (HStack repositions subsequent
     // siblings, but this pill's own leading edge is fixed by the cumulative width of EARLIER
     // siblings). A left-handle drag needs the LEADING edge to visually track the finger instead —
     // this local `.offset` compensates by exactly the trimStart delta, which also happens to keep
     // the trailing edge visually fixed (matches every trim-handle UX convention). Zero during a
-    // right-handle or body drag (trimStart stays at its committed value in both cases).
+    // right-handle drag, and irrelevant while reordering (handles are hidden then).
     private var trimHandleOffsetX: CGFloat { CGFloat(trimStart - clip.trimStartSeconds) * pxPerSecond }
     private var cellCount: Int { max(1, Int((width / cellWidth).rounded(.up))) }
     private var effectiveCellCount: Int { isZooming ? committedCellCount : cellCount }
@@ -93,22 +123,33 @@ struct ClipPillView: View {
         .overlay(alignment: .leading) {
             Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1)
         }
-        .frame(width: width, height: 58)
+        .frame(width: effectiveWidth, height: 58)
+        // 13-22 i12: floating/scaled/shadowed/z-raised treatment for the ONE dragged clip; every
+        // OTHER clip (including this one when idle) stays flat. The collapse/expand of
+        // `effectiveWidth` above and this scale/shadow both animate via the `.animation` below.
+        .scaleEffect(isBeingDragged ? 1.06 : 1.0)
+        .shadow(color: .black.opacity(isBeingDragged ? 0.4 : 0), radius: isBeingDragged ? 10 : 0, y: isBeingDragged ? 4 : 0)
+        .zIndex(isBeingDragged ? 10 : 0)
+        .overlay(alignment: .top) {
+            if isBeingDragged {
+                durationBadge.offset(y: -22)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
-        .highPriorityGesture(bodyDragGesture)
+        .highPriorityGesture(reorderGesture)
         .overlay(alignment: .leading) {
-            if isSelected { handle.highPriorityGesture(leftHandleGesture) }
+            if isSelected && !isReordering { handle.highPriorityGesture(leftHandleGesture) }
         }
         .overlay(alignment: .trailing) {
-            if isSelected { handle.highPriorityGesture(rightHandleGesture) }
+            if isSelected && !isReordering { handle.highPriorityGesture(rightHandleGesture) }
         }
         // F2 (Plan 13-21): offset is now the LAST modifier — after the selection stroke and every
-        // handle overlay — so the entire assembly (pill body + handles) translates together during
-        // a body drag. Previously offset was applied BEFORE the overlays, so only the pill body
-        // moved live while the handles stayed pinned to the pre-drag layout position until the
-        // drag ended and the whole view re-rendered ("handles snap into place after release").
-        .offset(x: dragTranslation + trimHandleOffsetX)
+        // handle overlay — so the entire assembly (pill body + handles) translates together.
+        // 13-22 i12: while reordering, trimHandleOffsetX is always 0 (handles hidden, preview
+        // vars never populated) — only the dragged clip's own `dragOffsetX` applies here.
+        .offset(x: isBeingDragged ? dragOffsetX : trimHandleOffsetX)
+        .animation(.spring(duration: 0.25), value: isReordering)
         .task(id: "\(clip.id)-\(clip.url ?? "")-\(effectiveCellCount)") {
             guard clip.mediaType != "image" else { return }
             await loadFilmstripIfNeeded()
@@ -121,11 +162,15 @@ struct ClipPillView: View {
         }
     }
 
-    // MARK: - Media preview (13-20 i5)
+    // MARK: - Media preview (13-20 i5, extended 13-22 i12)
 
     @ViewBuilder
     private var mediaContent: some View {
-        if clip.mediaType == "image" {
+        if isReordering {
+            // i12: "first filmstrip cell as its thumb, clipped" — a single un-stretched frame
+            // filling the uniform square, not the multi-cell stretched strip below.
+            reorderThumb
+        } else if clip.mediaType == "image" {
             if let urlString = clip.url, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
@@ -164,6 +209,36 @@ struct ClipPillView: View {
         } else {
             placeholderGlyph
         }
+    }
+
+    @ViewBuilder
+    private var reorderThumb: some View {
+        if clip.mediaType == "image" {
+            if let urlString = clip.url, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        placeholderGlyph
+                    }
+                }
+            } else {
+                placeholderGlyph
+            }
+        } else if let firstFrame = filmstripFrames[0] {
+            Image(uiImage: firstFrame).resizable().scaledToFill()
+        } else {
+            placeholderGlyph
+        }
+    }
+
+    private var durationBadge: some View {
+        Text(String(format: "%.1fs", duration))
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.75), in: Capsule())
     }
 
     private var placeholderGlyph: some View {
@@ -207,18 +282,29 @@ struct ClipPillView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - Body drag (reorder preview — CALLER performs the sort_order PATCH on release)
+    // MARK: - 13-22 i12: long-press-to-lift reorder. A plain (non-held) drag never satisfies
+    // LongPressGesture's minimumDuration and SwiftUI fails the whole sequence, letting the touch
+    // fall through to TimelineTrackView's background scrubGesture — a quick drag on a clip scrubs
+    // (CapCut behavior); only a genuine 0.35s hold engages reorder mode. `.first(true)` (the long
+    // press succeeding) is idempotency-guarded by the CALLER (TimelineTrackView.startReorder
+    // no-ops if this clip is already the one being dragged), since SwiftUI may deliver that case
+    // more than once before the sequence advances to `.second`.
 
-    private var bodyDragGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
+    private var reorderGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.35)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
             .onChanged { value in
-                onSelect()
-                dragTranslation = value.translation.width
+                switch value {
+                case .first(true):
+                    onReorderLift()
+                case .second(true, let drag):
+                    if let drag { onReorderChanged(drag.translation.width) }
+                default:
+                    break
+                }
             }
-            .onEnded { value in
-                let finalTranslation = value.translation.width
-                dragTranslation = 0
-                onReorder(finalTranslation)
+            .onEnded { _ in
+                onReorderEnded()
             }
     }
 

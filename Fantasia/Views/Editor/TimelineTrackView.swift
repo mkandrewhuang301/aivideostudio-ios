@@ -32,6 +32,7 @@
 //   rectangles. Playhead line now reaches the bottom of the whole 200pt block.
 
 import SwiftUI
+import UIKit
 
 struct TimelineTrackView: View {
     @Environment(ProjectManager.self) private var projectManager
@@ -128,6 +129,18 @@ struct TimelineTrackView: View {
 
     // F5: pinch-to-zoom start value, captured on the gesture's first change.
     @State private var pinchStartPxPerSecond: Double? = nil
+
+    // MARK: - 13-22 i12: long-press reorder state. `liveOrder` is a LOCAL preview ordering (clip
+    // IDs) distinct from the server-authoritative `sortedClips` — only ever populated while
+    // `reorderingClipId != nil`, reset to empty on drop. `reorderOriginalIndex` is the dragged
+    // clip's index in `sortedClips` at LIFT time — see `draggedClipVisualOffsetX`'s doc comment
+    // for why it's needed (keeps the dragged clip tracking the raw finger position even as its
+    // own slot shifts within `liveOrder` during the drag).
+    @State private var reorderingClipId: String? = nil
+    @State private var reorderDragX: CGFloat = 0
+    @State private var liveOrder: [String] = []
+    @State private var reorderOriginalIndex: Int? = nil
+    private let reorderSlotWidth: CGFloat = 46
 
     var body: some View {
         GeometryReader { geo in
@@ -279,6 +292,8 @@ struct TimelineTrackView: View {
     private var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
+                // 13-22 i12: suppressed while reorder mode is active.
+                guard reorderingClipId == nil else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
@@ -300,6 +315,8 @@ struct TimelineTrackView: View {
     private var tracksGesture: some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
+                // 13-22 i12: suppressed while reorder mode is active.
+                guard reorderingClipId == nil else { return }
                 if tracksDragAxis == nil {
                     tracksDragAxis = abs(value.translation.width) >= abs(value.translation.height) ? .horizontal : .vertical
                     switch tracksDragAxis {
@@ -333,6 +350,8 @@ struct TimelineTrackView: View {
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
+                // 13-22 i12: suppressed while reorder mode is active.
+                guard reorderingClipId == nil else { return }
                 if pinchStartPxPerSecond == nil {
                     pinchStartPxPerSecond = state.pxPerSecond
                     state.isZooming = true
@@ -459,6 +478,31 @@ struct TimelineTrackView: View {
         state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    // 13-22 i12: while reorder mode is active, the clip row renders in `liveOrder`'s LOCAL preview
+    // order instead of the server-authoritative `sortedClips` — SwiftUI's ForEach animates the
+    // shuffle automatically whenever `liveOrder` changes (id-based diffing), which is exactly the
+    // "other clips animate aside" effect the plan asks for.
+    private var displayOrderClips: [ProjectClip] {
+        guard reorderingClipId != nil, !liveOrder.isEmpty else { return sortedClips }
+        let byId = Dictionary(uniqueKeysWithValues: sortedClips.map { ($0.id, $0) })
+        return liveOrder.compactMap { byId[$0] }
+    }
+
+    /// 13-22 i12: the dragged clip's own slot in `liveOrder` moves as the array reorders (so its
+    /// NEIGHBORS can animate aside via plain HStack/ForEach diffing) — without compensation the
+    /// dragged clip's rendered position would jump by however much ITS OWN slot just moved, on
+    /// top of the raw finger delta. This term cancels exactly that (same shape as i14's
+    /// edgeScrollCompensationX): `reorderDragX` is the RAW translation from the lift point;
+    /// subtracting how far the slot has drifted from its ORIGINAL index leaves pure finger-
+    /// tracking, so the dragged clip floats smoothly under the finger regardless of how much the
+    /// array has reordered underneath it.
+    private var draggedClipVisualOffsetX: CGFloat {
+        guard let reorderingClipId, let originalIndex = reorderOriginalIndex,
+              let currentIndex = liveOrder.firstIndex(of: reorderingClipId) else { return 0 }
+        let slotShift = CGFloat(currentIndex - originalIndex) * reorderSlotWidth
+        return reorderDragX - slotShift
+    }
+
     private func clipRow(viewportWidth: CGFloat) -> some View {
         // 13-22 i3: spacing 3 → 0 — every clip-gap pixel the old `spacing: 3` inserted was pixel
         // math the time↔pixel conversion never accounted for, so the visual strip end drifted
@@ -466,17 +510,22 @@ struct TimelineTrackView: View {
         // playhead could never quite reach the last scene. Visual separation between adjacent
         // clips now comes from ClipPillView's own 1pt leading-edge divider instead of a real gap.
         HStack(spacing: 0) {
-            ForEach(sortedClips) { clip in
+            ForEach(displayOrderClips) { clip in
                 ClipPillView(
                     clip: clip,
                     pxPerSecond: pxPerSecond,
                     isSelected: state.selection == .clip(clip.id),
                     isZooming: state.isZooming,
+                    isReordering: reorderingClipId != nil,
+                    isBeingDragged: reorderingClipId == clip.id,
+                    dragOffsetX: reorderingClipId == clip.id ? draggedClipVisualOffsetX : 0,
                     onSelect: { selectClip(clip) },
-                    onReorder: { translation in handleReorder(clip: clip, translation: translation) },
                     onTrimChange: { newStart, newEnd in
                         Task { await updateClipTrim(clipId: clip.id, start: newStart, end: newEnd) }
-                    }
+                    },
+                    onReorderLift: { startReorder(clip: clip) },
+                    onReorderChanged: { translation in updateReorderDrag(clip: clip, translation: translation) },
+                    onReorderEnded: { commitReorder(clip: clip) }
                 )
             }
         }
@@ -749,41 +798,65 @@ struct TimelineTrackView: View {
         }
     }
 
-    /// Live-preview drag ends here: `translation` is the final horizontal drag distance (points).
-    /// Converts it to a target index by comparing the dragged clip's projected new center against
-    /// every clip's timeline position, then PATCHes the dragged clip's `sort_order` to the target
-    /// neighbor's current value — the backend is trusted to resequence the rest, mirroring the
-    /// same `sortOrder` reorder contract `ProjectManager.updateAudioClip` already exposes.
-    private func handleReorder(clip: ProjectClip, translation: CGFloat) {
+    // MARK: - 13-22 i12: CapCut-style long-press reorder. `startReorder` enters reorder mode on a
+    // successful long-press lift; `updateReorderDrag` runs on every drag-phase change, projecting
+    // the dragged clip's slot from its floating CENTER against uniform `reorderSlotWidth`-wide
+    // slots and reordering `liveOrder` (with a spring animation + a light haptic) whenever that
+    // projected slot changes; `commitReorder` fires on release, persisting via the EXISTING
+    // `sortOrder` PATCH contract `handleReorder` used to (reused verbatim: PATCH the dragged
+    // clip's sort_order to whatever clip currently occupies the target slot's value).
+
+    private func startReorder(clip: ProjectClip) {
+        // Idempotency guard — the long-press `.first(true)` phase inside ClipPillView's sequenced
+        // gesture may deliver more than once before the sequence advances to `.second`.
+        guard reorderingClipId != clip.id else { return }
         let clips = sortedClips
-        guard let currentIndex = clips.firstIndex(where: { $0.id == clip.id }) else { return }
-        guard translation != 0 else { return }
+        guard let index = clips.firstIndex(where: { $0.id == clip.id }) else { return }
+        liveOrder = clips.map(\.id)
+        reorderingClipId = clip.id
+        reorderOriginalIndex = index
+        reorderDragX = 0
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        state.select(.clip(clip.id))
+    }
 
-        var starts: [Double] = []
-        var acc = 0.0
-        for c in clips {
-            starts.append(acc)
-            acc += duration(of: c)
+    private func updateReorderDrag(clip: ProjectClip, translation: CGFloat) {
+        guard reorderingClipId == clip.id, let originalIndex = reorderOriginalIndex else { return }
+        reorderDragX = translation
+        guard let currentIndex = liveOrder.firstIndex(of: clip.id) else { return }
+
+        let projectedCenterX = (CGFloat(originalIndex) + 0.5) * reorderSlotWidth + translation
+        var targetIndex = Int((projectedCenterX / reorderSlotWidth).rounded(.down))
+        targetIndex = max(0, min(targetIndex, liveOrder.count - 1))
+
+        guard targetIndex != currentIndex else { return }
+        withAnimation(.spring(duration: 0.25)) {
+            let movedId = liveOrder.remove(at: currentIndex)
+            liveOrder.insert(movedId, at: targetIndex)
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func commitReorder(clip: ProjectClip) {
+        guard reorderingClipId == clip.id else { return }
+        defer {
+            reorderingClipId = nil
+            reorderOriginalIndex = nil
+            reorderDragX = 0
+            liveOrder = []
         }
 
-        let deltaSeconds = Double(translation) / pxPerSecond
-        let newCenter = starts[currentIndex] + duration(of: clip) / 2 + deltaSeconds
-
-        var targetIndex = clips.count - 1
-        for (index, c) in clips.enumerated() {
-            if newCenter < starts[index] + duration(of: c) / 2 {
-                targetIndex = index
-                break
-            }
-        }
-        guard targetIndex != currentIndex, clips.indices.contains(targetIndex) else { return }
-
+        let clips = sortedClips
+        guard let targetIndex = liveOrder.firstIndex(of: clip.id), clips.indices.contains(targetIndex) else { return }
         let targetSortOrder = clips[targetIndex].sortOrder
-        // F8: reorder fires ONCE at drag release (unlike trim), so this records directly — no
-        // debounce needed. Best-effort undo: re-PATCHes the dragged clip's OWN sort_order back to
-        // its pre-drag value (a multi-clip reorder cascade on the server isn't fully replayed in
+        guard targetSortOrder != clip.sortOrder else { return } // dropped back where it started
+
+        // F8: reorder fires ONCE at drop (unlike trim), so this records directly — no debounce
+        // needed. Best-effort undo: re-PATCHes the dragged clip's OWN sort_order back to its
+        // pre-drag value (a multi-clip reorder cascade on the server isn't fully replayed in
         // reverse for every OTHER clip it may have resequenced — acceptable v1 tradeoff, matches
-        // typical editor undo scope).
+        // typical editor undo scope — same deviation 13-21 already documented for the old
+        // plain-drag reorder this replaces).
         let previousSortOrder = clip.sortOrder
         Task {
             do {
