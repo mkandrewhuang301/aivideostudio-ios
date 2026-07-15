@@ -46,10 +46,10 @@ struct TimelineTrackView: View {
     /// `addDefaultTextOverlay()` EditorBottomBar's Text action already calls.
     let onAddDefaultText: () -> Void
 
-    // Shared with ClipPillView/TextOverlayPillView/AudioPillView/CaptionPillView's own x-offset
-    // math — kept a single constant per 13-20's explicit out-of-scope note (pinch-zoom is future
-    // work; this must stay the only place `44` is hard-coded as the timeline's px/second).
-    let pxPerSecond: Double = 44
+    // F5 (Plan 13-21): now forwards to the shared `state.pxPerSecond` (moved off this file's old
+    // hard-coded `let pxPerSecond: Double = 44` so the pinch gesture below and every pill/row/ruler
+    // consumer — all of which already read `pxPerSecond` from this view — see the SAME live value).
+    private var pxPerSecond: Double { state.pxPerSecond }
 
     // MARK: - Layout constants (13-20 i2/i3/i4 — pixel-level source of truth is the locked sketch)
 
@@ -116,6 +116,9 @@ struct TimelineTrackView: View {
     @State private var tracksScrubStartTime: Double? = nil
     @State private var tracksScrollStartY: CGFloat? = nil
 
+    // F5: pinch-to-zoom start value, captured on the gesture's first change.
+    @State private var pinchStartPxPerSecond: Double? = nil
+
     var body: some View {
         GeometryReader { geo in
             let viewportWidth = geo.size.width
@@ -167,6 +170,12 @@ struct TimelineTrackView: View {
                 .offset(y: fixedRegionHeight)
             }
             .clipped()
+            // F5: pinch-to-zoom over the WHOLE timeline block (ruler + clip row + tracks viewport),
+            // simultaneous with every other gesture here — `contentOffset`/`-tracksScrollY` above
+            // both derive from `state.currentTime`/`pxPerSecond`, not a separate scroll-position
+            // variable, so changing `pxPerSecond` alone re-centers the content around the
+            // screen-fixed playhead automatically (no separate "anchor at playhead" math needed).
+            .simultaneousGesture(magnificationGesture)
             .overlay(alignment: .top) {
                 // Fixed-center playhead (Task B.4) — content (ruler + clip row + track rows)
                 // translates under this via .offset() above; the playhead itself never moves.
@@ -287,24 +296,57 @@ struct TimelineTrackView: View {
             }
     }
 
-    // MARK: - Ruler (13-20 i4.3): per the sketch's `renderRuler` — a label EVERY second, centered
-    // on its tick x, plus a dot at every half-second. No tick rectangles.
+    // MARK: - Pinch-to-zoom (F5, Plan 13-21)
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                if pinchStartPxPerSecond == nil {
+                    pinchStartPxPerSecond = state.pxPerSecond
+                    state.isZooming = true
+                }
+                guard let start = pinchStartPxPerSecond else { return }
+                state.pxPerSecond = min(max(start * value, 12), 120)
+            }
+            .onEnded { _ in
+                pinchStartPxPerSecond = nil
+                state.isZooming = false
+            }
+    }
+
+    // MARK: - Ruler (F5, Plan 13-21): ADAPTIVE label interval — the first of [1, 2, 5, 10, 30, 60]
+    // seconds where `interval * pxPerSecond >= 56` (labels never crowd closer than ~56pt apart).
+    // At the default 44px/s that's 2s labels; pinch in far enough and it steps down to 1s, pinch
+    // out and it steps up through 5s/10s/30s/60s. A dot marks the MIDPOINT between each pair of
+    // labels (was: a fixed dot every 0.5s, independent of the label interval — 13-20 i4.3).
+
+    private static let labelIntervalCandidates: [Double] = [1, 2, 5, 10, 30, 60]
+
+    private var labelInterval: Double {
+        Self.labelIntervalCandidates.first { $0 * pxPerSecond >= 56 } ?? Self.labelIntervalCandidates.last!
+    }
 
     private func ruler(contentWidth: Double) -> some View {
-        let totalSeconds = max(Int(state.totalDuration.rounded(.up)), 1)
+        let interval = labelInterval
+        let totalSeconds = max(state.totalDuration, 1)
+        let lastLabelSec = (totalSeconds / interval).rounded(.up) * interval
+        let labelCount = max(Int((lastLabelSec / interval).rounded()) + 1, 1)
+
         return ZStack(alignment: .topLeading) {
-            ForEach(0...totalSeconds, id: \.self) { sec in
-                Text(Self.formatTime(Double(sec)))
+            ForEach(0..<labelCount, id: \.self) { i in
+                let sec = Double(i) * interval
+                Text(Self.formatTime(sec))
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.45))
                     .fixedSize()
-                    .position(x: Double(sec) * pxPerSecond, y: 7)
+                    .position(x: sec * pxPerSecond, y: 7)
             }
-            ForEach(0..<totalSeconds, id: \.self) { sec in
+            ForEach(0..<max(labelCount - 1, 0), id: \.self) { i in
+                let midSec = (Double(i) + 0.5) * interval
                 Circle()
                     .fill(rulerDotColor)
                     .frame(width: 3, height: 3)
-                    .position(x: (Double(sec) + 0.5) * pxPerSecond, y: 16)
+                    .position(x: midSec * pxPerSecond, y: 16)
             }
         }
         .frame(width: contentWidth, height: rulerHeight, alignment: .topLeading)
@@ -385,6 +427,7 @@ struct TimelineTrackView: View {
                     clip: clip,
                     pxPerSecond: pxPerSecond,
                     isSelected: state.selection == .clip(clip.id),
+                    isZooming: state.isZooming,
                     onSelect: { selectClip(clip) },
                     onReorder: { translation in handleReorder(clip: clip, translation: translation) },
                     onTrimChange: { newStart, newEnd in

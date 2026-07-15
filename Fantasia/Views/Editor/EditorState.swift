@@ -48,6 +48,18 @@ final class EditorState {
     var editRequestedTextId: String?
     var editRequestedCaptionId: String?
 
+    /// Plan 13-21 F5: the timeline's shared px-per-second zoom level — moved here from
+    /// TimelineTrackView's local constant so the pinch gesture (TimelineTrackView) and every pill/
+    /// row/ruler consumer read the SAME live value. Clamped to [12, 120] by the pinch gesture
+    /// itself; 44 (the original hard-coded constant) stays the default so nothing else changes at
+    /// rest.
+    var pxPerSecond: Double = 44
+
+    /// Plan 13-21 F5: true for the duration of an active pinch gesture — ClipPillView uses this to
+    /// avoid recomputing its filmstrip cell count (and re-triggering AVAssetImageGenerator loads)
+    /// on every live magnification delta; existing frames just stretch until the pinch ends.
+    var isZooming = false
+
     init(project: EditProject) {
         self.project = project
         self.aspectRatio = project.aspectRatio

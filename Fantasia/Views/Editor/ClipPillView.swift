@@ -25,6 +25,11 @@ struct ClipPillView: View {
     let clip: ProjectClip
     let pxPerSecond: Double
     let isSelected: Bool
+    /// F5 (Plan 13-21): true for the duration of an active pinch gesture — while true, the
+    /// filmstrip keeps rendering at its LAST COMMITTED cell count instead of recomputing on every
+    /// live magnification delta (which would otherwise thrash AVAssetImageGenerator on every
+    /// frame of the pinch). Cell count recomputes/reloads once the pinch ends.
+    let isZooming: Bool
     let onSelect: () -> Void
     /// Fires once, on drag release, with the final horizontal translation (points) — the CALLER
     /// (TimelineTrackView) resolves this into a target index + `sort_order` PATCH; this view never
@@ -37,6 +42,9 @@ struct ClipPillView: View {
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
     @State private var filmstripFrames: [Int: UIImage] = [:]
+    // F5: the cell count actually rendered/loaded — only syncs to the live `cellCount` when NOT
+    // mid-pinch (see `isZooming` doc comment above).
+    @State private var committedCellCount: Int = 1
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)      // #8C59FF
 
@@ -50,6 +58,7 @@ struct ClipPillView: View {
     }
     private var width: Double { max((trimEnd - trimStart) * pxPerSecond, 30) }
     private var cellCount: Int { max(1, Int((width / cellWidth).rounded(.up))) }
+    private var effectiveCellCount: Int { isZooming ? committedCellCount : cellCount }
 
     var body: some View {
         ZStack {
@@ -79,9 +88,15 @@ struct ClipPillView: View {
         // moved live while the handles stayed pinned to the pre-drag layout position until the
         // drag ended and the whole view re-rendered ("handles snap into place after release").
         .offset(x: dragTranslation)
-        .task(id: "\(clip.id)-\(clip.url ?? "")-\(cellCount)") {
+        .task(id: "\(clip.id)-\(clip.url ?? "")-\(effectiveCellCount)") {
             guard clip.mediaType != "image" else { return }
             await loadFilmstripIfNeeded()
+        }
+        .onAppear { committedCellCount = cellCount }
+        // F5: the pinch just ended — resync to whatever cellCount the final width settled at,
+        // which re-triggers the .task above (effectiveCellCount now tracks live cellCount again).
+        .onChange(of: isZooming) { wasZooming, nowZooming in
+            if wasZooming, !nowZooming { committedCellCount = cellCount }
         }
     }
 
@@ -102,8 +117,16 @@ struct ClipPillView: View {
                 placeholderGlyph
             }
         } else if !filmstripFrames.isEmpty {
+            // F5: renders at `effectiveCellCount` (frozen during a pinch), then `.scaleEffect`s the
+            // whole strip horizontally to match the LIVE `width` — existing frames visibly stretch
+            // as the user pinches instead of the grid abruptly adding/removing cells (which would
+            // otherwise re-trigger an AVAssetImageGenerator load burst on every magnification
+            // delta). The scale factor collapses back to ~1 the instant the pinch ends and
+            // `effectiveCellCount` resyncs to the live `cellCount`.
+            let renderedCellCount = effectiveCellCount
+            let nominalWidth = CGFloat(renderedCellCount) * cellWidth
             HStack(spacing: 0) {
-                ForEach(0..<cellCount, id: \.self) { index in
+                ForEach(0..<renderedCellCount, id: \.self) { index in
                     Group {
                         if let frame = filmstripFrames[index] {
                             Image(uiImage: frame).resizable().scaledToFill()
@@ -114,6 +137,8 @@ struct ClipPillView: View {
                     .frame(width: cellWidth)
                 }
             }
+            .frame(width: nominalWidth, height: 58, alignment: .leading)
+            .scaleEffect(x: nominalWidth > 0 ? width / nominalWidth : 1, y: 1, anchor: .leading)
             .frame(width: width, height: 58, alignment: .leading)
         } else {
             placeholderGlyph
@@ -133,7 +158,7 @@ struct ClipPillView: View {
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 92, height: 116)
 
-        for index in 0..<cellCount {
+        for index in 0..<effectiveCellCount {
             if Task.isCancelled { return }
             let cacheKey = "\(clip.id)-\(index)" as NSString
             if let cached = Self.filmstripCache.object(forKey: cacheKey) {
