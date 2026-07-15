@@ -168,21 +168,21 @@ struct TimelineTrackView: View {
                 // (above) stay fixed. Vertical scroll is fully manual (F13 — see tracksScrollY's
                 // doc comment); horizontal scrub still works via the SAME axis-locked gesture.
                 ZStack(alignment: .topLeading) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
-                        TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
-                        CaptionTrackRow(state: state, pxPerSecond: pxPerSecond)
+                    ZStack(alignment: .topLeading) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
+                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
+                            CaptionTrackRow(state: state, pxPerSecond: pxPerSecond)
+                        }
+
+                        // 13-22 i11 (user decision): rail tiles (♪/T) + empty-state placeholders
+                        // now live in CONTENT coordinates — same ZStack, same offset transform as
+                        // the pills above — so they scroll away with the clips as you scrub
+                        // deeper, instead of staying pinned to the viewport.
+                        railOverlay
                     }
                     .frame(width: contentWidth, alignment: .leading)
                     .offset(x: contentOffset, y: -tracksScrollY)
-
-                    // F12: left rail tiles (♪/T) + empty-state placeholders — pinned in VIEWPORT
-                    // coordinates (translate with tracksScrollY only, never with contentOffset, so
-                    // they never scrub horizontally). Drawn AFTER the pills layer above, so they
-                    // naturally occlude pills scrolling underneath (same layering trick the
-                    // play-box dock uses over the clip row) with no separate backdrop needed.
-                    railOverlay(viewportWidth: viewportWidth)
-                        .offset(y: -tracksScrollY)
                 }
                 .frame(width: viewportWidth, height: tracksViewportHeight, alignment: .topLeading)
                 .clipped()
@@ -592,37 +592,32 @@ struct TimelineTrackView: View {
         .accessibilityLabel("Add clip")
     }
 
-    // MARK: - F12 rail: left ♪/T tiles pinned to the first row of each section + empty-state
-    // placeholders (reference image IMG_0428 2.jpg). See tracksGesture's doc comment for why this
-    // whole layer only translates with `tracksScrollY`, never `contentOffset`.
+    // MARK: - 13-22 i11 rail: ♪/T tiles + empty-state placeholders, now in CONTENT coordinates
+    // (user decision, locked 2026-07-15: they scroll away with the clips — previously pinned in
+    // viewport coordinates via a separate translate-with-tracksScrollY-only layer). Reference
+    // frames f04/f10-f16's rail layout: tiles sit just LEFT of the first scene (content x < 0).
 
-    private func railOverlay(viewportWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                railTile(systemName: "music.note")
-                if state.project.audioClips.isEmpty {
-                    audioPlaceholderPill
-                }
-            }
-            .frame(height: trackRowHeight, alignment: .leading)
-            if audioSectionHeight > trackRowHeight {
-                Color.clear.frame(height: audioSectionHeight - trackRowHeight)
+    private var railOverlay: some View {
+        ZStack(alignment: .topLeading) {
+            railTile(systemName: "music.note")
+                .frame(height: trackRowHeight, alignment: .center)
+                .offset(x: -(railTileSize + 8))
+
+            if state.project.audioClips.isEmpty {
+                audioPlaceholderPill
+                    .frame(height: trackRowHeight, alignment: .center)
             }
 
-            HStack(spacing: 8) {
-                railTile(systemName: "textformat")
-                if state.project.textOverlays.isEmpty {
-                    textPlaceholderRow
-                }
-            }
-            .frame(height: trackRowHeight, alignment: .leading)
-            if textSectionHeight > trackRowHeight {
-                Color.clear.frame(height: textSectionHeight - trackRowHeight)
+            railTile(systemName: "textformat")
+                .frame(height: trackRowHeight, alignment: .center)
+                .offset(x: -(railTileSize + 8), y: audioSectionHeight)
+
+            if state.project.textOverlays.isEmpty {
+                textPlaceholderRow
+                    .frame(height: trackRowHeight, alignment: .center)
+                    .offset(y: audioSectionHeight)
             }
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 12)
-        .frame(width: viewportWidth, alignment: .leading)
     }
 
     private func railTile(systemName: String) -> some View {
@@ -636,33 +631,35 @@ struct TimelineTrackView: View {
             }
     }
 
-    // "+ Add audio" — grey rounded pill, tap opens the SAME AddAudioSheet the bottom bar's Audio
-    // action opens (onAddAudio, owned by EditorView).
+    // 13-22 i11.3: width is now EXACTLY `state.totalDuration * pxPerSecond` (was
+    // `.frame(maxWidth: .infinity)`, which — because this pill's row lived inside a
+    // viewport-width-constrained VStack — silently stretched the BUTTON's own tappable shape to
+    // the full viewport width, the root cause of "random taps open the audio sheet"). The Button
+    // wraps exactly this sized shape now, so the tap target IS the pill, nothing wider.
+    private let placeholderPillHeight: CGFloat = 24
+
+    // "＋ Add audio" — grey rounded pill spanning [0, video end], tap opens the SAME AddAudioSheet
+    // the bottom bar's Audio action opens (onAddAudio, owned by EditorView).
     private var audioPlaceholderPill: some View {
         Button(action: onAddAudio) {
-            HStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .bold))
-                Text("Add audio")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.55))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .frame(height: railTileSize)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            Text("＋ Add audio")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight, alignment: .leading)
+                .padding(.leading, 10)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add audio")
     }
 
-    // Empty grey rounded row, tap adds the default "Text" overlay at the playhead (onAddDefaultText,
-    // owned by EditorView — the exact same call EditorBottomBar's Text action already makes).
+    // Empty grey rounded row spanning [0, video end], tap adds the default "Text" overlay at the
+    // playhead (onAddDefaultText, owned by EditorView — the exact same call EditorBottomBar's Text
+    // action already makes).
     private var textPlaceholderRow: some View {
         Button(action: onAddDefaultText) {
             Color.white.opacity(0.06)
-                .frame(maxWidth: .infinity)
-                .frame(height: railTileSize)
+                .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
