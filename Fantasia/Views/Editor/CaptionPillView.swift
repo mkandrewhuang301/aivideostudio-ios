@@ -116,9 +116,11 @@ struct CaptionPillView: View {
                 .lineLimit(1)
                 .padding(.horizontal, 8)
         }
+        // 13-26 M3: strokeBorder — see AudioPillView's identical fix comment (a centered stroke
+        // rendered 1pt past the pill frame on every side).
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .stroke(isSelected ? Color.white : .clear, lineWidth: 2)
+                .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
@@ -154,9 +156,10 @@ struct CaptionPillView: View {
                 .padding(.horizontal, 8)
                 .onSubmit { commitEdit() }
         }
+        // 13-26 M3: strokeBorder — matches staticPill above.
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.white, lineWidth: 2)
+                .strokeBorder(Color.white, lineWidth: 2)
         )
     }
 

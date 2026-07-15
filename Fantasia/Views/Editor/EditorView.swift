@@ -91,7 +91,9 @@ struct EditorView: View {
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.isScrubbing) { _, isScrubbing in
                 guard !isScrubbing, let player else { return }
-                let target = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+                // 13-26 M4: exact-landing seek — nudge off a clip boundary if the scrub ended
+                // right on one (see EditorState.displayTime's doc comment).
+                let target = CMTime(seconds: state.displayTime(for: state.currentTime), preferredTimescale: 600)
                 player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
             }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
@@ -237,7 +239,11 @@ struct EditorView: View {
                 let scrubTolerance = CMTime(seconds: 0.2, preferredTimescale: 600)
                 player.seek(to: target, toleranceBefore: scrubTolerance, toleranceAfter: scrubTolerance)
             } else {
-                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                // 13-26 M4: exact-landing seek (scrub-end) — same boundary nudge as the
+                // isScrubbing→false path above; this is the OTHER caller that can land here
+                // (state.currentTime changing while not scrubbing, e.g. after snapPlayhead).
+                let preciseTarget = CMTime(seconds: state.displayTime(for: newValue), preferredTimescale: 600)
+                player.seek(to: preciseTarget, toleranceBefore: .zero, toleranceAfter: .zero)
             }
         }
     }
@@ -705,6 +711,9 @@ struct EditorView: View {
             clips: state.project.clips, aspectRatio: state.aspectRatio
         ) else { return }
         clipRanges = ranges
+        // 13-26 M4: every internal boundary except 0 and the final end — dropLast() removes the
+        // LAST range (its .end IS the composition's total duration, explicitly excluded).
+        state.clipBoundaries = ranges.dropLast().map(\.end)
         // 13-22 i3: the shared end-clamp's authoritative upper bound — the composition's REAL
         // duration, which can differ from state.totalDuration's logical sum by rounding/trim-math
         // slop. Every scrub/seek path now routes through state.clampTime(_:), which reads this.
@@ -729,6 +738,13 @@ struct EditorView: View {
                 state.currentTime = state.clampTime(time.seconds)
                 if state.isPlaying, time.seconds >= currentPlayEnd - 0.05 {
                     state.isPlaying = false
+                    // 13-26 M4: exact-landing seek — playback may have stopped a fraction of a
+                    // second into the next clip's black boundary zone (the 0.1s periodic observer
+                    // isn't frame-exact); land precisely on currentPlayEnd, nudged off a boundary
+                    // if it sits on one, so the paused frame is always the earlier clip's last
+                    // frame, never black.
+                    let target = CMTime(seconds: state.displayTime(for: currentPlayEnd), preferredTimescale: 600)
+                    player?.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
                 }
             }
         }

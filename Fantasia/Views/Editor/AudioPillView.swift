@@ -110,9 +110,15 @@ struct AudioPillView: View {
                 .foregroundStyle(.white)
         }
         .frame(width: width, height: pillHeight)
+        // 13-26 M3: strokeBorder (not stroke) — a centered stroke pokes 1pt past the pill's frame
+        // on every side, so a selected audio pill's trailing edge rendered ~1pt PAST the clip edge
+        // directly above it (the user-reported misalignment; measured in the m3 snapshot artifact).
+        // strokeBorder insets the whole 2pt inside the frame: rendered geometry now ends exactly
+        // at the pill's true edge. (The trim handles were already fully inside — .overlay(alignment:)
+        // aligns their outer edge with the pill's.)
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .stroke(isSelected ? Color.white : .clear, lineWidth: 2)
+                .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }

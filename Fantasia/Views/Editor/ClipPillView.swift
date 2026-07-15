@@ -126,9 +126,12 @@ struct ClipPillView: View {
             mediaContent
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        // 13-26 M3: strokeBorder — see AudioPillView's identical fix comment (a centered stroke
+        // rendered 1pt past the pill frame on every side, breaking edge alignment with the rows
+        // below when selected).
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isSelected ? accent : .clear, lineWidth: 2)
+                .strokeBorder(isSelected ? accent : .clear, lineWidth: 2)
         )
         // 13-22 i3: with the clip row's HStack spacing now 0 (adjacent clips, CapCut has no gaps),
         // this 1pt leading-edge divider is what visually separates consecutive pills instead of a

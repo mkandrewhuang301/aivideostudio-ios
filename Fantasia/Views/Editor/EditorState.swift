@@ -51,6 +51,12 @@ final class EditorState {
 
     var selection: EditorSelection = .none
 
+    /// Plan 13-26 M4: every INTERNAL clip boundary (global seconds) on the current composition —
+    /// excludes 0 and the composition's very end. Set by EditorView right after each
+    /// `rebuildPlayer()` from `EditorCompositionBuilder.build`'s returned `ranges`. Feeds
+    /// `displayTime(for:)` below.
+    var clipBoundaries: [Double] = []
+
     /// Transient "please enter edit mode" signals from the contextual bottom bar's Edit action
     /// (13-19 Task A) — the owning pill view (TextOverlayItemView / CaptionTrackRow) observes its
     /// own id against this, flips its local editing @State, then clears the signal back to nil.
@@ -171,5 +177,23 @@ final class EditorState {
         withAnimation(.easeInOut(duration: 0.25)) {
             currentTime = clampTime(target)
         }
+    }
+
+    /// Plan 13-26 M4: user-locked decision — the playhead sitting exactly BETWEEN two clips shows
+    /// the EARLIER clip's last frame, never a black frame. AVFoundation's per-clip
+    /// AVVideoCompositionInstruction tiling makes the exact boundary instant ambiguous (which
+    /// instruction "owns" that single sample is a coin flip in practice), so any PRECISE
+    /// (zero-tolerance) seek landing within 0.02s of a boundary is nudged back by 0.02s — just far
+    /// enough to unambiguously land inside the earlier clip's instruction range, imperceptible as a
+    /// time value. Only ever applied at the 3 exact-landing call sites in EditorView (scrub-end
+    /// seek, snapPlayhead's target, play-end pause) — NEVER during tolerant mid-scrub seeks, where
+    /// a constant 20ms nudge would just be visible jitter for zero benefit (tolerant seeks already
+    /// don't demand frame-exact accuracy).
+    func displayTime(for t: Double) -> Double {
+        guard t > 0.02 else { return t }
+        for boundary in clipBoundaries where abs(t - boundary) < 0.02 {
+            return boundary - 0.02
+        }
+        return t
     }
 }
