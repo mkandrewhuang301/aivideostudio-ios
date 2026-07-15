@@ -141,7 +141,8 @@ struct EditorView: View {
                 onCoverUpdated: {
                     syncProjectFromManager()
                     showBarToast("Cover updated")
-                }
+                },
+                onError: { showBarToast($0) }
             )
             editorBottomBar
         }

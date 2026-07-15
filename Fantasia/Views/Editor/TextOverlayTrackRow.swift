@@ -30,6 +30,9 @@ struct TextOverlayTrackRow: View {
     /// EdgeAutoScroll.swift).
     let viewportWidth: CGFloat
     let contentOffset: CGFloat
+    /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
+    /// local value has been reverted — see TimelineTrackView's identical param doc comment.
+    var onError: (String) -> Void = { _ in }
 
     @State private var edgeScrollTask: Task<Void, Never>?
     @State private var edgeScrollRate: Double?
@@ -57,7 +60,7 @@ struct TextOverlayTrackRow: View {
                                 state.select(.text(overlay.id))
                             },
                             onRetime: { start, end in
-                                Task { await retime(id: overlay.id, start: start, end: end) }
+                                retime(id: overlay.id, start: start, end: end)
                             },
                             contentOffset: contentOffset,
                             onBodyDragLocationChanged: { fingerX in
@@ -85,17 +88,34 @@ struct TextOverlayTrackRow: View {
     @State private var retimeBeforeByOverlay: [String: (start: Double, end: Double)] = [:]
     @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
 
-    private func retime(id: String, start: Double, end: Double) async {
-        if retimeBeforeByOverlay[id] == nil, let overlay = state.project.textOverlays.first(where: { $0.id == id }) {
-            retimeBeforeByOverlay[id] = (overlay.startSeconds, overlay.endSeconds)
+    // 13-23 J1: optimistic commit — see TimelineTrackView.updateClipTrim's identical doc comment.
+    // Synchronous entry point invoked directly from TextOverlayPillView.onRetime's `.onEnded`, in
+    // the SAME call frame that resets `dragTranslation`/preview vars, so the pill's next render
+    // reflects the FINAL committed position immediately — no stale-then-jump repaint.
+    private func retime(id: String, start: Double, end: Double) {
+        guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        let committedStart = state.project.textOverlays[idx].startSeconds
+        let committedEnd = state.project.textOverlays[idx].endSeconds
+        if retimeBeforeByOverlay[id] == nil {
+            retimeBeforeByOverlay[id] = (committedStart, committedEnd)
         }
-        do {
-            try await projectManager.updateTextOverlay(textId: id, startSeconds: start, endSeconds: end)
-            syncProjectFromManager()
-        } catch {
-            print("[TextOverlayTrackRow] retime error: \(error)")
+        state.project.textOverlays[idx].startSeconds = start
+        state.project.textOverlays[idx].endSeconds = end
+
+        Task {
+            do {
+                try await projectManager.updateTextOverlay(textId: id, startSeconds: start, endSeconds: end)
+                syncProjectFromManager()
+            } catch {
+                print("[TextOverlayTrackRow] retime error: \(error)")
+                if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
+                    state.project.textOverlays[revertIdx].startSeconds = committedStart
+                    state.project.textOverlays[revertIdx].endSeconds = committedEnd
+                }
+                onError("Couldn't save change")
+            }
+            scheduleRetimeUndoCommit(id: id, after: (start, end))
         }
-        scheduleRetimeUndoCommit(id: id, after: (start, end))
     }
 
     private func scheduleRetimeUndoCommit(id: String, after: (start: Double, end: Double)) {

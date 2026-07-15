@@ -51,6 +51,12 @@ struct TimelineTrackView: View {
     /// the "Cover updated" toast (this view has no toast machinery of its own for it, mirrors the
     /// onAddAudio/onAddDefaultText closure-threading pattern above).
     let onCoverUpdated: () -> Void
+    /// 13-23 J1: fires with a user-facing message when an optimistic pill mutation's PATCH fails
+    /// and the local value has been reverted — EditorView surfaces it via its own (non-clipped)
+    /// bar toast. Threaded down to AudioTrackRow/TextOverlayTrackRow, which have no toast
+    /// machinery of their own and sit inside this view's small clipped tracks viewport (a
+    /// same-row toast would risk being clipped there).
+    var onError: (String) -> Void = { _ in }
 
     // F5 (Plan 13-21): now forwards to the shared `state.pxPerSecond` (moved off this file's old
     // hard-coded `let pxPerSecond: Double = 44` so the pinch gesture below and every pill/row/ruler
@@ -183,8 +189,8 @@ struct TimelineTrackView: View {
                 ZStack(alignment: .topLeading) {
                     ZStack(alignment: .topLeading) {
                         VStack(alignment: .leading, spacing: 0) {
-                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset)
-                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset)
+                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError)
+                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError)
                             CaptionTrackRow(state: state, pxPerSecond: pxPerSecond, viewportWidth: viewportWidth, contentOffset: contentOffset)
                         }
 
@@ -521,7 +527,7 @@ struct TimelineTrackView: View {
                     dragOffsetX: reorderingClipId == clip.id ? draggedClipVisualOffsetX : 0,
                     onSelect: { selectClip(clip) },
                     onTrimChange: { newStart, newEnd in
-                        Task { await updateClipTrim(clipId: clip.id, start: newStart, end: newEnd) }
+                        updateClipTrim(clipId: clip.id, start: newStart, end: newEnd)
                     },
                     onReorderLift: { startReorder(clip: clip) },
                     onReorderChanged: { translation in updateReorderDrag(clip: clip, translation: translation) },
@@ -768,18 +774,38 @@ struct TimelineTrackView: View {
     @State private var trimBeforeByClip: [String: (start: Double, end: Double)] = [:]
     @State private var trimDebounceTasks: [String: Task<Void, Never>] = [:]
 
-    private func updateClipTrim(clipId: String, start: Double, end: Double) async {
-        if trimBeforeByClip[clipId] == nil, let clip = state.project.clips.first(where: { $0.id == clipId }) {
-            let beforeEnd = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
-            trimBeforeByClip[clipId] = (clip.trimStartSeconds, beforeEnd)
+    // 13-23 J1: optimistic commit — mutates `state.project` locally BEFORE the network call so the
+    // pill re-renders at its final position in the SAME frame the finger lifts (no stale repaint /
+    // bounce while the PATCH + syncProjectFromManager() round-trip is in flight). Reverts to the
+    // captured pre-mutation values and toasts on failure. Synchronous entry point (no longer
+    // `async`) — the caller (ClipPillView.onTrimChange) invokes it directly from `.onEnded`, in the
+    // SAME call frame that resets `previewTrimStart/End` to nil, so both changes land in one
+    // transaction instead of the preview-var reset landing a frame before the Task's body runs.
+    private func updateClipTrim(clipId: String, start: Double, end: Double) {
+        guard let idx = state.project.clips.firstIndex(where: { $0.id == clipId }) else { return }
+        // "Before" for the undo debounce (captured BEFORE the optimistic mutation, per guardrail).
+        let committedStart = state.project.clips[idx].trimStartSeconds
+        let committedEnd = state.project.clips[idx].trimEndSeconds ?? state.project.clips[idx].originalDurationSeconds ?? committedStart
+        if trimBeforeByClip[clipId] == nil {
+            trimBeforeByClip[clipId] = (committedStart, committedEnd)
         }
-        do {
-            try await projectManager.updateClip(clipId: clipId, trimStart: start, trimEnd: end)
-            syncProjectFromManager()
-        } catch {
-            print("[TimelineTrackView] updateClipTrim error: \(error)")
+        state.project.clips[idx].trimStartSeconds = start
+        state.project.clips[idx].trimEndSeconds = end
+
+        Task {
+            do {
+                try await projectManager.updateClip(clipId: clipId, trimStart: start, trimEnd: end)
+                syncProjectFromManager()
+            } catch {
+                print("[TimelineTrackView] updateClipTrim error: \(error)")
+                if let revertIdx = state.project.clips.firstIndex(where: { $0.id == clipId }) {
+                    state.project.clips[revertIdx].trimStartSeconds = committedStart
+                    state.project.clips[revertIdx].trimEndSeconds = committedEnd
+                }
+                onError("Couldn't save change")
+            }
+            scheduleTrimUndoCommit(clipId: clipId, after: (start, end))
         }
-        scheduleTrimUndoCommit(clipId: clipId, after: (start, end))
     }
 
     private func scheduleTrimUndoCommit(clipId: String, after: (start: Double, end: Double)) {

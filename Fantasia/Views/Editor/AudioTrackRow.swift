@@ -37,6 +37,9 @@ struct AudioTrackRow: View {
     /// EdgeAutoScroll.swift.
     let viewportWidth: CGFloat
     let contentOffset: CGFloat
+    /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
+    /// local value has been reverted — see TimelineTrackView's identical param doc comment.
+    var onError: (String) -> Void = { _ in }
 
     @State private var edgeScrollTask: Task<Void, Never>?
     @State private var edgeScrollRate: Double?
@@ -68,7 +71,7 @@ struct AudioTrackRow: View {
                                 state.select(.audio(clip.id))
                             },
                             onRetime: { offset, trimStart, trimEnd in
-                                Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
+                                retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd)
                             },
                             contentOffset: contentOffset,
                             onBodyDragLocationChanged: { fingerX in
@@ -96,20 +99,38 @@ struct AudioTrackRow: View {
     @State private var retimeBeforeByClip: [String: (offset: Double, trimStart: Double, trimEnd: Double)] = [:]
     @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
 
-    private func retime(id: String, offset: Double, trimStart: Double, trimEnd: Double) async {
-        if retimeBeforeByClip[id] == nil, let clip = state.project.audioClips.first(where: { $0.id == id }) {
-            let beforeEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
-            retimeBeforeByClip[id] = (clip.startOffsetSeconds, clip.trimStartSeconds, beforeEnd)
+    // 13-23 J1: optimistic commit — see TimelineTrackView.updateClipTrim's identical doc comment.
+    // Synchronous entry point invoked directly from AudioPillView.onRetime's `.onEnded`, in the
+    // SAME call frame that resets `dragTranslation`/preview vars.
+    private func retime(id: String, offset: Double, trimStart: Double, trimEnd: Double) {
+        guard let idx = state.project.audioClips.firstIndex(where: { $0.id == id }) else { return }
+        let committedOffset = state.project.audioClips[idx].startOffsetSeconds
+        let committedTrimStart = state.project.audioClips[idx].trimStartSeconds
+        let committedTrimEnd = state.project.audioClips[idx].trimEndSeconds ?? committedTrimStart
+        if retimeBeforeByClip[id] == nil {
+            retimeBeforeByClip[id] = (committedOffset, committedTrimStart, committedTrimEnd)
         }
-        do {
-            try await projectManager.updateAudioClip(
-                audioId: id, startOffsetSeconds: offset, trimStartSeconds: trimStart, trimEndSeconds: trimEnd
-            )
-            syncProjectFromManager()
-        } catch {
-            print("[AudioTrackRow] retime error: \(error)")
+        state.project.audioClips[idx].startOffsetSeconds = offset
+        state.project.audioClips[idx].trimStartSeconds = trimStart
+        state.project.audioClips[idx].trimEndSeconds = trimEnd
+
+        Task {
+            do {
+                try await projectManager.updateAudioClip(
+                    audioId: id, startOffsetSeconds: offset, trimStartSeconds: trimStart, trimEndSeconds: trimEnd
+                )
+                syncProjectFromManager()
+            } catch {
+                print("[AudioTrackRow] retime error: \(error)")
+                if let revertIdx = state.project.audioClips.firstIndex(where: { $0.id == id }) {
+                    state.project.audioClips[revertIdx].startOffsetSeconds = committedOffset
+                    state.project.audioClips[revertIdx].trimStartSeconds = committedTrimStart
+                    state.project.audioClips[revertIdx].trimEndSeconds = committedTrimEnd
+                }
+                onError("Couldn't save change")
+            }
+            scheduleRetimeUndoCommit(id: id, after: (offset, trimStart, trimEnd))
         }
-        scheduleRetimeUndoCommit(id: id, after: (offset, trimStart, trimEnd))
     }
 
     private func scheduleRetimeUndoCommit(id: String, after: (offset: Double, trimStart: Double, trimEnd: Double)) {

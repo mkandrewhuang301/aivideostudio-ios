@@ -66,7 +66,7 @@ struct CaptionTrackRow: View {
                         state.select(.caption(cue.id))
                     },
                     onRetime: { start, end in
-                        Task { await retime(id: cue.id, start: start, end: end) }
+                        retime(id: cue.id, start: start, end: end)
                     },
                     onWordsCommit: { words in
                         Task { await commitWords(id: cue.id, words: words) }
@@ -126,28 +126,44 @@ struct CaptionTrackRow: View {
     @State private var retimeBeforeByCue: [String: (start: Double, end: Double)] = [:]
     @State private var retimeDebounceTasks: [String: Task<Void, Never>] = [:]
 
-    private func retime(id: String, start: Double, end: Double) async {
-        if retimeBeforeByCue[id] == nil, let cue = state.project.captionCues.first(where: { $0.id == id }) {
-            retimeBeforeByCue[id] = (cue.startSeconds, cue.endSeconds)
+    // 13-23 J1: optimistic commit — see TimelineTrackView.updateClipTrim's identical doc comment.
+    // Synchronous entry point invoked directly from CaptionPillView.onRetime's `.onEnded`, in the
+    // SAME call frame that resets `dragTranslation`/preview vars.
+    private func retime(id: String, start: Double, end: Double) {
+        guard let idx = state.project.captionCues.firstIndex(where: { $0.id == id }) else { return }
+        let committedStart = state.project.captionCues[idx].startSeconds
+        let committedEnd = state.project.captionCues[idx].endSeconds
+        if retimeBeforeByCue[id] == nil {
+            retimeBeforeByCue[id] = (committedStart, committedEnd)
         }
-        do {
-            try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end)
-            syncProjectFromManager()
-        } catch {
-            print("[CaptionTrackRow] retime error: \(error)")
-        }
-        retimeDebounceTasks[id]?.cancel()
-        retimeDebounceTasks[id] = Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            guard let before = retimeBeforeByCue[id] else { return }
-            retimeBeforeByCue[id] = nil
-            retimeDebounceTasks[id] = nil
-            state.history.record(UndoableAction(
-                label: "Retime caption",
-                undo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: before.start, endSeconds: before.end) },
-                redo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end) }
-            ))
+        state.project.captionCues[idx].startSeconds = start
+        state.project.captionCues[idx].endSeconds = end
+
+        Task {
+            do {
+                try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end)
+                syncProjectFromManager()
+            } catch {
+                print("[CaptionTrackRow] retime error: \(error)")
+                if let revertIdx = state.project.captionCues.firstIndex(where: { $0.id == id }) {
+                    state.project.captionCues[revertIdx].startSeconds = committedStart
+                    state.project.captionCues[revertIdx].endSeconds = committedEnd
+                }
+                showToast("Couldn't save change")
+            }
+            retimeDebounceTasks[id]?.cancel()
+            retimeDebounceTasks[id] = Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                guard let before = retimeBeforeByCue[id] else { return }
+                retimeBeforeByCue[id] = nil
+                retimeDebounceTasks[id] = nil
+                state.history.record(UndoableAction(
+                    label: "Retime caption",
+                    undo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: before.start, endSeconds: before.end) },
+                    redo: { try await projectManager.updateCaptionCue(cueId: id, startSeconds: start, endSeconds: end) }
+                ))
+            }
         }
     }
 
