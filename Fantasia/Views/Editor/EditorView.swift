@@ -32,6 +32,7 @@ struct EditorView: View {
     @State private var state: EditorState
     @State private var player: AVPlayer?
     @State private var timeObserverToken: Any?
+    @State private var playerItemStatusObservation: NSKeyValueObservation?
 
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
@@ -88,6 +89,11 @@ struct EditorView: View {
             .onDisappear { tearDownPlayer() }
             .onChange(of: state.isPlaying) { _, isPlaying in handlePlayingChange(isPlaying) }
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
+            .onChange(of: state.isScrubbing) { _, isScrubbing in
+                guard !isScrubbing, let player else { return }
+                let target = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
             // 13-23 J4: the videoComposition's renderSize derives from the project aspect — cycling
             // the aspect toggle must rebuild the player item so the canvas shape follows.
@@ -207,7 +213,12 @@ struct EditorView: View {
         guard playerSeconds.isFinite else { return }
         if abs(playerSeconds - newValue) > 0.15 {
             let target = CMTime(seconds: newValue, preferredTimescale: 600)
-            player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            if state.isScrubbing {
+                player.currentItem?.cancelPendingSeeks()
+                player.seek(to: target, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+            } else {
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
         }
     }
 
@@ -684,6 +695,7 @@ struct EditorView: View {
         // pillarboxed/letterboxed instead of stretched to the first clip's shape. Fullscreen
         // shares this same item (13-22 i6.1), so it inherits the treatment automatically.
         item.videoComposition = videoComposition
+        observePlayerItemStatus(item)
         let avPlayer = AVPlayer(playerItem: item)
         player = avPlayer
 
@@ -739,7 +751,15 @@ struct EditorView: View {
         return url
     }
 
+    private func observePlayerItemStatus(_ item: AVPlayerItem) {
+        playerItemStatusObservation = item.observe(\.status, options: [.new, .initial]) { item, _ in
+            guard item.status == .failed else { return }
+            print("[EditorView] player item failed: \(String(describing: item.error))")
+        }
+    }
+
     private func tearDownPlayerObserverOnly() {
+        playerItemStatusObservation = nil
         if let token = timeObserverToken {
             player?.removeTimeObserver(token)
         }

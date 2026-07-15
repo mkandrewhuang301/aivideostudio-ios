@@ -153,8 +153,10 @@ struct TextOverlayTrackRow: View {
         edgeScrollTask?.cancel()
         guard let rate = newRate else {
             edgeScrollTask = nil
+            state.isScrubbing = false
             return
         }
+        state.isScrubbing = true
         edgeScrollTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(16)) // ~60Hz
@@ -170,5 +172,6 @@ struct TextOverlayTrackRow: View {
         edgeScrollTask?.cancel()
         edgeScrollTask = nil
         edgeScrollRate = nil
+        state.isScrubbing = false
     }
 }

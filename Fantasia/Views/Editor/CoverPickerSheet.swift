@@ -329,6 +329,8 @@ struct CoverPickerSheet: View {
         generator.appliesPreferredTrackTransform = true
         generator.videoComposition = videoComposition
         generator.maximumSize = canvasPixelSize
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
         if Task.isCancelled { return }
@@ -342,6 +344,9 @@ struct CoverPickerSheet: View {
         generator.appliesPreferredTrackTransform = true
         generator.videoComposition = videoComposition
         generator.maximumSize = CGSize(width: 160, height: 200)
+        let stripTolerance = CMTime(value: 1, timescale: 4)
+        generator.requestedTimeToleranceBefore = stripTolerance
+        generator.requestedTimeToleranceAfter = stripTolerance
 
         for index in 0..<cellCount {
             if Task.isCancelled { return }

@@ -70,6 +70,10 @@ final class EditorState {
     /// on every live magnification delta; existing frames just stretch until the pinch ends.
     var isZooming = false
 
+    /// Plan 13-25 L4: true while a timeline scrub gesture (or edge auto-scroll seek) is active —
+    /// EditorView uses tolerant seeks during scrub and a final zero-tolerance seek on release.
+    var isScrubbing = false
+
     /// Plan 13-21 F8: the Editor's undo/redo engine. Held here (not threaded as a separate param)
     /// so every view that already receives `state: EditorState` gets it for free — mirrors
     /// pxPerSecond/isZooming above.

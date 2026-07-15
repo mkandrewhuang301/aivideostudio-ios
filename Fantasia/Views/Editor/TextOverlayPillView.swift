@@ -134,7 +134,6 @@ struct TextOverlayPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if leftDragStartTime == nil { leftDragStartTime = overlay.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? overlay.startSeconds) + deltaSeconds
@@ -155,7 +154,6 @@ struct TextOverlayPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if rightDragStartTime == nil { rightDragStartTime = overlay.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? overlay.startSeconds

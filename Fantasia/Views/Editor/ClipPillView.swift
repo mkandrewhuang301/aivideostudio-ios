@@ -340,7 +340,6 @@ struct ClipPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if leftDragStartTrim == nil { leftDragStartTrim = clip.trimStartSeconds }
                 let deltaSec = value.translation.width / pxPerSecond
                 var newStart = (leftDragStartTrim ?? clip.trimStartSeconds) + deltaSec
@@ -361,7 +360,6 @@ struct ClipPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if rightDragStartTrim == nil {
                     rightDragStartTrim = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
                 }

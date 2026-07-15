@@ -166,7 +166,6 @@ struct AudioPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if leftDragStart == nil {
                     leftDragStart = (clip.startOffsetSeconds, clip.trimStartSeconds)
                 }
@@ -195,7 +194,6 @@ struct AudioPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if rightDragStartTrimEnd == nil {
                     rightDragStartTrimEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
                 }

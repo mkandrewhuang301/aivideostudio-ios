@@ -210,7 +210,6 @@ struct CaptionPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if leftDragStartTime == nil { leftDragStartTime = cue.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? cue.startSeconds) + deltaSeconds
@@ -231,7 +230,6 @@ struct CaptionPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                onSelect()
                 if rightDragStartTime == nil { rightDragStartTime = cue.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? cue.startSeconds

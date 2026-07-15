@@ -347,12 +347,16 @@ struct TimelineTrackView: View {
                 // 13-22 i12: suppressed while reorder mode is active.
                 guard reorderingClipId == nil else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                state.isScrubbing = true
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
                 let deltaTime = -value.translation.width / pxPerSecond
                 state.currentTime = state.clampTime(startTime + deltaTime)
             }
-            .onEnded { _ in scrubDragStartTime = nil }
+            .onEnded { _ in
+                scrubDragStartTime = nil
+                state.isScrubbing = false
+            }
     }
 
     // MARK: - Tracks viewport gesture (F13, Plan 13-21) — ONE background DragGesture over the
@@ -379,6 +383,7 @@ struct TimelineTrackView: View {
                 }
                 switch tracksDragAxis {
                 case .horizontal:
+                    state.isScrubbing = true
                     guard let startTime = tracksScrubStartTime else { return }
                     let deltaTime = -value.translation.width / pxPerSecond
                     state.currentTime = state.clampTime(startTime + deltaTime)
@@ -394,6 +399,7 @@ struct TimelineTrackView: View {
                 tracksDragAxis = nil
                 tracksScrubStartTime = nil
                 tracksScrollStartY = nil
+                state.isScrubbing = false
             }
     }
 
@@ -710,7 +716,7 @@ struct TimelineTrackView: View {
         // clip; snapping there is intentional even if the playhead was already past clipEnd), now
         // wrapped in the same animated-glide treatment (withAnimation — contentOffset derives from
         // currentTime, so the timeline glides instead of jumping).
-        if !(state.currentTime >= clipStart && state.currentTime < clipEnd) {
+        if !(state.currentTime >= clipStart && state.currentTime <= clipEnd - 0.01) {
             withAnimation(.easeInOut(duration: 0.25)) {
                 state.currentTime = state.clampTime(clipStart)
             }
@@ -793,26 +799,23 @@ struct TimelineTrackView: View {
     // viewport-width-constrained VStack — silently stretched the BUTTON's own tappable shape to
     // the full viewport width, the root cause of "random taps open the audio sheet"). The Button
     // wraps exactly this sized shape now, so the tap target IS the pill, nothing wider.
-    private let placeholderPillHeight: CGFloat = 24
 
     // "＋ Add audio" — grey rounded pill spanning [0, video end], tap opens the SAME AddAudioSheet
     // the bottom bar's Audio action opens (onAddAudio, owned by EditorView).
     //
     // 13-24 K5: the Button's label IS the pill and nothing more — `.contentShape` last, at pill
-    // bounds. The row-centering `.frame(height: trackRowHeight)` wraps OUTSIDE the Button so a tap
-    // 3pt below the pill's bottom edge hits the tracks background (deselect only), never the sheet.
+    // bounds. 13-25 L3: pill height fills trackRowHeight so drawn == hit == full row.
     private var audioPlaceholderPill: some View {
         Button(action: onAddAudio) {
             Text("＋ Add audio")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.55))
-                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: placeholderPillHeight, alignment: .leading)
+                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: trackRowHeight, alignment: .leading)
                 .padding(.leading, 10)
                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .frame(height: trackRowHeight, alignment: .center)
         .accessibilityLabel("Add audio")
     }
 
@@ -822,12 +825,11 @@ struct TimelineTrackView: View {
     private var textPlaceholderRow: some View {
         Button(action: onAddDefaultText) {
             Color.white.opacity(0.06)
-                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: placeholderPillHeight)
+                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: trackRowHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .frame(height: trackRowHeight, alignment: .center)
         .accessibilityLabel("Add text")
     }
 
