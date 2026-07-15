@@ -51,6 +51,11 @@ struct ClipPillView: View {
     /// for however much its own slot has shifted in the caller's `liveOrder` — see
     /// TimelineTrackView.draggedClipVisualOffsetX's doc comment). Ignored unless `isBeingDragged`.
     let dragOffsetX: CGFloat
+    /// 13-23 J7: the collapsed square's width while reordering. TimelineTrackView's viewport-space
+    /// reorder overlay scales this DOWN when many clips must fit on screen; the default 46 is the
+    /// original uniform square (used by the hidden in-content row, whose collapsed size no longer
+    /// matters visually).
+    var reorderSlotWidth: CGFloat = 46
     let onSelect: () -> Void
     /// Fires live, on every edge-handle drag change, with the clip's updated (trimStart, trimEnd)
     /// in seconds — the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
@@ -84,8 +89,6 @@ struct ClipPillView: View {
     // Tiny in-memory-only cache — deliberately NOT ThumbnailCache.shared (see file header).
     private static let filmstripCache = NSCache<NSString, UIImage>()
     private let cellWidth: CGFloat = 46
-    // 13-22 i12: uniform collapsed size while reordering (46×58, per spec).
-    private let reorderSlotWidth: CGFloat = 46
 
     private var trimStart: Double { previewTrimStart ?? clip.trimStartSeconds }
     private var trimEnd: Double {
