@@ -160,16 +160,30 @@ struct TimelineTrackView: View {
     @State private var reorderOriginalIndex: Int? = nil
     private let reorderSlotWidth: CGFloat = 46
     private let reorderSquareSpacing: CGFloat = 4
-    /// J7: where the reorder overlay row starts, in viewport x.
-    private var reorderRowOriginX: CGFloat { playBoxWidth + 12 }
 
-    /// J7: the overlay's slot pitch (square width + spacing). Nominal 50 (46 + 4); scales down so
-    /// up to ~12 clips fit in the viewport; beyond ~12 the row simply overflows (acceptable).
+    /// 13-24 K1: overlay slot pitch (square + spacing). Uses playBoxWidth+8 as the left dock
+    /// reserved space when sizing available width.
     private func reorderPitch(viewportWidth: CGFloat) -> CGFloat {
         let n = max(liveOrder.count, 1)
-        let available = max(viewportWidth - reorderRowOriginX - 8, 50)
+        let minX = playBoxWidth + 8
+        let available = max(viewportWidth - minX - 8, 50)
         let nominal = reorderSlotWidth + reorderSquareSpacing // 50
         return min(nominal, max(available / CGFloat(n), available / 12))
+    }
+
+    /// 13-24 K1: place the pressed clip's square centered on the playhead, then clamp so nothing
+    /// starts under the play-box dock and the row fits the viewport where possible.
+    private func reorderOverlayOriginX(viewportWidth: CGFloat) -> CGFloat {
+        let pitch = reorderPitch(viewportWidth: viewportWidth)
+        let n = max(liveOrder.count, 1)
+        let minX = playBoxWidth + 8
+        let pressedIndex = reorderOriginalIndex
+            ?? reorderingClipId.flatMap { id in liveOrder.firstIndex(of: id) }
+            ?? 0
+        let origin = viewportWidth / 2 - (CGFloat(pressedIndex) + 0.5) * pitch
+        let rowWidth = CGFloat(n) * pitch - reorderSquareSpacing
+        let maxOrigin = max(minX, viewportWidth - 8 - rowWidth)
+        return min(max(origin, minX), maxOrigin)
     }
 
     var body: some View {
@@ -241,31 +255,6 @@ struct TimelineTrackView: View {
             // variable, so changing `pxPerSecond` alone re-centers the content around the
             // screen-fixed playhead automatically (no separate "anchor at playhead" math needed).
             .simultaneousGesture(magnificationGesture)
-            .overlay(alignment: .top) {
-                // Fixed-center playhead (Task B.4) — content (ruler + clip row + track rows)
-                // translates under this via .offset() above; the playhead itself never moves.
-                // Shortened + pushed down so its top sits just under the ruler numbers/dots at
-                // EVERY scroll offset (never overlaps them), with a small rounded nub at its top
-                // (sketch's .playhead-line::before). i4: the line now reaches the bottom of the
-                // whole 200pt block.
-                ZStack {
-                    // 13-22 i9: nub shrunk 11×8 → 8×6 and moved up 2pt so it reads as a small cap
-                    // sitting just above the ruler row, its bottom edge meeting the line's top.
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 0, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 0
-                    )
-                    .fill(Color.white)
-                    .frame(width: 8, height: 6)
-                    .position(x: viewportWidth / 2, y: playheadTopY - 2)
-
-                    Rectangle()
-                        .fill(Color.white)
-                        .frame(width: 2, height: playheadHeight)
-                        .shadow(color: .white.opacity(0.5), radius: 4)
-                        .position(x: viewportWidth / 2, y: playheadTopY + playheadHeight / 2)
-                }
-                .allowsHitTesting(false)
-            }
             .overlay(alignment: .topLeading) {
                 // Left docks (Task B / 13-20 i3) — current/total time over the ruler row.
                 // Opaque background so scrolling content passes visually UNDER it. Each dock is
@@ -300,17 +289,37 @@ struct TimelineTrackView: View {
                     .offset(x: viewportWidth - 46 - 8, y: clipRowTop + (clipRowHeight - 46) / 2)
             }
             .overlay(alignment: .topLeading) {
-                // 13-23 J7: the visible reorder row, in VIEWPORT coordinates on the clip row —
-                // see reorderRowOverlay's doc comment. The wrapping ZStack hosts the appear/
-                // dismiss transition (spring-in on lift, fade on drop).
+                // 13-23 J7 / 13-24 K1: viewport-space reorder row, anchored so the pressed clip's
+                // square sits on the playhead (see reorderOverlayOriginX).
                 ZStack(alignment: .topLeading) {
                     if reorderingClipId != nil {
                         reorderRowOverlay(viewportWidth: viewportWidth)
-                            .offset(x: reorderRowOriginX, y: clipRowTop)
+                            .offset(x: reorderOverlayOriginX(viewportWidth: viewportWidth), y: clipRowTop)
                             .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
                     }
                 }
                 .animation(.spring(duration: 0.25), value: reorderingClipId != nil)
+                .zIndex(1)
+            }
+            .overlay(alignment: .top) {
+                // 13-24 K1: playhead drawn AFTER the reorder overlay so the divider stays visible
+                // through reorder mode (later overlays paint on top).
+                ZStack {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 0
+                    )
+                    .fill(Color.white)
+                    .frame(width: 8, height: 6)
+                    .position(x: viewportWidth / 2, y: playheadTopY - 2)
+
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(width: 2, height: playheadHeight)
+                        .shadow(color: .white.opacity(0.5), radius: 4)
+                        .position(x: viewportWidth / 2, y: playheadTopY + playheadHeight / 2)
+                }
+                .allowsHitTesting(false)
+                .zIndex(2)
             }
         }
         // 13-22 i14: named coordinate space every pill's body-drag gesture reads its finger
