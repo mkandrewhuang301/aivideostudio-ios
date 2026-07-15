@@ -426,6 +426,20 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/projects/\(id)", method: "DELETE")
     }
 
+    // POST /api/projects/:id/cover — sets a custom project cover from a scrubbed frame (Plan
+    // 13-21 B3/F17). `atSeconds` is the picked global timeline position resolved to a LOCAL
+    // seconds-within-that-clip value by the caller (CoverPickerSheet, via the composition's clip
+    // ranges) — the backend clamps it into the clip's own real duration server-side either way.
+    // Returns a fresh presigned thumbnail_url.
+    func setProjectCover(id: String, clipId: String, atSeconds: Double) async throws -> String {
+        let body: [String: Any] = ["clip_id": clipId, "at_seconds": atSeconds]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let response: CoverResponse = try await projectRequest(
+            path: "api/projects/\(id)/cover", method: "POST", body: bodyData, expectedStatus: [200]
+        )
+        return response.thumbnailUrl
+    }
+
     // POST /api/projects/:id/clips — import by copy from an owned, completed generation (D-03).
     func importClipFromGeneration(projectId: String, generationId: String) async throws -> ProjectClip {
         let body: [String: Any] = ["source_type": "generation", "generation_id": generationId]
@@ -745,6 +759,13 @@ actor APIClient {
 
 private struct ProjectResponse: Decodable {
     let project: EditProject
+}
+
+private struct CoverResponse: Decodable {
+    let thumbnailUrl: String
+    enum CodingKeys: String, CodingKey {
+        case thumbnailUrl = "thumbnail_url"
+    }
 }
 
 private struct ProjectsListResponse: Decodable {

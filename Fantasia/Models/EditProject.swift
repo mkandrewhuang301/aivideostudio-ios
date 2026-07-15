@@ -153,6 +153,12 @@ struct AudioClip: Codable, Identifiable, Equatable {
     var startOffsetSeconds: Double
     var trimStartSeconds: Double
     var trimEndSeconds: Double?
+    // Plan 13-21 B2/F9: probed via ffprobe at add-time (backend mediaProbe.probeDurationSeconds),
+    // nil for rows added before that fix (self-heals server-side on next GET). This is the
+    // fallback ProjectManager.splitAudioClip uses when trimEndSeconds has never been explicitly
+    // set — the root cause of "audio split silently does nothing" was that fallback not existing
+    // at all (the ONLY guard was trimEndSeconds, always nil for untrimmed audio).
+    var originalDurationSeconds: Double?
     var sortOrder: Int
 
     enum CodingKeys: String, CodingKey {
@@ -161,6 +167,7 @@ struct AudioClip: Codable, Identifiable, Equatable {
         case startOffsetSeconds = "start_offset_seconds"
         case trimStartSeconds = "trim_start_seconds"
         case trimEndSeconds = "trim_end_seconds"
+        case originalDurationSeconds = "original_duration_seconds"
         case sortOrder = "sort_order"
     }
 }

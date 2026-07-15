@@ -45,6 +45,11 @@ struct TimelineTrackView: View {
     /// F12: the empty-state text placeholder taps through to here — the SAME
     /// `addDefaultTextOverlay()` EditorBottomBar's Text action already calls.
     let onAddDefaultText: () -> Void
+    /// F16/F17 (Plan 13-21): fires once CoverPickerSheet has actually persisted a new cover — the
+    /// caller (EditorView) reconciles state.project from projectManager.loadedProject and shows
+    /// the "Cover updated" toast (this view has no toast machinery of its own for it, mirrors the
+    /// onAddAudio/onAddDefaultText closure-threading pattern above).
+    let onCoverUpdated: () -> Void
 
     // F5 (Plan 13-21): now forwards to the shared `state.pxPerSecond` (moved off this file's old
     // hard-coded `let pxPerSecond: Double = 44` so the pinch gesture below and every pill/row/ruler
@@ -103,6 +108,7 @@ struct TimelineTrackView: View {
     @State private var scrubDragStartTime: Double? = nil
     @State private var showAddMediaSheet = false
     @State private var isAddingClip = false
+    @State private var showCoverPicker = false
 
     // F13: manual vertical scroll for the tracks viewport — replaces the ScrollView(.vertical) +
     // .simultaneousGesture(scrubGesture) combination (confirmed via simulator repro to never
@@ -243,6 +249,9 @@ struct TimelineTrackView: View {
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
             MediaPickerSheet(onAdd: handlePickedMedia)
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            CoverPickerSheet(project: state.project, onCoverSet: onCoverUpdated)
         }
     }
 
@@ -443,6 +452,54 @@ struct TimelineTrackView: View {
             }
         }
         .frame(height: clipRowHeight, alignment: .leading)
+        .overlay(alignment: .leading) {
+            // F16 (Plan 13-21): cover card in CONTENT coordinates just left of t=0 — scrolls WITH
+            // the clips (contentOffset already applies to the whole ruler+clipRow VStack this
+            // clipRow lives in) so at t=00:00 it exactly fills the dead gap between the play-box
+            // dock and the first clip.
+            coverCard.offset(x: -(coverCardWidth + coverCardGap))
+        }
+    }
+
+    // MARK: - F16: cover card (content-space, just left of t=0)
+
+    private let coverCardWidth: CGFloat = 52
+    private let coverCardGap: CGFloat = 6
+
+    private var coverCard: some View {
+        Button {
+            showCoverPicker = true
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                if let urlString = state.project.thumbnailUrl, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color(red: 0.11, green: 0.11, blue: 0.137)
+                        }
+                    }
+                } else {
+                    Color(red: 0.11, green: 0.11, blue: 0.137)
+                }
+
+                HStack(spacing: 3) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Cover")
+                        .font(.system(size: 11, weight: .semibold))
+                        .underline()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.45))
+            }
+            .frame(width: coverCardWidth, height: clipRowHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Choose project cover")
     }
 
     // MARK: - Clip selection with the C0 snap-to-start rule (13-19 Task C0, exact user spec):

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		02BBAB59549272FFA33C31CD /* CoverPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */; };
 		037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */; };
 		03DE4BE9123D30D92B6D6A4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 71907E2C4814D307EE0AADF4 /* Assets.xcassets */; };
 		09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */; };
@@ -224,6 +225,7 @@
 		DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddAudioSheet.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
 		E1AF13629D571EF8D48B749B /* BubblePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePickerView.swift; sourceTree = "<group>"; };
+		E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverPickerSheet.swift; sourceTree = "<group>"; };
 		E800BB75E6A7C706622D1CB0 /* CreditStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditStoreView.swift; sourceTree = "<group>"; };
 		E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		EA736381FE914D7303D5DE5E /* TransparentFullScreenBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparentFullScreenBackground.swift; sourceTree = "<group>"; };
@@ -540,6 +542,7 @@
 				F1FB67BBB633D6485F16FC2A /* CaptionStyleSheet.swift */,
 				1BB21E9FB37EB647392EA743 /* CaptionTrackRow.swift */,
 				8867510E5992319DB56765C9 /* ClipPillView.swift */,
+				E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */,
 				C4B4F501364C0B7DF4678081 /* EditorBottomBar.swift */,
 				B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */,
 				045559253B09A54FC9E2075E /* EditorState.swift */,
@@ -693,6 +696,7 @@
 				DAD0A45CA8A4E1A86062501B /* ClipPillView.swift in Sources */,
 				98891B7B4E232C4194621D74 /* ConsentAttestationView.swift in Sources */,
 				E0D396BB6619E7630B49C1E2 /* ContentView.swift in Sources */,
+				02BBAB59549272FFA33C31CD /* CoverPickerSheet.swift in Sources */,
 				800A992332E0D1E793C4BA8A /* CreateGenerationView.swift in Sources */,
 				3729BF5D687CF0876974F3FF /* CreditManager.swift in Sources */,
 				ABB54C63E460F8B91648880B /* CreditStoreView.swift in Sources */,

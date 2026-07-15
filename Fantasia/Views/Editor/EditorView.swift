@@ -113,7 +113,11 @@ struct EditorView: View {
             TimelineTrackView(
                 state: state,
                 onAddAudio: { showAddAudioSheet = true },
-                onAddDefaultText: { Task { await addDefaultTextOverlay() } }
+                onAddDefaultText: { Task { await addDefaultTextOverlay() } },
+                onCoverUpdated: {
+                    syncProjectFromManager()
+                    showBarToast("Cover updated")
+                }
             )
             editorBottomBar
         }

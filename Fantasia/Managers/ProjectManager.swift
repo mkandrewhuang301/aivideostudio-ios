@@ -184,6 +184,20 @@ final class ProjectManager {
         loadedProject?.captionStyle = updated.captionStyle
     }
 
+    /// Plan 13-21 B3/F16-F17: sets a custom project cover from a scrubbed frame — `clipId`/
+    /// `atSeconds` are the picked global timeline position ALREADY resolved to a local
+    /// (clipId, seconds-within-that-clip) pair by the caller (CoverPickerSheet). Merges just the
+    /// new `thumbnailUrl` into `loadedProject` in place, same convention as updateProjectTitle/
+    /// updateAspectRatio/updateCaptionStyle above.
+    func setCover(clipId: String, atSeconds: Double) async throws {
+        guard let id = loadedProject?.id else { return }
+        let thumbnailUrl = try await APIClient.shared.setProjectCover(id: id, clipId: clipId, atSeconds: atSeconds)
+        loadedProject?.thumbnailUrl = thumbnailUrl
+        if let index = projects.firstIndex(where: { $0.id == id }) {
+            projects[index].thumbnailUrl = thumbnailUrl
+        }
+    }
+
     // MARK: - Clip mutations (SC2) — reconcile via a full re-fetch afterward (mutation responses
     // are url-less by design, see refreshLoadedProjectURLs's doc comment above).
 
@@ -367,7 +381,12 @@ final class ProjectManager {
     func splitAudioClip(audioId: String, atLocalSeconds: Double) async throws -> Bool {
         guard let id = loadedProject?.id,
               let clip = loadedProject?.audioClips.first(where: { $0.id == audioId }),
-              let currentTrimEnd = clip.trimEndSeconds
+              // F9.1 (Plan 13-21): falls back to originalDurationSeconds (B2's new probed field)
+              // when the clip has never been explicitly trimmed — previously `trimEndSeconds` was
+              // the ONLY source, always nil for untrimmed audio, so split silently no-op'd for
+              // every audio clip a user hadn't first dragged a trim handle on. Mirrors
+              // ClipPillView.splitPoint's identical clip.trimEndSeconds ?? clip.originalDurationSeconds fallback.
+              let currentTrimEnd = clip.trimEndSeconds ?? clip.originalDurationSeconds
         else { return false }
         guard atLocalSeconds > clip.trimStartSeconds + 0.05, atLocalSeconds < currentTrimEnd - 0.05 else {
             return false
