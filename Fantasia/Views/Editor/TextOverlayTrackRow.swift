@@ -33,20 +33,25 @@ struct TextOverlayTrackRow: View {
     /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
     /// local value has been reverted — see TimelineTrackView's identical param doc comment.
     var onError: (String) -> Void = { _ in }
+    /// 13-26 M7: adds the default "Text" overlay at the playhead — the SAME call EditorBottomBar's
+    /// Text action makes, threaded EditorView → TimelineTrackView → here. See AudioTrackRow's
+    /// onAddAudio doc comment for why the placeholder moved INSIDE the row (single source of
+    /// geometry — no parallel overlay layer whose y-bands could drift from the real rows').
+    var onAddDefaultText: () -> Void = {}
 
     @State private var edgeScrollTask: Task<Void, Never>?
     @State private var edgeScrollRate: Double?
 
     var body: some View {
-        // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
-        // Text action (which makes this exact same addTextOverlay call at the playhead); no
-        // per-row "+" tile lives here anymore.
-        // F12 (Plan 13-21): the empty-state placeholder row + T rail tile are rendered by
-        // TimelineTrackView itself, in its viewport-pinned overlay layer (see AudioTrackRow's
-        // identical comment) — this view only reserves the matching `rowHeight`.
+        // Pure pill rail (13-19 Task E) — adds also come from EditorBottomBar's Text action
+        // (which makes this exact same addTextOverlay call at the playhead); no per-row "+" tile
+        // lives here.
+        // 13-26 M7: the empty-state grey row is rendered by THIS row again (was
+        // TimelineTrackView.railOverlay's parallel content-coordinate layer).
         VStack(alignment: .leading, spacing: 0) {
             if state.project.textOverlays.isEmpty {
-                Color.clear.frame(height: rowHeight)
+                textPlaceholderRow
+                    .frame(height: rowHeight, alignment: .leading)
             } else {
                 ForEach(state.project.textOverlays) { overlay in
                     ZStack(alignment: .topLeading) {
@@ -76,6 +81,25 @@ struct TextOverlayTrackRow: View {
                 }
             }
         }
+    }
+
+    // MARK: - 13-26 M7: empty-state placeholder (moved back in from TimelineTrackView.railOverlay)
+
+    // NO Button wrapper — drawn shape + explicit .contentShape + .onTapGesture, matching
+    // AudioTrackRow.audioPlaceholderPill's structure (see its comment).
+    private var textPlaceholderRow: some View {
+        Color.white.opacity(0.06)
+            .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: rowHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onTapGesture {
+                #if DEBUG
+                print("[hit] add-text placeholder tapped")
+                #endif
+                onAddDefaultText()
+            }
+            .accessibilityLabel("Add text")
+            .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Mutations

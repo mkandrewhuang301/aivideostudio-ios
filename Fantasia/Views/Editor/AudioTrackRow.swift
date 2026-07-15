@@ -40,21 +40,26 @@ struct AudioTrackRow: View {
     /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
     /// local value has been reverted — see TimelineTrackView's identical param doc comment.
     var onError: (String) -> Void = { _ in }
+    /// 13-26 M7: opens the SAME AddAudioSheet EditorBottomBar's Audio action owns — threaded
+    /// EditorView → TimelineTrackView → here. The empty-state placeholder now renders INSIDE this
+    /// row (single source of geometry: the row that owns the action draws its own tap target),
+    /// structurally killing the "tapping the empty TEXT row opened the ADD-AUDIO sheet" bug — a
+    /// parallel overlay layer can no longer drift out of sync with the real rows' y-bands.
+    var onAddAudio: () -> Void = {}
 
     @State private var edgeScrollTask: Task<Void, Never>?
     @State private var edgeScrollRate: Double?
 
     var body: some View {
-        // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
-        // Audio action (owns AddAudioSheet); no per-row "+" tile lives here anymore.
-        // F12 (Plan 13-21): the empty-state "+ Add audio" placeholder + ♪ rail tile are rendered
-        // by TimelineTrackView itself, in its viewport-pinned overlay layer (they must NOT scrub
-        // horizontally with contentOffset the way real pills do) — this view only reserves the
-        // matching `rowHeight` of vertical space so TextOverlayTrackRow below it still starts at
-        // the right y, keeping this a pure (horizontally-scrolling) pill rail either way.
+        // Pure pill rail (13-19 Task E) — adds also come from EditorBottomBar's Audio action
+        // (owns AddAudioSheet); no per-row "+" tile lives here.
+        // 13-26 M7: the empty-state "＋ Add audio" placeholder is rendered by THIS row again (was
+        // TimelineTrackView.railOverlay's parallel content-coordinate layer) — drawn bounds, hit
+        // bounds, and the action now all live in the one row that owns them.
         VStack(alignment: .leading, spacing: 0) {
             if state.project.audioClips.isEmpty {
-                Color.clear.frame(height: rowHeight)
+                audioPlaceholderPill
+                    .frame(height: rowHeight, alignment: .leading)
             } else {
                 ForEach(state.project.audioClips) { clip in
                     ZStack(alignment: .topLeading) {
@@ -88,6 +93,29 @@ struct AudioTrackRow: View {
                 }
             }
         }
+    }
+
+    // MARK: - 13-26 M7: empty-state placeholder (moved back in from TimelineTrackView.railOverlay)
+
+    // Deliberately NO Button wrapper (a Button carries its own hit-region semantics that fought
+    // the drawn shape in past regressions — 13-22 i11.3): the drawn shape + an explicit
+    // .contentShape define the ONE tappable region, then .onTapGesture invokes the action.
+    private var audioPlaceholderPill: some View {
+        Text("＋ Add audio")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.55))
+            .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: rowHeight, alignment: .leading)
+            .padding(.leading, 10)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onTapGesture {
+                #if DEBUG
+                print("[hit] add-audio placeholder tapped")
+                #endif
+                onAddAudio()
+            }
+            .accessibilityLabel("Add audio")
+            .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Mutations

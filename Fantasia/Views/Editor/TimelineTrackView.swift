@@ -226,9 +226,11 @@ struct TimelineTrackView: View {
                 // doc comment); horizontal scrub still works via the SAME axis-locked gesture.
                 ZStack(alignment: .topLeading) {
                     ZStack(alignment: .topLeading) {
+                        // 13-26 M7: onAddAudio/onAddDefaultText now thread INTO the rows — each
+                        // row draws its own empty-state placeholder (single source of geometry).
                         VStack(alignment: .leading, spacing: 0) {
-                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError)
-                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError)
+                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError, onAddAudio: onAddAudio)
+                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError, onAddDefaultText: onAddDefaultText)
                             CaptionTrackRow(state: state, pxPerSecond: pxPerSecond, viewportWidth: viewportWidth, contentOffset: contentOffset)
                         }
 
@@ -766,30 +768,21 @@ struct TimelineTrackView: View {
     // viewport coordinates via a separate translate-with-tracksScrollY-only layer). Reference
     // frames f04/f10-f16's rail layout: tiles sit just LEFT of the first scene (content x < 0).
 
+    // 13-26 M7: this overlay keeps ONLY the decorative ♪/T tiles now (allowsHitTesting(false) —
+    // they never carried actions, and making that explicit removes them from hit-testing
+    // entirely). The empty-state placeholders moved INTO AudioTrackRow/TextOverlayTrackRow — the
+    // parallel-geometry layer that let a tap land on the wrong row's action is gone.
     private var railOverlay: some View {
         ZStack(alignment: .topLeading) {
             railTile(systemName: "music.note")
                 .frame(height: trackRowHeight, alignment: .center)
                 .offset(x: -(railTileSize + 8))
 
-            if state.project.audioClips.isEmpty {
-                // 13-23 J3: the row-height frame + contentShape now live INSIDE audioPlaceholderPill
-                // itself (attached to the pill's own view chain) — no wrapping frame at this call
-                // site, so there is exactly ONE place that defines both the drawn bounds and the
-                // hit-test bounds, eliminating any drawn-vs-hit-test drift between this wrapper and
-                // the button's own inferred shape.
-                audioPlaceholderPill
-            }
-
             railTile(systemName: "textformat")
                 .frame(height: trackRowHeight, alignment: .center)
                 .offset(x: -(railTileSize + 8), y: audioSectionHeight)
-
-            if state.project.textOverlays.isEmpty {
-                textPlaceholderRow
-                    .offset(y: audioSectionHeight)
-            }
         }
+        .allowsHitTesting(false)
     }
 
     private func railTile(systemName: String) -> some View {
@@ -803,44 +796,8 @@ struct TimelineTrackView: View {
             }
     }
 
-    // 13-22 i11.3: width is now EXACTLY `state.totalDuration * pxPerSecond` (was
-    // `.frame(maxWidth: .infinity)`, which — because this pill's row lived inside a
-    // viewport-width-constrained VStack — silently stretched the BUTTON's own tappable shape to
-    // the full viewport width, the root cause of "random taps open the audio sheet"). The Button
-    // wraps exactly this sized shape now, so the tap target IS the pill, nothing wider.
-
-    // "＋ Add audio" — grey rounded pill spanning [0, video end], tap opens the SAME AddAudioSheet
-    // the bottom bar's Audio action opens (onAddAudio, owned by EditorView).
-    //
-    // 13-24 K5: the Button's label IS the pill and nothing more — `.contentShape` last, at pill
-    // bounds. 13-25 L3: pill height fills trackRowHeight so drawn == hit == full row.
-    private var audioPlaceholderPill: some View {
-        Button(action: onAddAudio) {
-            Text("＋ Add audio")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: trackRowHeight, alignment: .leading)
-                .padding(.leading, 10)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Add audio")
-    }
-
-    // Empty grey rounded row spanning [0, video end], tap adds the default "Text" overlay at the
-    // playhead (onAddDefaultText, owned by EditorView — the exact same call EditorBottomBar's Text
-    // action already makes). 13-24 K5: same pill-only hit target as audioPlaceholderPill.
-    private var textPlaceholderRow: some View {
-        Button(action: onAddDefaultText) {
-            Color.white.opacity(0.06)
-                .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: trackRowHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Add text")
-    }
+    // 13-26 M7: audioPlaceholderPill/textPlaceholderRow moved INTO AudioTrackRow/
+    // TextOverlayTrackRow respectively — see railOverlay's comment above.
 
     // MARK: - Clip mutations — reconcile `state.project` from the reloaded `projectManager
     // .loadedProject` after every mutation (EditorState "owns playback/selection state, not
