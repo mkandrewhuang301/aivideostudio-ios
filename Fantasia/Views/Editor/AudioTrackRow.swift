@@ -62,6 +62,7 @@ struct AudioTrackRow: View {
                             clip: clip,
                             pxPerSecond: pxPerSecond,
                             isSelected: state.selection == .audio(clip.id),
+                            totalDuration: state.totalDuration,
                             onSelect: {
                                 // F10 (Plan 13-21): animated snap to this pill's own window BEFORE
                                 // selecting, mirroring TimelineTrackView.selectClip's snap.

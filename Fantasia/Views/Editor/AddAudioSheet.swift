@@ -20,6 +20,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct AddAudioSheet: View {
     @Environment(ThemeManager.self) private var theme
@@ -29,6 +30,10 @@ struct AddAudioSheet: View {
     /// Playhead time (seconds) at the moment the sheet was opened — defaults a newly added
     /// clip's `start_offset_seconds` to wherever the user is currently scrubbed to.
     let currentTime: Double
+    /// 13-23 J5: the project's total (video) duration — if the added track would run past this,
+    /// a `trim_end_seconds` is sent so the STORED clip already ends at the video's own end,
+    /// instead of a long track silently drawing/retiming past the visible timeline.
+    let totalDuration: Double
     /// Fires once a clip has actually been persisted (upload or preset) — no payload, since
     /// ProjectManager's add methods return Void and reconcile via re-fetch (see file header).
     var onAdded: () -> Void
@@ -253,12 +258,16 @@ struct AddAudioSheet: View {
 
         isAdding = true
         errorMessage = nil
+        // 13-23 J5: probe the file's own duration so a track longer than the remaining video time
+        // can be clamped at add-time — best-effort only (a probe failure just skips the clamp; the
+        // server's own bounds validation is the backstop, same as the untrimmed-audio case today).
+        let sourceDuration = (try? await AVURLAsset(url: tmpURL).load(.duration).seconds) ?? .infinity
         do {
             try await projectManager.addAudioClip(
                 fileURL: tmpURL,
                 startOffsetSeconds: currentTime,
                 trimStartSeconds: 0,
-                trimEndSeconds: nil
+                trimEndSeconds: clampedTrimEnd(sourceDurationSeconds: sourceDuration)
             )
             isAdding = false
             onAdded()
@@ -277,7 +286,7 @@ struct AddAudioSheet: View {
                 presetMusicId: track.id,
                 startOffsetSeconds: currentTime,
                 trimStartSeconds: 0,
-                trimEndSeconds: nil
+                trimEndSeconds: clampedTrimEnd(sourceDurationSeconds: Double(track.durationSeconds))
             )
             isAdding = false
             onAdded()
@@ -286,5 +295,15 @@ struct AddAudioSheet: View {
             isAdding = false
             errorMessage = "Couldn't add that track. Check your connection and try again."
         }
+    }
+
+    /// 13-23 J5: caps a newly-added clip's `trim_end_seconds` so it never draws/retimes past the
+    /// video's own end. Returns nil (play the full source, existing behavior) when there's enough
+    /// room left on the timeline, or when there's effectively no room at all (a near-zero clamp
+    /// isn't useful — the server's own bounds validation is the backstop for that edge case).
+    private func clampedTrimEnd(sourceDurationSeconds: Double) -> Double? {
+        let maxAllowed = totalDuration - currentTime
+        guard maxAllowed > 0.3, sourceDurationSeconds > maxAllowed else { return nil }
+        return maxAllowed
     }
 }

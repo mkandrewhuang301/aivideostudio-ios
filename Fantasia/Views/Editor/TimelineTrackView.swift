@@ -429,6 +429,11 @@ struct TimelineTrackView: View {
                     .foregroundStyle(.white)
             }
         }
+        // 13-23 J2: the stock button style dims the WHOLE label (including the opaque
+        // trackBackground fill) on press, which visibly flashed the play box's background on
+        // every tap — EditorNoPressButtonStyle renders `configuration.label` completely unchanged
+        // regardless of press state, so only the glyph itself ever swaps (play <-> pause).
+        .buttonStyle(EditorNoPressButtonStyle())
         .frame(width: playBoxWidth)
         .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
     }
@@ -664,8 +669,12 @@ struct TimelineTrackView: View {
                 .offset(x: -(railTileSize + 8))
 
             if state.project.audioClips.isEmpty {
+                // 13-23 J3: the row-height frame + contentShape now live INSIDE audioPlaceholderPill
+                // itself (attached to the pill's own view chain) — no wrapping frame at this call
+                // site, so there is exactly ONE place that defines both the drawn bounds and the
+                // hit-test bounds, eliminating any drawn-vs-hit-test drift between this wrapper and
+                // the button's own inferred shape.
                 audioPlaceholderPill
-                    .frame(height: trackRowHeight, alignment: .center)
             }
 
             railTile(systemName: "textformat")
@@ -674,7 +683,6 @@ struct TimelineTrackView: View {
 
             if state.project.textOverlays.isEmpty {
                 textPlaceholderRow
-                    .frame(height: trackRowHeight, alignment: .center)
                     .offset(y: audioSectionHeight)
             }
         }
@@ -700,6 +708,13 @@ struct TimelineTrackView: View {
 
     // "＋ Add audio" — grey rounded pill spanning [0, video end], tap opens the SAME AddAudioSheet
     // the bottom bar's Audio action opens (onAddAudio, owned by EditorView).
+    //
+    // 13-23 J3: the row-height `.frame` + an explicit `.contentShape` are now BOTH attached here,
+    // directly on the button's own view chain, INSIDE this view rather than as an external wrapper
+    // at the railOverlay call site — "attach the gesture/Button to the pill shape itself... never
+    // to a row/HStack wrapper with extra vertical padding" (13-23 J3). This guarantees the drawn
+    // bounds and the hit-test bounds are defined by the exact same `.frame`/`.contentShape` pair,
+    // so they can never drift apart.
     private var audioPlaceholderPill: some View {
         Button(action: onAddAudio) {
             Text("＋ Add audio")
@@ -708,6 +723,8 @@ struct TimelineTrackView: View {
                 .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight, alignment: .leading)
                 .padding(.leading, 10)
                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .frame(height: trackRowHeight, alignment: .center)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add audio")
@@ -715,12 +732,15 @@ struct TimelineTrackView: View {
 
     // Empty grey rounded row spanning [0, video end], tap adds the default "Text" overlay at the
     // playhead (onAddDefaultText, owned by EditorView — the exact same call EditorBottomBar's Text
-    // action already makes).
+    // action already makes). 13-23 J3: same row-height-frame-then-contentShape treatment as
+    // audioPlaceholderPill above.
     private var textPlaceholderRow: some View {
         Button(action: onAddDefaultText) {
             Color.white.opacity(0.06)
                 .frame(width: max(state.totalDuration * pxPerSecond, 60), height: placeholderPillHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(height: trackRowHeight, alignment: .center)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add text")
@@ -908,5 +928,18 @@ struct TimelineTrackView: View {
         if let refreshed = projectManager.loadedProject {
             state.project = refreshed
         }
+    }
+}
+
+// MARK: - 13-23 J2: zero-press-effect button style
+
+/// The stock system button styles (including `.plain`) dim/opacity-fade `configuration.label` on
+/// press — invisible for a bare glyph, but visibly flashes any OPAQUE background fill baked into
+/// the label (playBox's `trackBackground` fill; the fullscreen player's play/pause + minimize
+/// glyphs, for consistency). This style returns the label completely unchanged regardless of
+/// `configuration.isPressed` — background stays constant, only the glyph itself ever swaps.
+struct EditorNoPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }

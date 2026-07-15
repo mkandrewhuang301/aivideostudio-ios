@@ -94,7 +94,8 @@ struct FullscreenEditorPlayerView: View {
                     .foregroundStyle(.white)
                     .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            // 13-23 J2: matches playBox's zero-press-effect treatment for consistency.
+            .buttonStyle(EditorNoPressButtonStyle())
 
             scrubber(player: player)
 
@@ -110,7 +111,7 @@ struct FullscreenEditorPlayerView: View {
                     .foregroundStyle(.white)
                     .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EditorNoPressButtonStyle())
             .accessibilityLabel("Minimize")
         }
         .padding(.horizontal, 12)

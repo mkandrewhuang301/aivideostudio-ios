@@ -36,6 +36,10 @@ struct AudioPillView: View {
     let clip: AudioClip
     let pxPerSecond: Double
     let isSelected: Bool
+    /// 13-23 J5: the project's total (video) duration — an audio clip can never render or drag
+    /// past this bound; nothing clamped it before, so a long audio track under a short video drew
+    /// (and retimed) past the visible end of the timeline.
+    let totalDuration: Double
     let onSelect: () -> Void
     /// Fires once, on drag release (body move OR either edge-handle retrim), with the final
     /// (startOffsetSeconds, trimStartSeconds, trimEndSeconds) — the CALLER (AudioTrackRow) PATCHes
@@ -68,8 +72,12 @@ struct AudioPillView: View {
     private var trimStart: Double { previewTrimStart ?? clip.trimStartSeconds }
     private var trimEnd: Double { previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds) }
     private var duration: Double { max(0, trimEnd - trimStart) }
-    private var width: Double { max(duration * pxPerSecond, 30) }
     private var offsetSeconds: Double { previewOffset ?? clip.startOffsetSeconds }
+    // 13-23 J5: the pill can never draw past the timeline end — clamps the RENDERED duration to
+    // whatever room is left between this clip's own start offset and `totalDuration`, independent
+    // of how long the underlying trimmed source audio actually is.
+    private var clampedDuration: Double { max(0, min(duration, totalDuration - offsetSeconds)) }
+    private var width: Double { max(clampedDuration * pxPerSecond, 30) }
     // The parent row positions this pill via `.offset(x: clip.startOffsetSeconds * pxPerSecond)`
     // using the COMMITTED offset (unchanged until onRetime fires at release) — this local offset
     // compensates during a left-handle drag (which shifts BOTH startOffsetSeconds and trimStart by
@@ -144,7 +152,9 @@ struct AudioPillView: View {
                 dragTranslation = 0
                 dragStartContentOffset = nil
                 onBodyDragEnded()
-                let newOffset = max(0, clip.startOffsetSeconds + deltaSeconds)
+                var newOffset = max(0, clip.startOffsetSeconds + deltaSeconds)
+                // 13-23 J5: can't push the clip's start past the video's own end.
+                newOffset = min(newOffset, max(0, totalDuration - 0.3))
                 onRetime(newOffset, trimStart, trimEnd)
             }
     }
@@ -188,10 +198,14 @@ struct AudioPillView: View {
                     rightDragStartTrimEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
                 }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
-                // No client-known upper bound (T-13-34) — server validates against the real
-                // source duration; only guard against inverting past trimStart here.
+                // No client-known upper bound on the SOURCE file's own duration (T-13-34) — server
+                // validates against that; only guard against inverting past trimStart here.
                 let startBound = previewTrimStart ?? clip.trimStartSeconds
-                let newEnd = max(startBound + 0.3, (rightDragStartTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)) + deltaSeconds)
+                var newEnd = max(startBound + 0.3, (rightDragStartTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)) + deltaSeconds)
+                // 13-23 J5: independent client-known bound — the clip can never extend past the
+                // VIDEO's own end regardless of how much of the source file is left.
+                let maxEnd = startBound + max(0.3, totalDuration - offsetSeconds)
+                newEnd = min(newEnd, maxEnd)
                 previewTrimEnd = newEnd
             }
             .onEnded { _ in

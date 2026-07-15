@@ -331,10 +331,17 @@ private struct TextOverlayItemView: View {
                 if showsControls && isSelected { resizeHandle.offset(x: 25, y: 25) }
             }
             .overlay(alignment: .top) {
-                // F14.2, geometry fixed 13-22 i7.2: stem's BOTTOM lands exactly on the box's top
-                // border (selectionFrame's own top edge, text-frame-y = -8) — see
-                // rotationHandle's own doc comment for the derivation with the new 18pt stem.
-                if showsControls && isSelected { rotationHandle.offset(y: -26) }
+                // 13-23 J6: with `.overlay(alignment: .top)` the handle assembly's frame is
+                // top-aligned to the TEXT frame (its top at text-frame y = 0). The assembly's
+                // frame height is stemHeight + dotRadius (the dot's top half pokes above the stem
+                // top — see rotationHandle's own geometry doc) and its BOTTOM edge IS the stem's
+                // bottom. That bottom must land on the selection frame's top border (text-frame
+                // y = -8, from selectionFrame's `.padding(-8)`), so:
+                // offset = -(assemblyHeight + 8) = -(stemHeight + dotRadius + 8). Computed, not
+                // eyeballed.
+                if showsControls && isSelected {
+                    rotationHandle.offset(y: -(rotationStemHeight + rotationDotDiameter / 2 + 8))
+                }
             }
             .rotationEffect(.degrees(liveRotation))
     }
@@ -428,42 +435,41 @@ private struct TextOverlayItemView: View {
         .accessibilityLabel("Resize text overlay")
     }
 
-    // MARK: - Rotation (NEW, 13-19 Task H; geometry fixed 13-21 F14.2, redone 13-22 i7.1/i7.2) —
-    // short vertical line rising from the box's top-center to a small dot; press-drag the dot to
-    // rotate clockwise/counterclockwise. Continuous-drag control, hit area 28pt (was 34pt),
-    // exempt from the 44pt rule (same exemption resizeHandle relies on).
+    // MARK: - Rotation (NEW, 13-19 Task H; geometry rebuilt 13-23 J6) — short vertical line
+    // rising from the box's top-center to a small dot; press-drag the dot to rotate clockwise/
+    // counterclockwise. Continuous-drag control, exempt from the 44pt rule (same exemption
+    // resizeHandle relies on).
     //
-    // i7.1: the ROOT CAUSE of "rotation dot invisible" was EditorView.previewStage clipping
-    // TextOverlayCanvasView's whole overlay to the letterbox frame (`.clipShape`) — this handle
-    // ALWAYS extends above the selected box, so it got amputated whenever the box sat near the
-    // top of the canvas. Fixed at the call site (EditorView.swift) by removing that clipShape from
-    // the text-overlay overlay ONLY (video/caption layers stay clipped).
+    // J6 root cause of "dot disconnected from the stem": the previous version bottom-aligned a
+    // 28×28 hit-area ZStack (dot centered inside) against the 18pt stem frame, then offset that
+    // layer up by the FULL stem height — the dot's center landed at hit-half (14pt) MINUS the
+    // intended anchor above the stem top, i.e. 14pt above it, leaving a visible ~9pt gap between
+    // the dot's bottom edge and the stem's top pixel.
     //
-    // i7.2: the dot previously sat BELOW the stem (a VStack[stem, dot] with the dot listed
-    // second) — that put the dot OVERLAPPING the selected box's own top edge instead of at the
-    // handle's far tip, which read as "geometry has a gap" between the visible stem and where a
-    // grabbable dot should be. Rebuilt as a bottom-anchored ZStack: the stem's BOTTOM is the fixed
-    // reference point (touches the selectionFrame's top edge, text-frame-y = -8 — same anchor
-    // math as before, now solved for an 18pt stem: `.offset(y: -(8 + stemHeight))` on the whole
-    // assembly below), and the dot is a SEPARATE layer offset UP by the full stem height so its
-    // CENTER (not edge) sits exactly at the stem's top.
+    // Rebuilt with explicit geometry, no alignment/offset stacking guesswork:
+    //   - assembly frame: width 28 (hit width), height = stemHeight + dotRadius, bottom-aligned
+    //     content — the frame's BOTTOM edge is the stem's bottom endpoint (the mount anchor).
+    //   - stem: 1.5 × 18, bottom at the frame's bottom → stem TOP sits at frame-y = dotRadius.
+    //   - dot: 10pt circle, bottom-aligned like the stem (center at frame-bottom − 5), then
+    //     offset UP by (stemHeight − dotRadius) so its CENTER lands exactly ON the stem's top
+    //     endpoint (frame-y = dotRadius): -13 = -(18 − 5). No gap — the dot's lower half overlaps
+    //     the stem's last 5 pixels.
+    //   - contentShape covers the full 28-wide assembly (dot + entire stem) for the drag target.
     private let rotationStemHeight: CGFloat = 18
+    private let rotationDotDiameter: CGFloat = 10
 
     private var rotationHandle: some View {
         ZStack(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.9))
                 .frame(width: 1.5, height: rotationStemHeight)
-            ZStack {
-                Color.white.opacity(0.001).frame(width: 28, height: 28) // hit area
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 10, height: 10)
-                    .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
-            }
-            .offset(y: -rotationStemHeight) // dot's CENTER at the stem's top
+            Circle()
+                .fill(Color.white)
+                .frame(width: rotationDotDiameter, height: rotationDotDiameter)
+                .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
+                .offset(y: -(rotationStemHeight - rotationDotDiameter / 2)) // center == stem top
         }
-        .frame(height: rotationStemHeight, alignment: .bottom)
+        .frame(width: 28, height: rotationStemHeight + rotationDotDiameter / 2, alignment: .bottom)
         .contentShape(Rectangle())
         .highPriorityGesture(rotationDragGesture)
         .accessibilityLabel("Rotate text overlay")

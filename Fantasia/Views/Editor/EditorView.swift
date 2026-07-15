@@ -94,7 +94,7 @@ struct EditorView: View {
                 // per sheet presentation) — onAdded diffs against it to find the newly-added row
                 // and records an "add" UndoableAction (undo = soft-delete, redo = restore).
                 let idsBefore = Set(state.project.audioClips.map(\.id))
-                AddAudioSheet(currentTime: state.currentTime, onAdded: {
+                AddAudioSheet(currentTime: state.currentTime, totalDuration: state.totalDuration, onAdded: {
                     syncProjectFromManager()
                     let newIds = Set(state.project.audioClips.map(\.id)).subtracting(idsBefore)
                     for newId in newIds {
