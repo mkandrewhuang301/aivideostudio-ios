@@ -14,6 +14,10 @@ final class ProjectManager {
     private static let snapshotName = "projectsSnapshot"
     private static let staleAfter: TimeInterval = 60
 
+    private static func editProjectSnapshotName(id: String) -> String {
+        "editProject-\(id)"
+    }
+
     // Published state — read by the Studio hub grid and the editor screen (plans 09-18).
     var projects: [ProjectSummary] = []
     var loadedProject: EditProject?
@@ -50,6 +54,18 @@ final class ProjectManager {
     private func persistSnapshot() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         ListSnapshotStore.save(projects, name: Self.snapshotName, uid: uid)
+    }
+
+    private func persistEditProjectSnapshot(_ project: EditProject) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        ListSnapshotStore.save([project], name: Self.editProjectSnapshotName(id: project.id), uid: uid)
+    }
+
+    private func loadEditProjectSnapshot(id: String) -> EditProject? {
+        guard let uid = Auth.auth().currentUser?.uid,
+              let snapshot = ListSnapshotStore.load([EditProject].self, name: Self.editProjectSnapshotName(id: id), uid: uid),
+              let project = snapshot.items.first else { return nil }
+        return project
     }
 
     // MARK: - Project hub list (D-06 — the Studio grid: "+" tile + existing project tiles)
@@ -114,6 +130,7 @@ final class ProjectManager {
         }
         let full = try await APIClient.shared.getProject(id: created.id)
         loadedProject = full
+        persistEditProjectSnapshot(full)
         projects.insert(
             ProjectSummary(id: full.id, title: full.title, thumbnailUrl: full.thumbnailUrl, updatedAt: full.updatedAt),
             at: 0
@@ -124,12 +141,24 @@ final class ProjectManager {
 
     // MARK: - Opening / reloading a project (D-01)
 
+    /// Cache-first open (Plan 13-25 L7): when a per-project snapshot exists, hydrates
+    /// `loadedProject` synchronously and kicks a background URL refresh. Returns `true` on
+    /// cache hit so the caller can navigate immediately without awaiting the network.
+    func openProjectFromCache(id: String) -> Bool {
+        guard let cached = loadEditProjectSnapshot(id: id) else { return false }
+        loadedProject = cached
+        Task { await refreshLoadedProjectURLs() }
+        return true
+    }
+
     func openProject(id: String) async {
         isLoading = true
         loadError = nil
         defer { isLoading = false }
         do {
-            loadedProject = try await APIClient.shared.getProject(id: id)
+            let project = try await APIClient.shared.getProject(id: id)
+            loadedProject = project
+            persistEditProjectSnapshot(project)
         } catch {
             print("[ProjectManager] openProject error: \(error)")
             loadError = "Couldn't open this project."
@@ -143,7 +172,9 @@ final class ProjectManager {
     func refreshLoadedProjectURLs() async {
         guard let id = loadedProject?.id else { return }
         do {
-            loadedProject = try await APIClient.shared.getProject(id: id)
+            let project = try await APIClient.shared.getProject(id: id)
+            loadedProject = project
+            persistEditProjectSnapshot(project)
         } catch {
             print("[ProjectManager] refreshLoadedProjectURLs error: \(error)")
         }
@@ -155,6 +186,9 @@ final class ProjectManager {
         try await APIClient.shared.deleteProject(id: id)
         projects.removeAll { $0.id == id }
         if loadedProject?.id == id { loadedProject = nil }
+        if let uid = Auth.auth().currentUser?.uid {
+            ListSnapshotStore.clear(name: Self.editProjectSnapshotName(id: id), uid: uid)
+        }
         persistSnapshot()
     }
 

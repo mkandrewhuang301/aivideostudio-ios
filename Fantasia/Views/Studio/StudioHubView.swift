@@ -21,9 +21,8 @@ struct StudioHubView: View {
     @State private var showMediaPicker = false
     @State private var isCreatingProject = false
 
-    // Tap a project tile → open it (openProject already awaited before this is set, so
-    // projectManager.loadedProject is populated by the time navigation fires), then push the
-    // real Editor (Plan 11).
+    // Tap a project tile → open it (cache-first when a snapshot exists; otherwise await the
+    // network GET before pushing EditorView).
     @State private var openedProjectId: String?
 
     // Long-press → Delete → the reused confirmationDialog pattern (D-04), verbatim copy from
@@ -121,9 +120,13 @@ struct StudioHubView: View {
                 ProjectTileView(
                     project: project,
                     onTap: {
-                        Task {
-                            await projectManager.openProject(id: project.id)
+                        if projectManager.openProjectFromCache(id: project.id) {
                             openedProjectId = project.id
+                        } else {
+                            Task {
+                                await projectManager.openProject(id: project.id)
+                                openedProjectId = project.id
+                            }
                         }
                     },
                     onRequestDelete: { projectPendingDelete = project }
@@ -194,9 +197,8 @@ struct StudioHubView: View {
 
     // MARK: - Editor destination (Plan 11's real EditorView)
 
-    /// `openProject(id:)` is always awaited before `openedProjectId` is set (both at the tile-tap
-    /// call site above and in `createProject`), so `loadedProject` is populated by the time this
-    /// destination is pushed — the ProgressView branch only covers the (rare) case where a pull-
+    /// `openProjectFromCache` or `openProject` populates `loadedProject` before (or as) this
+    /// destination is pushed — the ProgressView branch only covers the rare case where a pull-
     /// to-refresh or delete raced the navigation and cleared it out from under us.
     @ViewBuilder
     private func editorDestination(projectId: String) -> some View {
