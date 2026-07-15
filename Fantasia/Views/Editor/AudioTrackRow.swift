@@ -31,6 +31,15 @@ struct AudioTrackRow: View {
     let state: EditorState
     let pxPerSecond: Double
     var rowHeight: CGFloat = 28
+    /// 13-22 i14: the timeline's own viewport width + LIVE contentOffset (recomputed every render
+    /// from state.currentTime) — needed to detect a pill body-drag's finger nearing either edge
+    /// and to feed each pill a live compensation value while an auto-scroll loop runs. See
+    /// EdgeAutoScroll.swift.
+    let viewportWidth: CGFloat
+    let contentOffset: CGFloat
+
+    @State private var edgeScrollTask: Task<Void, Never>?
+    @State private var edgeScrollRate: Double?
 
     var body: some View {
         // Pure pill rail (13-19 Task E) — adds now come exclusively from EditorBottomBar's
@@ -60,6 +69,13 @@ struct AudioTrackRow: View {
                             },
                             onRetime: { offset, trimStart, trimEnd in
                                 Task { await retime(id: clip.id, offset: offset, trimStart: trimStart, trimEnd: trimEnd) }
+                            },
+                            contentOffset: contentOffset,
+                            onBodyDragLocationChanged: { fingerX in
+                                updateEdgeScroll(fingerX: fingerX)
+                            },
+                            onBodyDragEnded: {
+                                stopEdgeScroll()
                             }
                         )
                         .offset(x: clip.startOffsetSeconds * pxPerSecond)
@@ -127,5 +143,34 @@ struct AudioTrackRow: View {
         if let refreshed = projectManager.loadedProject {
             state.project = refreshed
         }
+    }
+
+    // MARK: - 13-22 i14: edge auto-scroll while dragging a pill's body — see
+    // TextOverlayTrackRow's identical implementation for the full doc comment.
+
+    private func updateEdgeScroll(fingerX: CGFloat) {
+        let newRate = EdgeAutoScroll.rate(fingerX: fingerX, viewportWidth: viewportWidth, pxPerSecond: pxPerSecond)
+        guard newRate != edgeScrollRate else { return }
+        edgeScrollRate = newRate
+        edgeScrollTask?.cancel()
+        guard let rate = newRate else {
+            edgeScrollTask = nil
+            return
+        }
+        edgeScrollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(16)) // ~60Hz
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    state.currentTime = state.clampTime(state.currentTime + rate / 60.0)
+                }
+            }
+        }
+    }
+
+    private func stopEdgeScroll() {
+        edgeScrollTask?.cancel()
+        edgeScrollTask = nil
+        edgeScrollRate = nil
     }
 }

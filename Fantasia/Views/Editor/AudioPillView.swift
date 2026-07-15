@@ -41,10 +41,19 @@ struct AudioPillView: View {
     /// (startOffsetSeconds, trimStartSeconds, trimEndSeconds) — the CALLER (AudioTrackRow) PATCHes
     /// via `ProjectManager.updateAudioClip`.
     let onRetime: (Double, Double, Double) -> Void
+    /// 13-22 i14: the row's LIVE contentOffset — see TextOverlayPillView's identical param doc
+    /// comment.
+    let contentOffset: CGFloat
+    /// Fires the finger's x (in the "timeline" named coordinate space) on every BODY-drag
+    /// onChanged — never during a handle drag.
+    var onBodyDragLocationChanged: (CGFloat) -> Void = { _ in }
+    /// Fires once on body-drag release.
+    var onBodyDragEnded: () -> Void = {}
 
     @State private var dragTranslation: CGFloat = 0
     @State private var leftDragStart: (offset: Double, trimStart: Double)? = nil
     @State private var rightDragStartTrimEnd: Double? = nil
+    @State private var dragStartContentOffset: CGFloat? = nil
     // 13-22 i4: commit-on-release — onChanged only updates these LOCAL preview values (pill
     // width/offset render from them); onRetime fires ONCE in .onEnded with the final values.
     // Previously onRetime fired on every onChanged (a network PATCH + full re-sync per finger
@@ -67,6 +76,12 @@ struct AudioPillView: View {
     // the same delta) so the leading edge tracks the finger while the trailing edge stays visually
     // fixed. Zero during a right-handle or body drag.
     private var trimHandleOffsetX: CGFloat { CGFloat(offsetSeconds - clip.startOffsetSeconds) * pxPerSecond }
+    // 13-22 i14: cancels the row's contentOffset shift during an edge-auto-scroll-driven body
+    // drag — see TextOverlayPillView.edgeScrollCompensationX's doc comment for the full
+    // derivation. Zero when not dragging.
+    private var edgeScrollCompensationX: CGFloat {
+        (dragStartContentOffset ?? contentOffset) - contentOffset
+    }
 
     private var icon: String {
         switch clip.sourceType {
@@ -99,7 +114,7 @@ struct AudioPillView: View {
             if isSelected { handle.highPriorityGesture(rightHandleGesture) }
         }
         // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
-        .offset(x: dragTranslation + trimHandleOffsetX)
+        .offset(x: dragTranslation + trimHandleOffsetX + edgeScrollCompensationX)
     }
 
     private var handle: some View {
@@ -116,14 +131,19 @@ struct AudioPillView: View {
     // MARK: - Body drag (move — shifts start_offset_seconds only, trim window unchanged)
 
     private var bodyDragGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
+        // 13-22 i14: named coordinate space — see TextOverlayPillView's identical gesture doc.
+        DragGesture(minimumDistance: 3, coordinateSpace: .named("timeline"))
             .onChanged { value in
                 onSelect()
+                if dragStartContentOffset == nil { dragStartContentOffset = contentOffset }
                 dragTranslation = value.translation.width
+                onBodyDragLocationChanged(value.location.x)
             }
             .onEnded { value in
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 dragTranslation = 0
+                dragStartContentOffset = nil
+                onBodyDragEnded()
                 let newOffset = max(0, clip.startOffsetSeconds + deltaSeconds)
                 onRetime(newOffset, trimStart, trimEnd)
             }

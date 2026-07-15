@@ -92,6 +92,7 @@
 		C2B359997B2C9829C6BB635F /* ScrollFriendlyContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A200AB6D9DBBC0500F05205 /* ScrollFriendlyContextMenu.swift */; };
 		C2DC853F0FAFD1A9D4CD22D7 /* presets.json in Resources */ = {isa = PBXBuildFile; fileRef = AFB7654B0746207F617ED9A4 /* presets.json */; };
 		CD588BB0CE704C261299154A /* TextOverlayCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4ECBA84FDBAF62C8708156 /* TextOverlayCanvasView.swift */; };
+		E5223F3314D55AC52181C730 /* EdgeAutoScroll.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B51D2515F117382711CF3A /* EdgeAutoScroll.swift */; };
 		CEF62DAE8702AA91759CCB21 /* LibraryThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */; };
 		D159637964125A3A1F0361EC /* GenerationDetailPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14394B580AF055B8F4BDF02 /* GenerationDetailPagerView.swift */; };
 		D5B57AF6D5862CDBAA8414E8 /* LoopPlayerPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */; };
@@ -152,6 +153,7 @@
 		45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCache.swift; sourceTree = "<group>"; };
 		462ABB111EB4D74E5344ECFB /* MaskEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorView.swift; sourceTree = "<group>"; };
 		4A4ECBA84FDBAF62C8708156 /* TextOverlayCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextOverlayCanvasView.swift; sourceTree = "<group>"; };
+		A4B51D2515F117382711CF3A /* EdgeAutoScroll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeAutoScroll.swift; sourceTree = "<group>"; };
 		4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfferingsManager.swift; sourceTree = "<group>"; };
 		4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTrackView.swift; sourceTree = "<group>"; };
 		54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationDetailSheet.swift; sourceTree = "<group>"; };
@@ -545,6 +547,7 @@
 				1BB21E9FB37EB647392EA743 /* CaptionTrackRow.swift */,
 				8867510E5992319DB56765C9 /* ClipPillView.swift */,
 				E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */,
+				A4B51D2515F117382711CF3A /* EdgeAutoScroll.swift */,
 				C4B4F501364C0B7DF4678081 /* EditorBottomBar.swift */,
 				B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */,
 				EEA1EAE8480B4A8A377C4028 /* EditorHistory.swift */,
@@ -767,6 +770,7 @@
 				14C33C25B4E446F40F55E0F3 /* SocialSignInButton.swift in Sources */,
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
 				F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */,
+				E5223F3314D55AC52181C730 /* EdgeAutoScroll.swift in Sources */,
 				CD588BB0CE704C261299154A /* TextOverlayCanvasView.swift in Sources */,
 				B005229F73374713E0EFCD6C /* TextOverlayPillView.swift in Sources */,
 				F5BC9EED839AD6832329A1EE /* TextOverlayTrackRow.swift in Sources */,

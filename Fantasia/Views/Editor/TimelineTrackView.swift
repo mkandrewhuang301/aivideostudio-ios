@@ -170,9 +170,9 @@ struct TimelineTrackView: View {
                 ZStack(alignment: .topLeading) {
                     ZStack(alignment: .topLeading) {
                         VStack(alignment: .leading, spacing: 0) {
-                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
-                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight)
-                            CaptionTrackRow(state: state, pxPerSecond: pxPerSecond)
+                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset)
+                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset)
+                            CaptionTrackRow(state: state, pxPerSecond: pxPerSecond, viewportWidth: viewportWidth, contentOffset: contentOffset)
                         }
 
                         // 13-22 i11 (user decision): rail tiles (♪/T) + empty-state placeholders
@@ -257,6 +257,11 @@ struct TimelineTrackView: View {
                     .offset(x: viewportWidth - 46 - 8, y: clipRowTop + (clipRowHeight - 46) / 2)
             }
         }
+        // 13-22 i14: named coordinate space every pill's body-drag gesture reads its finger
+        // position in (`DragGesture(coordinateSpace: .named("timeline"))`) — screen-fixed
+        // regardless of contentOffset/tracksScrollY, so edge-zone detection (EdgeAutoScroll) is
+        // always relative to the TIMELINE'S OWN viewport, not any single descendant's local frame.
+        .coordinateSpace(name: "timeline")
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
