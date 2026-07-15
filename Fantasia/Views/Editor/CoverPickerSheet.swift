@@ -33,7 +33,11 @@ struct CoverPickerSheet: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    @State private var previewGenerationTask: Task<Void, Never>?
+    // 13-26 M5: latest-wins preview generation (replaces the cancel-storm debounce — see
+    // schedulePreviewRegeneration's doc comment). `pendingTime` is the newest scrubbed time not
+    // yet rendered; `isGeneratingPreview` is true while the drain loop runs.
+    @State private var isGeneratingPreview = false
+    @State private var pendingTime: Double?
     @State private var stripDragStartTime: Double?
 
     // Ephemeral overlay state — never persisted; see file header.
@@ -235,6 +239,10 @@ struct CoverPickerSheet: View {
             }
             .onEnded { _ in
                 stripDragStartTime = nil
+                // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
+                // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
+                let finalTime = scrubbedTime
+                Task { await generatePreview(at: finalTime) }
             }
     }
 
@@ -246,7 +254,9 @@ struct CoverPickerSheet: View {
                 .fill(Color.white.opacity(0.08))
                 .frame(height: 1)
             HStack(spacing: 0) {
-                coverTab(icon: "film", label: "Frame", tab: .frame) {
+                // 13-26 M6.1: "Frame" → "Cover" — this tab picks the COVER frame; the old label
+                // read as a generic frame tool.
+                coverTab(icon: "film", label: "Cover", tab: .frame) {
                     selectedTab = .frame
                     selectedOverlayId = nil
                 }
@@ -313,16 +323,43 @@ struct CoverPickerSheet: View {
         await generatePreview(at: scrubbedTime)
     }
 
+    /// 13-26 M5: latest-wins throttling. The old cancel+120ms-sleep debounce cancelled the pending
+    /// task on EVERY drag change — during continuous strip movement no render ever survived to
+    /// completion, so the big preview sat frozen until the finger stopped (the reported "strip
+    /// slides but preview never updates" bug). Now: every change just records the newest time;
+    /// exactly one drain loop runs at a time, rendering FAST (½s-tolerance, keyframe-near) frames
+    /// back-to-back, always picking up the most recent pending time next — the preview visibly
+    /// tracks the drag at whatever rate the device can decode. The strip gesture's .onEnded fires
+    /// one final PRECISE render at the resting time.
     private func schedulePreviewRegeneration() {
-        previewGenerationTask?.cancel()
-        let target = scrubbedTime
-        previewGenerationTask = Task {
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            await generatePreview(at: target)
+        pendingTime = scrubbedTime
+        guard !isGeneratingPreview else { return }
+        isGeneratingPreview = true
+        Task {
+            while let t = pendingTime {
+                pendingTime = nil
+                await generateFastPreview(at: t)
+            }
+            isGeneratingPreview = false
         }
     }
 
+    /// FAST during-drag frame: ½-second tolerance snaps to a cheap nearby keyframe.
+    private func generateFastPreview(at time: Double) async {
+        guard let composition else { return }
+        let generator = AVAssetImageGenerator(asset: composition)
+        generator.appliesPreferredTrackTransform = true
+        generator.videoComposition = videoComposition
+        generator.maximumSize = canvasPixelSize
+        let fastTolerance = CMTime(value: 1, timescale: 2)
+        generator.requestedTimeToleranceBefore = fastTolerance
+        generator.requestedTimeToleranceAfter = fastTolerance
+        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+        guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
+        previewImage = UIImage(cgImage: cgImage)
+    }
+
+    /// PRECISE frame (zero tolerance) — initial load, drag-end landing, and the frame Save uses.
     private func generatePreview(at time: Double) async {
         guard let composition else { return }
         let generator = AVAssetImageGenerator(asset: composition)
