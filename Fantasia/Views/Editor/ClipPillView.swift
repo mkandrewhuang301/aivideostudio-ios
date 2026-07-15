@@ -80,9 +80,12 @@ struct ClipPillView: View {
     @State private var previewTrimStart: Double? = nil
     @State private var previewTrimEnd: Double? = nil
     @State private var filmstripFrames: [Int: UIImage] = [:]
-    // F5: the cell count actually rendered/loaded — only syncs to the live `cellCount` when NOT
-    // mid-pinch (see `isZooming` doc comment above).
-    @State private var committedCellCount: Int = 1
+    // 13-24 K2 / F5: px-per-second used for SOURCE cell layout+loads. Frozen while pinching so
+    // cells don't thrash; resyncs when isZooming flips false.
+    @State private var committedPxPerSecond: Double = 44
+    /// 13-24 K1: GestureState resets on EVERY termination path (end/cancel/interrupt) — drives
+    /// the guaranteed reorder exit that bare `.onEnded` can miss.
+    @GestureState private var reorderGestureActive = false
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)      // #8C59FF
 
@@ -105,8 +108,15 @@ struct ClipPillView: View {
     // the trailing edge visually fixed (matches every trim-handle UX convention). Zero during a
     // right-handle drag, and irrelevant while reordering (handles are hidden then).
     private var trimHandleOffsetX: CGFloat { CGFloat(trimStart - clip.trimStartSeconds) * pxPerSecond }
-    private var cellCount: Int { max(1, Int((width / cellWidth).rounded(.up))) }
-    private var effectiveCellCount: Int { isZooming ? committedCellCount : cellCount }
+
+    /// 13-24 K2: layout zoom for the SOURCE strip (frozen mid-pinch).
+    private var layoutPxPerSecond: Double { isZooming ? committedPxPerSecond : pxPerSecond }
+    private var originalDuration: Double { max(clip.originalDurationSeconds ?? duration, duration, 0.1) }
+    /// Cells cover the full source, independent of trim window.
+    private var sourceCellCount: Int {
+        max(1, Int((originalDuration * layoutPxPerSecond / Double(cellWidth)).rounded(.up)))
+    }
+    private var zoomBucket: Int { Int(layoutPxPerSecond.rounded()) }
 
     var body: some View {
         ZStack {
@@ -153,15 +163,18 @@ struct ClipPillView: View {
         // vars never populated) — only the dragged clip's own `dragOffsetX` applies here.
         .offset(x: isBeingDragged ? dragOffsetX : trimHandleOffsetX)
         .animation(.spring(duration: 0.25), value: isReordering)
-        .task(id: "\(clip.id)-\(clip.url ?? "")-\(effectiveCellCount)") {
+        .task(id: "\(clip.id)-\(clip.url ?? "")-\(sourceCellCount)-\(zoomBucket)") {
             guard clip.mediaType != "image" else { return }
             await loadFilmstripIfNeeded()
         }
-        .onAppear { committedCellCount = cellCount }
-        // F5: the pinch just ended — resync to whatever cellCount the final width settled at,
-        // which re-triggers the .task above (effectiveCellCount now tracks live cellCount again).
+        .onAppear { committedPxPerSecond = pxPerSecond }
+        // F5 / K2: pinch ended — resync layout px so cells resample at the new zoom bucket.
         .onChange(of: isZooming) { wasZooming, nowZooming in
-            if wasZooming, !nowZooming { committedCellCount = cellCount }
+            if wasZooming, !nowZooming { committedPxPerSecond = pxPerSecond }
+        }
+        // 13-24 K1: when GestureState resets (any exit path), always tear down reorder mode.
+        .onChange(of: reorderGestureActive) { _, active in
+            if !active { onReorderEnded() }
         }
     }
 
@@ -186,16 +199,18 @@ struct ClipPillView: View {
                 placeholderGlyph
             }
         } else if !filmstripFrames.isEmpty {
-            // F5: renders at `effectiveCellCount` (frozen during a pinch), then `.scaleEffect`s the
-            // whole strip horizontally to match the LIVE `width` — existing frames visibly stretch
-            // as the user pinches instead of the grid abruptly adding/removing cells (which would
-            // otherwise re-trigger an AVAssetImageGenerator load burst on every magnification
-            // delta). The scale factor collapses back to ~1 the instant the pinch ends and
-            // `effectiveCellCount` resyncs to the live `cellCount`.
-            let renderedCellCount = effectiveCellCount
-            let nominalWidth = CGFloat(renderedCellCount) * cellWidth
+            // 13-24 K2: SOURCE-anchored strip — cells are fixed to source time from t=0; the pill
+            // is a WINDOW (offset + clipped frame). Trim left slides the strip; trim right only
+            // changes the window width. No stretch. Mid-pinch: layout uses committedPx; live
+            // width scales the windowed strip so frames don't resample until pinch ends.
+            let layoutPx = layoutPxPerSecond
+            let layoutWindowWidth = max(duration * layoutPx, 30)
+            let zoomScale = isZooming && committedPxPerSecond > 0
+                ? pxPerSecond / committedPxPerSecond
+                : 1.0
+            let stripWidth = CGFloat(sourceCellCount) * cellWidth
             HStack(spacing: 0) {
-                ForEach(0..<renderedCellCount, id: \.self) { index in
+                ForEach(0..<sourceCellCount, id: \.self) { index in
                     Group {
                         if let frame = filmstripFrames[index] {
                             Image(uiImage: frame).resizable().scaledToFill()
@@ -203,12 +218,17 @@ struct ClipPillView: View {
                             Color.clear
                         }
                     }
-                    .frame(width: cellWidth)
+                    .frame(width: cellWidth, height: 58)
+                    .clipped()
                 }
             }
-            .frame(width: nominalWidth, height: 58, alignment: .leading)
-            .scaleEffect(x: nominalWidth > 0 ? width / nominalWidth : 1, y: 1, anchor: .leading)
+            .frame(width: stripWidth, height: 58, alignment: .leading)
+            .offset(x: -CGFloat(trimStart) * layoutPx)
+            .frame(width: layoutWindowWidth, height: 58, alignment: .leading)
+            .clipped()
+            .scaleEffect(x: zoomScale, y: 1, anchor: .leading)
             .frame(width: width, height: 58, alignment: .leading)
+            .clipped()
         } else {
             placeholderGlyph
         }
@@ -257,14 +277,19 @@ struct ClipPillView: View {
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 92, height: 116)
 
-        for index in 0..<effectiveCellCount {
+        // 13-24 K2: sample SOURCE time from 0, independent of trim. Cache keys include zoom bucket
+        // so different px/s tiers don't collide.
+        let layoutPx = layoutPxPerSecond
+        let bucket = Int(layoutPx.rounded())
+        let count = sourceCellCount
+        for index in 0..<count {
             if Task.isCancelled { return }
-            let cacheKey = "\(clip.id)-\(index)" as NSString
+            let cacheKey = "\(clip.id)-src\(index)-z\(bucket)" as NSString
             if let cached = Self.filmstripCache.object(forKey: cacheKey) {
                 filmstripFrames[index] = cached
                 continue
             }
-            let seconds = trimStart + Double(index) * (cellWidth / pxPerSecond)
+            let seconds = Double(index) * (Double(cellWidth) / layoutPx)
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             guard let (cgImage, _) = try? await generator.image(at: time) else { continue }
             let image = UIImage(cgImage: cgImage)
@@ -285,17 +310,16 @@ struct ClipPillView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - 13-22 i12: long-press-to-lift reorder. A plain (non-held) drag never satisfies
-    // LongPressGesture's minimumDuration and SwiftUI fails the whole sequence, letting the touch
-    // fall through to TimelineTrackView's background scrubGesture — a quick drag on a clip scrubs
-    // (CapCut behavior); only a genuine 0.35s hold engages reorder mode. `.first(true)` (the long
-    // press succeeding) is idempotency-guarded by the CALLER (TimelineTrackView.startReorder
-    // no-ops if this clip is already the one being dragged), since SwiftUI may deliver that case
-    // more than once before the sequence advances to `.second`.
+    // MARK: - 13-22 i12 / 13-24 K1: long-press-to-lift reorder. Hold threshold is 0.5s so a tap
+    // never lifts. GestureState guarantees exit on ANY release/cancel (bare .onEnded can miss).
+    // A plain (non-held) drag fails the long-press and falls through to background scrub.
 
     private var reorderGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.35)
+        LongPressGesture(minimumDuration: 0.5)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .updating($reorderGestureActive) { _, state, _ in
+                state = true
+            }
             .onChanged { value in
                 switch value {
                 case .first(true):
@@ -307,7 +331,7 @@ struct ClipPillView: View {
                 }
             }
             .onEnded { _ in
-                onReorderEnded()
+                onReorderEnded() // idempotent duplicate of GestureState exit
             }
     }
 
