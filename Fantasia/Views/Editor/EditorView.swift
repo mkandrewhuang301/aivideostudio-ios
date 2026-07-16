@@ -253,6 +253,14 @@ struct EditorView: View {
         if isPlaying {
             currentPlayEnd = computePlayEnd()
             player?.play()
+#if DEBUG
+            if let player {
+                print(
+                    "[EditorView] play requested: timeControlStatus=\(player.timeControlStatus.rawValue) "
+                    + "waitingReason=\(player.reasonForWaitingToPlay?.rawValue ?? \"nil\")"
+                )
+            }
+#endif
         } else {
             player?.pause()
         }
@@ -733,6 +741,9 @@ struct EditorView: View {
         item.videoComposition = videoComposition
         observePlayerItemStatus(item)
         let avPlayer = AVPlayer(playerItem: item)
+        // The editor composition is assembled entirely from validated local cache files. Waiting
+        // to minimize network stalls can leave composition-backed playback parked indefinitely.
+        avPlayer.automaticallyWaitsToMinimizeStalling = false
         player = avPlayer
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
@@ -796,8 +807,24 @@ struct EditorView: View {
 
     private func observePlayerItemStatus(_ item: AVPlayerItem) {
         playerItemStatusObservation = item.observe(\.status, options: [.new, .initial]) { item, _ in
-            guard item.status == .failed else { return }
-            print("[EditorView] player item failed: \(String(describing: item.error))")
+            switch item.status {
+            case .readyToPlay:
+                Task { @MainActor in
+                    guard let player, player.currentItem === item else { return }
+                    // A custom videoComposition may not present its first frame until a seek is
+                    // issued after readiness. This single exact seek primes the render pipeline.
+                    let target = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+                    player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                        Task { @MainActor in
+                            if state.isPlaying { player.play() }
+                        }
+                    }
+                }
+            case .failed:
+                print("[EditorView] player item failed: \(String(describing: item.error))")
+            default:
+                break
+            }
         }
     }
 
