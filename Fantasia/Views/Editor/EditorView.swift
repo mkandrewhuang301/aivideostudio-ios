@@ -34,6 +34,8 @@ struct EditorView: View {
     @State private var player: AVPlayer?
     @State private var timeObserverToken: Any?
     @State private var playerItemStatusObservation: NSKeyValueObservation?
+    @State private var playerItemFailureObservation: NSObjectProtocol?
+    @State private var playerRebuildGeneration: UInt = 0
     @State private var scrubSeekInFlight = false
     @State private var pendingScrubTarget: Double?
     @State private var slowScrubMode = false
@@ -807,14 +809,19 @@ struct EditorView: View {
     // EditorCompositionBuilder.swift's KNOWN LIMITATION doc comment for the image-clip caveat.
 
     private func rebuildPlayer() async {
+        playerRebuildGeneration &+= 1
+        let rebuildGeneration = playerRebuildGeneration
         tearDownPlayerObserverOnly()
         await refreshOriginalAspectFraction()
+        guard rebuildGeneration == playerRebuildGeneration else { return }
         guard let (composition, videoComposition, ranges, isDegraded) = await EditorCompositionBuilder.build(
             clips: state.project.clips, aspectRatio: state.aspectRatio
         ) else { return }
+        guard rebuildGeneration == playerRebuildGeneration else { return }
         if isDegraded, !didAttemptCachePurge {
             didAttemptCachePurge = true
             await ClipFileCache.shared.remove(clipIds: state.project.clips.map(\.id))
+            guard rebuildGeneration == playerRebuildGeneration else { return }
             await projectManager.refreshLoadedProjectURLs()
             return
         }
@@ -832,12 +839,13 @@ struct EditorView: View {
         // pillarboxed/letterboxed instead of stretched to the first clip's shape. Fullscreen
         // shares this same item (13-22 i6.1), so it inherits the treatment automatically.
         item.videoComposition = videoComposition
-        observePlayerItemStatus(item)
         let avPlayer = AVPlayer(playerItem: item)
         // The editor composition is assembled entirely from validated local cache files. Waiting
         // to minimize network stalls can leave composition-backed playback parked indefinitely.
         avPlayer.automaticallyWaitsToMinimizeStalling = false
         player = avPlayer
+        observePlayerItemStatus(item, on: avPlayer)
+        observePlayerItemFailure(item, on: avPlayer)
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
@@ -898,18 +906,19 @@ struct EditorView: View {
         return url
     }
 
-    private func observePlayerItemStatus(_ item: AVPlayerItem) {
+    private func observePlayerItemStatus(_ item: AVPlayerItem, on observedPlayer: AVPlayer) {
         playerItemStatusObservation = item.observe(\.status, options: [.new, .initial]) { item, _ in
             switch item.status {
             case .readyToPlay:
                 Task { @MainActor in
-                    guard let player, player.currentItem === item else { return }
+                    guard player === observedPlayer, observedPlayer.currentItem === item else { return }
                     // A custom videoComposition may not present its first frame until a seek is
                     // issued after readiness. This single exact seek primes the render pipeline.
                     let target = CMTime(seconds: state.currentTime, preferredTimescale: 600)
-                    player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    observedPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
                         Task { @MainActor in
-                            if state.isPlaying { player.play() }
+                            guard player === observedPlayer, observedPlayer.currentItem === item else { return }
+                            if state.isPlaying { observedPlayer.play() }
                         }
                     }
                 }
@@ -921,8 +930,59 @@ struct EditorView: View {
         }
     }
 
+    /// A video-composition processor can fail after the item has already reached `.readyToPlay`.
+    /// In that case `item.status` stays ready, so the status KVO above never reports the failure and
+    /// AVPlayerLayer remains silently black. Keep the per-clip aspect-fit composition as the primary
+    /// path, but retry once with the same assembled asset and no custom video composition. The plain
+    /// composition may stretch a later mixed-aspect segment, but it restores visible, seekable
+    /// playback instead of leaving the entire editor unusable. A fallback item has nil
+    /// `videoComposition`, which also makes this intrinsically one-shot.
+    private func observePlayerItemFailure(_ item: AVPlayerItem, on observedPlayer: AVPlayer) {
+        playerItemFailureObservation = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { notification in
+            let notificationErrorDescription = String(
+                describing: notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]
+            )
+            Task { @MainActor in
+                guard player === observedPlayer, observedPlayer.currentItem === item else { return }
+                print(
+                    "[EditorView] player item failed to play to end: "
+                    + "notificationError=\(notificationErrorDescription) "
+                    + "itemError=\(String(describing: item.error)) "
+                    + "hasVideoComposition=\(item.videoComposition != nil)"
+                )
+                guard item.videoComposition != nil else { return }
+                installPlainCompositionFallback(replacing: item, on: observedPlayer)
+            }
+        }
+    }
+
+    private func installPlainCompositionFallback(replacing failedItem: AVPlayerItem, on observedPlayer: AVPlayer) {
+        guard player === observedPlayer, observedPlayer.currentItem === failedItem else { return }
+
+        playerItemStatusObservation = nil
+        if let playerItemFailureObservation {
+            NotificationCenter.default.removeObserver(playerItemFailureObservation)
+            self.playerItemFailureObservation = nil
+        }
+
+        let fallbackItem = AVPlayerItem(asset: failedItem.asset)
+        observedPlayer.replaceCurrentItem(with: fallbackItem)
+        observePlayerItemStatus(fallbackItem, on: observedPlayer)
+        observePlayerItemFailure(fallbackItem, on: observedPlayer)
+        // The status observer's ready path performs the single exact seek and resumes when needed.
+        print("[EditorView] installed plain-composition playback fallback")
+    }
+
     private func tearDownPlayerObserverOnly() {
         playerItemStatusObservation = nil
+        if let playerItemFailureObservation {
+            NotificationCenter.default.removeObserver(playerItemFailureObservation)
+        }
+        playerItemFailureObservation = nil
         if let token = timeObserverToken {
             player?.removeTimeObserver(token)
         }
@@ -932,6 +992,9 @@ struct EditorView: View {
     }
 
     private func tearDownPlayer() {
+        // Prevent a rebuild suspended in asset/cache work from installing a player after the view
+        // has disappeared.
+        playerRebuildGeneration &+= 1
         tearDownPlayerObserverOnly()
         titleErrorClearTask?.cancel()
         exportToastTask?.cancel()
