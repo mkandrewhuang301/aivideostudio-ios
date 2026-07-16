@@ -299,6 +299,11 @@ struct EditorView: View {
             Task { @MainActor in
                 guard self.player === seekPlayer else {
                     scrubSeekInFlight = false
+                    if state.isScrubbing {
+                        drainScrubSeeks()
+                    } else {
+                        finishPreciseScrubLandingIfPossible()
+                    }
                     return
                 }
                 if seekSessionGeneration == scrubSessionGeneration,
@@ -339,6 +344,7 @@ struct EditorView: View {
             Task { @MainActor in
                 guard self.player === seekPlayer else {
                     scrubSeekInFlight = false
+                    finishPreciseScrubLandingIfPossible()
                     return
                 }
                 scrubSeekInFlight = false
@@ -356,6 +362,10 @@ struct EditorView: View {
                     // AVPlayer reports false when another operation interrupts the exact seek.
                     // Retain the ladder and retry only the still-current landing request.
                     pendingScrubLandingTarget = targetSeconds
+                    finishPreciseScrubLandingIfPossible()
+                } else {
+                    // A newer landing was queued while this seek was in flight. Its request owns
+                    // the ladder now, so immediately drain that latest target.
                     finishPreciseScrubLandingIfPossible()
                 }
             }
