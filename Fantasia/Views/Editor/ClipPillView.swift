@@ -64,8 +64,8 @@ struct ClipPillView: View {
     /// enters reorder mode, selects this clip, and gives the medium haptic.
     let onReorderLift: () -> Void
     /// Fires on every drag-phase change once reorder mode is active, with the RAW horizontal
-    /// translation (points) from the lift point — the caller updates its live slot math.
-    let onReorderChanged: (CGFloat) -> Void
+    /// translation plus the finger's current/start x positions in the timeline coordinate space.
+    let onReorderChanged: (_ translation: CGFloat, _ location: CGFloat, _ startLocation: CGFloat) -> Void
     /// Fires once, on release (or cancellation) — the caller commits the drop (or no-ops if
     /// nothing moved) and exits reorder mode.
     let onReorderEnded: () -> Void
@@ -323,7 +323,7 @@ struct ClipPillView: View {
 
     private var reorderGesture: some Gesture {
         LongPressGesture(minimumDuration: 0.5)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineBlock")))
             .updating($reorderGestureActive) { _, state, _ in
                 state = true
             }
@@ -332,7 +332,9 @@ struct ClipPillView: View {
                 case .first(true):
                     onReorderLift()
                 case .second(true, let drag):
-                    if let drag { onReorderChanged(drag.translation.width) }
+                    if let drag {
+                        onReorderChanged(drag.translation.width, drag.location.x, drag.startLocation.x)
+                    }
                 default:
                     break
                 }

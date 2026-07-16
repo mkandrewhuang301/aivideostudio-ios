@@ -161,6 +161,8 @@ struct TimelineTrackView: View {
     @State private var reorderDragX: CGFloat = 0
     @State private var liveOrder: [String] = []
     @State private var reorderOriginalIndex: Int? = nil
+    @State private var reorderAnchorX: CGFloat? = nil
+    @State private var didLatchReorderAnchorToFinger = false
     private let reorderSlotWidth: CGFloat = 46
     private let reorderSquareSpacing: CGFloat = 4
 
@@ -174,16 +176,27 @@ struct TimelineTrackView: View {
         return min(nominal, max(available / CGFloat(n), available / 12))
     }
 
-    /// 13-24 K1: place the pressed clip's square centered on the playhead, then clamp so nothing
-    /// starts under the play-box dock and the row fits the viewport where possible.
+    /// Place the pressed clip's square under the lift/finger anchor, then clamp so nothing starts
+    /// under the play-box dock and the row fits the viewport where possible.
     private func reorderOverlayOriginX(viewportWidth: CGFloat) -> CGFloat {
+        let pressedIndex = reorderingClipId.flatMap { id in liveOrder.firstIndex(of: id) }
+            ?? reorderOriginalIndex
+            ?? 0
+        return clampedReorderOriginX(pressedIndex: pressedIndex, viewportWidth: viewportWidth)
+    }
+
+    /// Projection stays tied to the dragged clip's ORIGINAL slot. The visible origin above follows
+    /// its live slot to keep the square under the finger; using that moving origin for projection
+    /// would feed each reorder back into the next update and cascade across extra slots.
+    private func reorderProjectionOriginX(viewportWidth: CGFloat) -> CGFloat {
+        clampedReorderOriginX(pressedIndex: reorderOriginalIndex ?? 0, viewportWidth: viewportWidth)
+    }
+
+    private func clampedReorderOriginX(pressedIndex: Int, viewportWidth: CGFloat) -> CGFloat {
         let pitch = reorderPitch(viewportWidth: viewportWidth)
         let n = max(liveOrder.count, 1)
         let minX = playBoxWidth + 8
-        let pressedIndex = reorderOriginalIndex
-            ?? reorderingClipId.flatMap { id in liveOrder.firstIndex(of: id) }
-            ?? 0
-        let origin = viewportWidth / 2 - (CGFloat(pressedIndex) + 0.5) * pitch
+        let origin = (reorderAnchorX ?? viewportWidth / 2) - (CGFloat(pressedIndex) + 0.5) * pitch
         let rowWidth = CGFloat(n) * pitch - reorderSquareSpacing
         let maxOrigin = max(minX, viewportWidth - 8 - rowWidth)
         return min(max(origin, minX), maxOrigin)
@@ -332,6 +345,7 @@ struct TimelineTrackView: View {
         // regardless of contentOffset/tracksScrollY, so edge-zone detection (EdgeAutoScroll) is
         // always relative to the TIMELINE'S OWN viewport, not any single descendant's local frame.
         .coordinateSpace(name: "timeline")
+        .coordinateSpace(name: "timelineBlock")
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
@@ -557,19 +571,11 @@ struct TimelineTrackView: View {
     }
 
     /// 13-22 i12: the dragged clip's own slot in `liveOrder` moves as the array reorders (so its
-    /// NEIGHBORS can animate aside via plain HStack/ForEach diffing) — without compensation the
-    /// dragged clip's rendered position would jump by however much ITS OWN slot just moved, on
-    /// top of the raw finger delta. This term cancels exactly that (same shape as i14's
-    /// edgeScrollCompensationX): `reorderDragX` is the RAW translation from the lift point;
-    /// subtracting how far the slot has drifted from its ORIGINAL index leaves pure finger-
-    /// tracking, so the dragged clip floats smoothly under the finger regardless of how much the
-    /// array has reordered underneath it. 13-23 J7: parameterized on the overlay's live `pitch`
-    /// (slot width + spacing, possibly scaled down) instead of the fixed 46pt slot.
-    private func draggedClipVisualOffsetX(pitch: CGFloat) -> CGFloat {
-        guard let reorderingClipId, let originalIndex = reorderOriginalIndex,
-              let currentIndex = liveOrder.firstIndex(of: reorderingClipId) else { return 0 }
-        let slotShift = CGFloat(currentIndex - originalIndex) * pitch
-        return reorderDragX - slotShift
+    /// NEIGHBORS can animate aside via plain HStack/ForEach diffing). The overlay origin follows
+    /// the dragged clip's LIVE index, keeping its base center on `reorderAnchorX`; applying the raw
+    /// finger translation therefore keeps the lifted square directly under the finger.
+    private func draggedClipVisualOffsetX() -> CGFloat {
+        reorderDragX
     }
 
     private func clipRow(viewportWidth: CGFloat) -> some View {
@@ -594,9 +600,15 @@ struct TimelineTrackView: View {
                     onTrimChange: { newStart, newEnd in
                         updateClipTrim(clipId: clip.id, start: newStart, end: newEnd)
                     },
-                    onReorderLift: { startReorder(clip: clip) },
-                    onReorderChanged: { translation in
-                        updateReorderDrag(clip: clip, translation: translation, viewportWidth: viewportWidth)
+                    onReorderLift: { startReorder(clip: clip, viewportWidth: viewportWidth) },
+                    onReorderChanged: { translation, location, startLocation in
+                        updateReorderDrag(
+                            clip: clip,
+                            translation: translation,
+                            location: location,
+                            startLocation: startLocation,
+                            viewportWidth: viewportWidth
+                        )
                     },
                     onReorderEnded: { commitReorder(clip: clip) }
                 )
@@ -637,12 +649,12 @@ struct TimelineTrackView: View {
                     isZooming: state.isZooming,
                     isReordering: true,
                     isBeingDragged: reorderingClipId == clip.id,
-                    dragOffsetX: reorderingClipId == clip.id ? draggedClipVisualOffsetX(pitch: pitch) : 0,
+                    dragOffsetX: reorderingClipId == clip.id ? draggedClipVisualOffsetX() : 0,
                     reorderSlotWidth: squareWidth,
                     onSelect: {},
                     onTrimChange: { _, _ in },
                     onReorderLift: {},
-                    onReorderChanged: { _ in },
+                    onReorderChanged: { _, _, _ in },
                     onReorderEnded: {}
                 )
             }
@@ -910,10 +922,10 @@ struct TimelineTrackView: View {
     //
     // 13-23 J7: the slot math is re-anchored to the viewport-space reorder overlay's OWN
     // coordinates — pitch = reorderPitch(viewportWidth:) (slot width + spacing, possibly scaled
-    // down) instead of the fixed content-row 46pt. The `originalIndex*pitch + translation` shape
-    // carries over unchanged; the overlay origin cancels out of the projection.
+    // down) instead of the fixed content-row 46pt. O3 anchors the visible row on the finger's live
+    // slot while projecting against the original slot's stable origin to avoid feedback jumps.
 
-    private func startReorder(clip: ProjectClip) {
+    private func startReorder(clip: ProjectClip, viewportWidth: CGFloat) {
         // Idempotency guard — the long-press `.first(true)` phase inside ClipPillView's sequenced
         // gesture may deliver more than once before the sequence advances to `.second`.
         guard reorderingClipId != clip.id else { return }
@@ -923,18 +935,35 @@ struct TimelineTrackView: View {
         reorderingClipId = clip.id
         reorderOriginalIndex = index
         reorderDragX = 0
+        let clipStart = clips[..<index].reduce(0) { $0 + duration(of: $1) }
+        let contentOffset = viewportWidth / 2 - state.currentTime * pxPerSecond
+        let renderedWidth = max(duration(of: clip) * pxPerSecond, 30)
+        let pillMidX = clipStart * pxPerSecond + contentOffset + renderedWidth / 2
+        let halfSlot = reorderSlotWidth / 2
+        reorderAnchorX = min(max(pillMidX, playBoxWidth + 8 + halfSlot), viewportWidth - 8 - halfSlot)
+        didLatchReorderAnchorToFinger = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         state.select(.clip(clip.id))
     }
 
-    private func updateReorderDrag(clip: ProjectClip, translation: CGFloat, viewportWidth: CGFloat) {
-        guard reorderingClipId == clip.id, let originalIndex = reorderOriginalIndex else { return }
+    private func updateReorderDrag(
+        clip: ProjectClip,
+        translation: CGFloat,
+        location: CGFloat,
+        startLocation: CGFloat,
+        viewportWidth: CGFloat
+    ) {
+        guard reorderingClipId == clip.id, reorderOriginalIndex != nil else { return }
+        if !didLatchReorderAnchorToFinger {
+            reorderAnchorX = startLocation
+            didLatchReorderAnchorToFinger = true
+        }
         reorderDragX = translation
         guard let currentIndex = liveOrder.firstIndex(of: clip.id) else { return }
 
         let pitch = reorderPitch(viewportWidth: viewportWidth)
-        let projectedCenterX = (CGFloat(originalIndex) + 0.5) * pitch + translation
-        var targetIndex = Int((projectedCenterX / pitch).rounded(.down))
+        let projectionOriginX = reorderProjectionOriginX(viewportWidth: viewportWidth)
+        var targetIndex = Int(((location - projectionOriginX) / pitch).rounded(.down))
         targetIndex = max(0, min(targetIndex, liveOrder.count - 1))
 
         guard targetIndex != currentIndex else { return }
@@ -951,6 +980,8 @@ struct TimelineTrackView: View {
             reorderingClipId = nil
             reorderOriginalIndex = nil
             reorderDragX = 0
+            reorderAnchorX = nil
+            didLatchReorderAnchorToFinger = false
             liveOrder = []
         }
 
