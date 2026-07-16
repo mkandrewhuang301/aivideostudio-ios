@@ -546,25 +546,28 @@ struct CoverPickerSheet: View {
     }
 
     private func generateStrip(cellCount: Int, stripPx: CGFloat) async {
-        guard let composition, totalDuration > 0 else { return }
+        guard totalDuration > 0 else { return }
         stripFrames = Array(repeating: nil, count: cellCount)
-        let generator = AVAssetImageGenerator(asset: composition)
-        generator.appliesPreferredTrackTransform = true
-        generator.videoComposition = videoComposition
-        generator.maximumSize = CGSize(width: 160, height: 200)
-        let stripTolerance = CMTime(value: 1, timescale: 4)
-        generator.requestedTimeToleranceBefore = stripTolerance
-        generator.requestedTimeToleranceAfter = stripTolerance
 
         for index in 0..<cellCount {
             if Task.isCancelled { return }
             let cellCenter = (Double(index) + 0.5) * Double(stripCellWidth)
             let t = min(totalDuration, max(0, cellCenter / Double(stripPx)))
-            let cmTime = CMTime(seconds: t, preferredTimescale: 600)
-            guard let (cgImage, _) = try? await generator.image(at: cmTime) else { continue }
+            var image = scrubFrameLadder.frame(project: project.clips, at: t, ranges: ranges)
+            if image == nil, let active = activeClip(at: t) {
+                // Source-clip generation avoids composition boundary failures and canvas-coupled
+                // black padding. `sourceGenerator` caches one decoder per clip/quality.
+                image = await sourceImage(
+                    for: active.clip,
+                    localTime: active.localTime,
+                    quality: .fast
+                )
+            }
             if Task.isCancelled { return }
             if index < stripFrames.count {
-                stripFrames[index] = UIImage(cgImage: cgImage)
+                // A failed source sample must never punch a black hole into the middle of the
+                // strip. Repeat the preceding uniform cell, or leave the first placeholder tone.
+                stripFrames[index] = image ?? (index > 0 ? stripFrames[index - 1] : nil)
             }
         }
 
