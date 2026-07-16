@@ -31,6 +31,7 @@ struct CoverPickerSheet: View {
     @State private var stripFrames: [UIImage?] = []
     @State private var stripCellCount = 0
     @State private var isLoadingComposition = true
+    @State private var mediaLoadFailed = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -67,6 +68,22 @@ struct CoverPickerSheet: View {
                 Spacer()
                 Text("This project has no playable clips yet.")
                     .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+            } else if mediaLoadFailed {
+                Spacer()
+                VStack(spacing: 14) {
+                    Text("Couldn't load media")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Button("Retry") {
+                        Task { await loadComposition() }
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 9)
+                    .background(accent, in: Capsule())
+                }
                 Spacer()
             } else {
                 previewSection
@@ -298,6 +315,11 @@ struct CoverPickerSheet: View {
 
     private func loadComposition() async {
         isLoadingComposition = true
+        mediaLoadFailed = false
+        previewImage = nil
+        stripFrames = []
+        stripCellCount = 0
+        sourceGenerators.removeAll()
         guard let (built, builtVideoComposition, builtRanges, _) = await EditorCompositionBuilder.build(
             clips: project.clips, aspectRatio: project.aspectRatio
         ) else {
@@ -320,8 +342,8 @@ struct CoverPickerSheet: View {
             )
         }
 
-        isLoadingComposition = false
         await generatePreview(at: scrubbedTime)
+        isLoadingComposition = false
     }
 
     /// 13-26 M5: latest-wins throttling. The old cancel+120ms-sleep debounce cancelled the pending
@@ -457,6 +479,10 @@ struct CoverPickerSheet: View {
             if index < stripFrames.count {
                 stripFrames[index] = UIImage(cgImage: cgImage)
             }
+        }
+
+        if !ranges.isEmpty, stripFrames.allSatisfy({ $0 == nil }), previewImage == nil {
+            mediaLoadFailed = true
         }
     }
 
