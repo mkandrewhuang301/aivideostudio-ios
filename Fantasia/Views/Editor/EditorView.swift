@@ -23,6 +23,7 @@
 
 import SwiftUI
 import AVFoundation
+import QuartzCore
 
 struct EditorView: View {
     @Environment(ProjectManager.self) private var projectManager
@@ -33,6 +34,10 @@ struct EditorView: View {
     @State private var player: AVPlayer?
     @State private var timeObserverToken: Any?
     @State private var playerItemStatusObservation: NSKeyValueObservation?
+    @State private var scrubSeekInFlight = false
+    @State private var pendingScrubTarget: Double?
+    @State private var slowScrubMode = false
+    @State private var pendingScrubLandingTarget: Double?
 
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
@@ -91,11 +96,18 @@ struct EditorView: View {
             .onChange(of: state.isPlaying) { _, isPlaying in handlePlayingChange(isPlaying) }
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.isScrubbing) { _, isScrubbing in
-                guard !isScrubbing, let player else { return }
+                if isScrubbing {
+                    // A new drag supersedes any not-yet-issued landing from the previous drag.
+                    pendingScrubLandingTarget = nil
+                    return
+                }
+                slowScrubMode = false
+                pendingScrubTarget = nil
                 // 13-26 M4: exact-landing seek — nudge off a clip boundary if the scrub ended
-                // right on one (see EditorState.displayTime's doc comment).
-                let target = CMTime(seconds: state.displayTime(for: state.currentTime), preferredTimescale: 600)
-                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                // right on one (see EditorState.displayTime's doc comment). If a mid-drag seek is
+                // still decoding, queue this behind it so that older completion cannot overwrite
+                // the precise landing frame.
+                requestPreciseScrubLanding(at: state.displayTime(for: state.currentTime))
             }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
             // Plan 13-26 M1 Fix A: cache-first open (ProjectManager.openProjectFromCache) hands
@@ -224,27 +236,100 @@ struct EditorView: View {
     // land within epsilon of the player's actual position, so only a genuine external scrub
     // (timeline drag) triggers a seek.
     //
-    // IMPORTANT: do NOT use `.positiveInfinity` tolerance during scrub. That snaps to the nearest
-    // keyframe only, so on long-GOP H.264 the main preview freezes on one frame while the
-    // timeline scrolls (the reported "images don't change" bug). cancelPendingSeeks + a SMALL
-    // tolerance (~0.2s) keeps seeks latest-wins and still updates the picture as you drag.
-    // Exact frame lands on scrub-end via the isScrubbing→false zero-tolerance seek above.
+    // Scrub seeks are serialized rather than cancelled: every issued seek gets a chance to render,
+    // while unissued drag samples coalesce into one latest target. Exact seeks are preferred until
+    // a long-GOP source proves slow, then the rest of that drag uses keyframe-friendly tolerance.
+    // The final exact landing is serialized behind any active mid-drag seek.
     private func handleScrubSeek(_ newValue: Double) {
         guard let player else { return }
         let playerSeconds = player.currentTime().seconds
         guard playerSeconds.isFinite else { return }
-        if abs(playerSeconds - newValue) > 0.15 {
-            let target = CMTime(seconds: newValue, preferredTimescale: 600)
-            if state.isScrubbing {
-                player.currentItem?.cancelPendingSeeks()
-                let scrubTolerance = CMTime(seconds: 0.2, preferredTimescale: 600)
-                player.seek(to: target, toleranceBefore: scrubTolerance, toleranceAfter: scrubTolerance)
-            } else {
-                // 13-26 M4: exact-landing seek (scrub-end) — same boundary nudge as the
-                // isScrubbing→false path above; this is the OTHER caller that can land here
-                // (state.currentTime changing while not scrubbing, e.g. after snapPlayhead).
-                let preciseTarget = CMTime(seconds: state.displayTime(for: newValue), preferredTimescale: 600)
-                player.seek(to: preciseTarget, toleranceBefore: .zero, toleranceAfter: .zero)
+        if state.isScrubbing {
+            pendingScrubTarget = newValue
+            // Preserve a near-current latest target while an older seek is active: after that
+            // older seek lands, this target may no longer be near the player's actual position.
+            guard scrubSeekInFlight || abs(playerSeconds - newValue) >= 0.02 else {
+                pendingScrubTarget = nil
+                return
+            }
+            drainScrubSeeks()
+        } else if abs(playerSeconds - newValue) > 0.15 {
+            // 13-26 M4: exact-landing seek — same boundary nudge as the isScrubbing→false path;
+            // this is the OTHER caller that can land here (for example, snapPlayhead).
+            let preciseTarget = CMTime(seconds: state.displayTime(for: newValue), preferredTimescale: 600)
+            player.seek(to: preciseTarget, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    private func drainScrubSeeks() {
+        guard !scrubSeekInFlight else { return }
+        guard state.isScrubbing else {
+            finishPreciseScrubLandingIfPossible()
+            return
+        }
+        guard let targetSeconds = pendingScrubTarget, let player else { return }
+
+        let playerSeconds = player.currentTime().seconds
+        if playerSeconds.isFinite, abs(playerSeconds - targetSeconds) < 0.02 {
+            pendingScrubTarget = nil
+            return
+        }
+
+        pendingScrubTarget = nil
+        scrubSeekInFlight = true
+        let target = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+        let tolerance = slowScrubMode
+            ? CMTime(seconds: 0.35, preferredTimescale: 600)
+            : .zero
+        let started = CACurrentMediaTime()
+        let seekPlayer = player
+        player.seek(to: target, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+            Task { @MainActor in
+                guard self.player === seekPlayer else {
+                    scrubSeekInFlight = false
+                    return
+                }
+                if CACurrentMediaTime() - started > 0.25 {
+                    slowScrubMode = true
+                }
+                scrubSeekInFlight = false
+                if state.isScrubbing {
+                    drainScrubSeeks()
+                } else {
+                    finishPreciseScrubLandingIfPossible()
+                }
+            }
+        }
+    }
+
+    private func requestPreciseScrubLanding(at targetSeconds: Double) {
+        pendingScrubLandingTarget = targetSeconds
+        finishPreciseScrubLandingIfPossible()
+    }
+
+    private func finishPreciseScrubLandingIfPossible() {
+        guard !scrubSeekInFlight,
+              !state.isScrubbing,
+              let targetSeconds = pendingScrubLandingTarget,
+              let player
+        else { return }
+
+        pendingScrubLandingTarget = nil
+        scrubSeekInFlight = true
+        let target = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+        let seekPlayer = player
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            Task { @MainActor in
+                guard self.player === seekPlayer else {
+                    scrubSeekInFlight = false
+                    return
+                }
+                scrubSeekInFlight = false
+                if state.isScrubbing {
+                    drainScrubSeeks()
+                } else if state.isPlaying {
+                    player.play()
+                }
             }
         }
     }
@@ -255,9 +340,10 @@ struct EditorView: View {
             player?.play()
 #if DEBUG
             if let player {
+                let waitingReason = player.reasonForWaitingToPlay?.rawValue ?? "nil"
                 print(
                     "[EditorView] play requested: timeControlStatus=\(player.timeControlStatus.rawValue) "
-                    + "waitingReason=\(player.reasonForWaitingToPlay?.rawValue ?? \"nil\")"
+                    + "waitingReason=\(waitingReason)"
                 )
             }
 #endif

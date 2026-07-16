@@ -19,8 +19,9 @@
 // AVPlayerLayer-backed `FillingVideoPlayerView`. EditorView's own periodic time observer (already
 // running on this player) keeps clamping/advancing `state.currentTime` regardless of which
 // surface is visible — this view has NO time observer of its own, only play/pause/seek calls
-// forwarded onto the shared player, plus a local `isScrubbing` flag so its own scrub drag doesn't
-// fight that periodic observer mid-gesture (the observer doesn't fire repeatedly while paused).
+// forwarded onto the shared player, plus a local `isScrubbing` flag. Its drag also marks the
+// shared EditorState scrub flag so EditorView's serialized latest-wins seek engine drives this
+// surface too, instead of fullscreen changes spawning independent fire-and-forget exact seeks.
 // On minimize there is nothing to reconcile — same player, same clock, throughout.
 //
 // Still bound to the SAME shared `EditorState.currentTime`/`isPlaying` clock instead of a
@@ -167,13 +168,12 @@ struct FullscreenEditorPlayerView: View {
         }
     }
 
-    // Pauses playback while the user drags the scrubber — the periodic time observer (owned by
-    // EditorView, not this view) only fires on actual time changes, so pausing the shared player
-    // is enough to stop it from fighting a live drag; no isScrubbing guard needed on that
-    // observer's side.
+    // Pauses playback while the user drags and marks the shared scrub state. EditorView owns the
+    // one serialized seek engine for both inline and fullscreen surfaces.
     private func beginScrubbing(player: AVPlayer) {
         guard !isScrubbing else { return }
         isScrubbing = true
+        state.isScrubbing = true
         player.pause()
     }
 
@@ -187,10 +187,10 @@ struct FullscreenEditorPlayerView: View {
     }
 
     private func endScrubbing(player: AVPlayer) {
-        let time = CMTime(seconds: state.currentTime, preferredTimescale: 600)
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         isScrubbing = false
-        if state.isPlaying { player.play() }
+        // EditorView observes this transition and serializes the precise landing behind any
+        // active mid-drag seek, then resumes playback if it was active before the drag.
+        state.isScrubbing = false
     }
 
     private func formatTime(_ seconds: Double) -> String {
