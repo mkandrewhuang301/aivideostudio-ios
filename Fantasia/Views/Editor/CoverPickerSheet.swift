@@ -50,6 +50,7 @@ struct CoverPickerSheet: View {
 
     @State private var canvasPixelSize = CGSize(width: 1080, height: 1920)
     @State private var canvasAspect: CGFloat = 9.0 / 16.0
+    @State private var canvasDisplaySize: CGSize = .zero
 
     private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051) // #0A0A0D
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)               // #8C59FF
@@ -172,6 +173,7 @@ struct CoverPickerSheet: View {
                     overlays: coverOverlays,
                     selectedOverlayId: selectedOverlayId,
                     canvasSize: fitted.size,
+                    overlaySizeScale: 1,
                     gestureOrigin: CGPoint(x: fitted.minX, y: fitted.minY),
                     showsControls: true,
                     onSelect: { selectedOverlayId = $0 },
@@ -181,6 +183,9 @@ struct CoverPickerSheet: View {
                 )
                 .frame(width: fitted.width, height: fitted.height)
                 .position(x: fitted.midX, y: fitted.midY)
+                .onGeometryChange(for: CGSize.self, of: { $0.size }) {
+                    canvasDisplaySize = $0
+                }
             }
             .coordinateSpace(name: "coverCanvas")
             .contentShape(Rectangle())
@@ -494,7 +499,7 @@ struct CoverPickerSheet: View {
             text: "Text",
             xNorm: 0.5,
             yNorm: 0.5,
-            scale: 1.0,
+            fontSizePoints: 26,
             rotation: 0
         )
         coverOverlays.append(overlay)
@@ -514,7 +519,7 @@ struct CoverPickerSheet: View {
             image: image,
             xNorm: 0.5,
             yNorm: 0.5,
-            scale: 1.0,
+            widthPoints: canvasDisplaySize.width > 0 ? canvasDisplaySize.width * 0.4 : 120,
             rotation: 0,
             mirrored: false
         )
@@ -534,13 +539,13 @@ struct CoverPickerSheet: View {
     }
 
     private func duplicateTextOverlay(_ overlay: CoverOverlay) {
-        guard case .text(let text, let x, let y, let scale, let rotation) = overlay.kind else { return }
+        guard case .text(let text, let x, let y, let fontSizePoints, let rotation) = overlay.kind else { return }
         let duplicate = CoverOverlay.text(
             id: UUID(),
             text: text,
             xNorm: min(0.94, x + 0.04),
             yNorm: min(0.94, y + 0.04),
-            scale: scale,
+            fontSizePoints: fontSizePoints,
             rotation: rotation
         )
         coverOverlays.append(duplicate)
@@ -575,9 +580,15 @@ struct CoverPickerSheet: View {
 
     @MainActor
     private func renderCompositeJPEG(frameImage: UIImage) -> Data? {
+        // Preview points become output pixels exactly once, at composite time. Because the
+        // display rect and source frame share an aspect, width and height produce one scale.
+        let displayToPixelScale = canvasDisplaySize.width > 0
+            ? canvasPixelSize.width / canvasDisplaySize.width
+            : 1
         let view = CoverCompositeView(
             frameImage: frameImage,
             canvasSize: canvasPixelSize,
+            displayToPixelScale: displayToPixelScale,
             overlays: coverOverlays
         )
         let renderer = ImageRenderer(content: view)
@@ -650,22 +661,35 @@ private enum CoverEditorTab {
 private struct CoverOverlay: Identifiable {
     let id: UUID
     enum Kind {
-        case text(String, xNorm: Double, yNorm: Double, scale: Double, rotation: Double)
-        case photo(UIImage, xNorm: Double, yNorm: Double, scale: Double, rotation: Double, mirrored: Bool)
+        case text(String, xNorm: Double, yNorm: Double, fontSizePoints: Double, rotation: Double)
+        case photo(UIImage, xNorm: Double, yNorm: Double, widthPoints: Double, rotation: Double, mirrored: Bool)
     }
     var kind: Kind
 
     static func text(
-        id: UUID, text: String, xNorm: Double, yNorm: Double, scale: Double, rotation: Double
+        id: UUID, text: String, xNorm: Double, yNorm: Double, fontSizePoints: Double, rotation: Double
     ) -> CoverOverlay {
-        CoverOverlay(id: id, kind: .text(text, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation))
+        CoverOverlay(
+            id: id,
+            kind: .text(text, xNorm: xNorm, yNorm: yNorm, fontSizePoints: fontSizePoints, rotation: rotation)
+        )
     }
 
     static func photo(
         id: UUID, image: UIImage, xNorm: Double, yNorm: Double,
-        scale: Double, rotation: Double, mirrored: Bool
+        widthPoints: Double, rotation: Double, mirrored: Bool
     ) -> CoverOverlay {
-        CoverOverlay(id: id, kind: .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation, mirrored: mirrored))
+        CoverOverlay(
+            id: id,
+            kind: .photo(
+                image,
+                xNorm: xNorm,
+                yNorm: yNorm,
+                widthPoints: widthPoints,
+                rotation: rotation,
+                mirrored: mirrored
+            )
+        )
     }
 }
 
@@ -675,6 +699,8 @@ private struct CoverOverlayCanvas: View {
     let overlays: [CoverOverlay]
     let selectedOverlayId: UUID?
     let canvasSize: CGSize
+    /// Preview uses 1 point per stored point. Export supplies the single display-to-pixel scale.
+    let overlaySizeScale: CGFloat
     /// Offset of this canvas within the named `coverCanvas` coordinate space (`.zero` for export).
     let gestureOrigin: CGPoint
     let showsControls: Bool
@@ -687,73 +713,99 @@ private struct CoverOverlayCanvas: View {
         ZStack(alignment: .topLeading) {
             ForEach(overlays) { overlay in
                 switch overlay.kind {
-                case .text(let text, let xNorm, let yNorm, let scale, let rotation):
+                case .text(let text, let xNorm, let yNorm, let fontSizePoints, let rotation):
                     CoverTextOverlayItemView(
                         text: text,
                         xNorm: xNorm,
                         yNorm: yNorm,
-                        scale: scale,
+                        fontSizePoints: fontSizePoints,
                         rotation: rotation,
                         canvasSize: canvasSize,
+                        overlaySizeScale: overlaySizeScale,
                         gestureOrigin: gestureOrigin,
                         isSelected: selectedOverlayId == overlay.id,
                         showsControls: showsControls,
                         onSelect: { onSelect(overlay.id) },
                         onMove: { x, y in
                             var updated = overlay
-                            updated.kind = .text(text, xNorm: x, yNorm: y, scale: scale, rotation: rotation)
+                            updated.kind = .text(
+                                text, xNorm: x, yNorm: y,
+                                fontSizePoints: fontSizePoints, rotation: rotation
+                            )
                             onUpdate(updated)
                         },
-                        onResize: { newScale in
+                        onResize: { newFontSizePoints in
                             var updated = overlay
-                            updated.kind = .text(text, xNorm: xNorm, yNorm: yNorm, scale: newScale, rotation: rotation)
+                            updated.kind = .text(
+                                text, xNorm: xNorm, yNorm: yNorm,
+                                fontSizePoints: newFontSizePoints, rotation: rotation
+                            )
                             onUpdate(updated)
                         },
                         onRotate: { newRotation in
                             var updated = overlay
-                            updated.kind = .text(text, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: newRotation)
+                            updated.kind = .text(
+                                text, xNorm: xNorm, yNorm: yNorm,
+                                fontSizePoints: fontSizePoints, rotation: newRotation
+                            )
                             onUpdate(updated)
                         },
                         onEditCommit: { newText in
                             var updated = overlay
-                            updated.kind = .text(newText, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation)
+                            updated.kind = .text(
+                                newText, xNorm: xNorm, yNorm: yNorm,
+                                fontSizePoints: fontSizePoints, rotation: rotation
+                            )
                             onUpdate(updated)
                         },
                         onDelete: { onDelete(overlay.id) },
                         onDuplicate: { onDuplicateText(overlay) }
                     )
 
-                case .photo(let image, let xNorm, let yNorm, let scale, let rotation, let mirrored):
+                case .photo(let image, let xNorm, let yNorm, let widthPoints, let rotation, let mirrored):
                     CoverPhotoOverlayItemView(
                         image: image,
                         xNorm: xNorm,
                         yNorm: yNorm,
-                        scale: scale,
+                        widthPoints: widthPoints,
                         rotation: rotation,
                         mirrored: mirrored,
                         canvasSize: canvasSize,
+                        overlaySizeScale: overlaySizeScale,
                         gestureOrigin: gestureOrigin,
                         isSelected: selectedOverlayId == overlay.id,
                         showsControls: showsControls,
                         onSelect: { onSelect(overlay.id) },
                         onMove: { x, y in
                             var updated = overlay
-                            updated.kind = .photo(image, xNorm: x, yNorm: y, scale: scale, rotation: rotation, mirrored: mirrored)
+                            updated.kind = .photo(
+                                image, xNorm: x, yNorm: y,
+                                widthPoints: widthPoints, rotation: rotation, mirrored: mirrored
+                            )
                             onUpdate(updated)
                         },
-                        onResize: { newScale in
+                        onResize: { newWidthPoints in
                             var updated = overlay
-                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: newScale, rotation: rotation, mirrored: mirrored)
+                            updated.kind = .photo(
+                                image, xNorm: xNorm, yNorm: yNorm,
+                                widthPoints: newWidthPoints, rotation: rotation, mirrored: mirrored
+                            )
                             onUpdate(updated)
                         },
                         onRotate: { newRotation in
                             var updated = overlay
-                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: newRotation, mirrored: mirrored)
+                            updated.kind = .photo(
+                                image, xNorm: xNorm, yNorm: yNorm,
+                                widthPoints: widthPoints, rotation: newRotation, mirrored: mirrored
+                            )
                             onUpdate(updated)
                         },
                         onMirror: {
                             var updated = overlay
-                            updated.kind = .photo(image, xNorm: xNorm, yNorm: yNorm, scale: scale, rotation: rotation, mirrored: !mirrored)
+                            updated.kind = .photo(
+                                image, xNorm: xNorm, yNorm: yNorm,
+                                widthPoints: widthPoints, rotation: rotation, mirrored: !mirrored
+                            )
                             onUpdate(updated)
                         },
                         onDelete: { onDelete(overlay.id) }
@@ -771,6 +823,7 @@ private struct CoverOverlayCanvas: View {
 private struct CoverCompositeView: View {
     let frameImage: UIImage
     let canvasSize: CGSize
+    let displayToPixelScale: CGFloat
     let overlays: [CoverOverlay]
 
     var body: some View {
@@ -785,6 +838,7 @@ private struct CoverCompositeView: View {
                 overlays: overlays,
                 selectedOverlayId: nil,
                 canvasSize: canvasSize,
+                overlaySizeScale: displayToPixelScale,
                 gestureOrigin: .zero,
                 showsControls: false,
                 onSelect: { _ in },
@@ -803,9 +857,11 @@ private struct CoverTextOverlayItemView: View {
     let text: String
     let xNorm: Double
     let yNorm: Double
-    let scale: Double
+    /// Absolute size in preview display points; independent of the fitted canvas dimensions.
+    let fontSizePoints: Double
     let rotation: Double
     let canvasSize: CGSize
+    let overlaySizeScale: CGFloat
     let gestureOrigin: CGPoint
     let isSelected: Bool
     let showsControls: Bool
@@ -818,17 +874,21 @@ private struct CoverTextOverlayItemView: View {
     let onDuplicate: () -> Void
 
     @State private var dragOffset: CGSize = .zero
-    @State private var scaleDelta: Double = 0
+    @State private var sizeDeltaPoints: Double = 0
     @State private var rotationDelta: Double = 0
     @State private var rotationGrabAngle: Double?
     @State private var isEditing = false
     @State private var editDraft = ""
     @FocusState private var editFieldFocused: Bool
 
-    private let baseFontSize: CGFloat = 26
     private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)
 
-    private var liveScale: Double { min(3.0, max(0.5, scale + scaleDelta)) }
+    private var liveFontSizePoints: Double {
+        min(78, max(13, fontSizePoints + sizeDeltaPoints))
+    }
+    private var renderedFontSize: CGFloat {
+        CGFloat(liveFontSizePoints) * overlaySizeScale
+    }
     private var liveRotation: Double { rotation + rotationDelta }
 
     private var basePosition: CGPoint {
@@ -839,7 +899,7 @@ private struct CoverTextOverlayItemView: View {
         Group {
             if isEditing {
                 TextField("Text", text: $editDraft)
-                    .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+                    .font(.system(size: renderedFontSize, weight: .heavy))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .focused($editFieldFocused)
@@ -853,11 +913,15 @@ private struct CoverTextOverlayItemView: View {
                     .onAppear { editFieldFocused = true }
             } else {
                 Text(text)
-                    .font(.system(size: baseFontSize * liveScale, weight: .heavy))
+                    .font(.system(size: renderedFontSize, weight: .heavy))
                     .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
+                    .shadow(
+                        color: .black.opacity(0.65),
+                        radius: 10 * overlaySizeScale,
+                        y: 2 * overlaySizeScale
+                    )
                     .fixedSize()
-                    .padding(6)
+                    .padding(6 * overlaySizeScale)
                     .overlay(selectionFrame)
                     .contentShape(Rectangle())
                     .onTapGesture { onSelect() }
@@ -1008,11 +1072,13 @@ private struct CoverTextOverlayItemView: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 onSelect()
-                scaleDelta = Double(value.translation.width) / 120.0
+                // Preserve the old handle sensitivity: 120pt horizontal movement changed a
+                // 26pt default by one full base size.
+                sizeDeltaPoints = Double(value.translation.width) * 26.0 / 120.0
             }
             .onEnded { _ in
-                onResize(liveScale)
-                scaleDelta = 0
+                onResize(liveFontSizePoints)
+                sizeDeltaPoints = 0
             }
     }
 
@@ -1035,10 +1101,12 @@ private struct CoverPhotoOverlayItemView: View {
     let image: UIImage
     let xNorm: Double
     let yNorm: Double
-    let scale: Double
+    /// Absolute box width in preview display points; never derived from the current canvas rect.
+    let widthPoints: Double
     let rotation: Double
     let mirrored: Bool
     let canvasSize: CGSize
+    let overlaySizeScale: CGFloat
     let gestureOrigin: CGPoint
     let isSelected: Bool
     let showsControls: Bool
@@ -1050,18 +1118,19 @@ private struct CoverPhotoOverlayItemView: View {
     let onDelete: () -> Void
 
     @State private var dragOffset: CGSize = .zero
-    @State private var scaleDelta: Double = 0
+    @State private var widthDeltaPoints: Double = 0
     @State private var rotationDelta: Double = 0
     @State private var rotationGrabAngle: Double?
 
-    private let baseWidthFraction: CGFloat = 0.4
     private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)
 
-    private var liveScale: Double { min(3.0, max(0.2, scale + scaleDelta)) }
+    private var liveWidthPoints: Double {
+        min(480, max(24, widthPoints + widthDeltaPoints))
+    }
     private var liveRotation: Double { rotation + rotationDelta }
 
     private var boxSize: CGSize {
-        let width = canvasSize.width * baseWidthFraction * CGFloat(liveScale)
+        let width = CGFloat(liveWidthPoints) * overlaySizeScale
         let aspect = image.size.width / max(image.size.height, 1)
         return CGSize(width: width, height: width / aspect)
     }
@@ -1210,11 +1279,11 @@ private struct CoverPhotoOverlayItemView: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 onSelect()
-                scaleDelta = Double(value.translation.width) / 120.0
+                widthDeltaPoints = Double(value.translation.width)
             }
             .onEnded { _ in
-                onResize(liveScale)
-                scaleDelta = 0
+                onResize(liveWidthPoints)
+                widthDeltaPoints = 0
             }
     }
 }
