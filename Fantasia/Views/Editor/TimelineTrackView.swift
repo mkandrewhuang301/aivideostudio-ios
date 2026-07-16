@@ -37,17 +37,30 @@ import UIKit
 /// SwiftUI can finish a descendant tap recognizer after the ancestor scrub recognizer has already
 /// moved the timeline. Keep those recognizers simultaneous (so swipes that start on pills still
 /// scrub), but suppress any tap action from that same moving touch sequence.
+enum TimelineMovementSource: Hashable {
+    case fixedRegionScrub
+    case tracksViewport
+}
+
 final class TimelineTapSelectionGate {
     private let clock = ContinuousClock()
-    private var lastMovementAt: ContinuousClock.Instant?
+    private var activeMovementSources: Set<TimelineMovementSource> = []
+    private var lastMovementEndAt: ContinuousClock.Instant?
 
-    func noteMovement(at instant: ContinuousClock.Instant? = nil) {
-        lastMovementAt = instant ?? clock.now
+    func beginMovement(_ source: TimelineMovementSource) {
+        activeMovementSources.insert(source)
+    }
+
+    func endMovement(_ source: TimelineMovementSource, at instant: ContinuousClock.Instant? = nil) {
+        // Idempotent: normal onEnded and GestureState cancellation cleanup may both arrive.
+        guard activeMovementSources.remove(source) != nil else { return }
+        lastMovementEndAt = instant ?? clock.now
     }
 
     func acceptsTap(at instant: ContinuousClock.Instant? = nil) -> Bool {
-        guard let lastMovementAt else { return true }
-        return lastMovementAt.duration(to: instant ?? clock.now) > .milliseconds(150)
+        guard activeMovementSources.isEmpty else { return false }
+        guard let lastMovementEndAt else { return true }
+        return lastMovementEndAt.duration(to: instant ?? clock.now) > .milliseconds(150)
     }
 }
 
@@ -154,6 +167,8 @@ struct TimelineTrackView: View {
     @State private var tracksDragAxis: Axis? = nil
     @State private var tracksScrubStartTime: Double? = nil
     @State private var tracksScrollStartY: CGFloat? = nil
+    @GestureState private var fixedScrubGestureActive = false
+    @GestureState private var tracksViewportGestureActive = false
 
     // Q5: pinch state captures both scale and the timeline time under the gesture centroid.
     @State private var pinchStartPxPerSecond: Double? = nil
@@ -380,6 +395,13 @@ struct TimelineTrackView: View {
             // GestureState resets on end, cancellation, and interruption.
             if !active { finishMagnification() }
         }
+        .onChange(of: fixedScrubGestureActive) { _, active in
+            // DragGesture.onEnded is not guaranteed for cancellation/interruption. GestureState is.
+            if !active { finishFixedScrub() }
+        }
+        .onChange(of: tracksViewportGestureActive) { _, active in
+            if !active { finishTracksGesture() }
+        }
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
@@ -396,22 +418,25 @@ struct TimelineTrackView: View {
 
     private var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 2)
+            .updating($fixedScrubGestureActive) { _, active, _ in active = true }
             .onChanged { value in
                 // 13-22 i12: suppressed while reorder mode is active.
                 guard reorderingClipId == nil, !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                tapSelectionGate.beginMovement(.fixedRegionScrub)
                 state.isScrubbing = true
-                tapSelectionGate.noteMovement()
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
                 let deltaTime = -value.translation.width / pxPerSecond
                 state.currentTime = state.clampTime(startTime + deltaTime)
             }
-            .onEnded { _ in
-                if scrubDragStartTime != nil { tapSelectionGate.noteMovement() }
-                scrubDragStartTime = nil
-                state.isScrubbing = false
-            }
+            .onEnded { _ in finishFixedScrub() }
+    }
+
+    private func finishFixedScrub() {
+        tapSelectionGate.endMovement(.fixedRegionScrub)
+        scrubDragStartTime = nil
+        state.isScrubbing = tracksDragAxis == .horizontal
     }
 
     // MARK: - Tracks viewport gesture (F13, Plan 13-21) — ONE background DragGesture over the
@@ -425,10 +450,11 @@ struct TimelineTrackView: View {
 
     private var tracksGesture: some Gesture {
         DragGesture(minimumDistance: 4)
+            .updating($tracksViewportGestureActive) { _, active, _ in active = true }
             .onChanged { value in
                 // 13-22 i12: suppressed while reorder mode is active.
                 guard reorderingClipId == nil, !state.isZooming else { return }
-                tapSelectionGate.noteMovement()
+                tapSelectionGate.beginMovement(.tracksViewport)
                 if tracksDragAxis == nil {
                     tracksDragAxis = abs(value.translation.width) >= abs(value.translation.height) ? .horizontal : .vertical
                     switch tracksDragAxis {
@@ -451,13 +477,15 @@ struct TimelineTrackView: View {
                     break
                 }
             }
-            .onEnded { _ in
-                if tracksDragAxis != nil { tapSelectionGate.noteMovement() }
-                tracksDragAxis = nil
-                tracksScrubStartTime = nil
-                tracksScrollStartY = nil
-                state.isScrubbing = false
-            }
+            .onEnded { _ in finishTracksGesture() }
+    }
+
+    private func finishTracksGesture() {
+        tapSelectionGate.endMovement(.tracksViewport)
+        tracksDragAxis = nil
+        tracksScrubStartTime = nil
+        tracksScrollStartY = nil
+        state.isScrubbing = scrubDragStartTime != nil
     }
 
     // MARK: - Pinch-to-zoom (F5, Plan 13-21)
