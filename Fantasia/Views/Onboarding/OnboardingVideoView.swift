@@ -16,22 +16,68 @@ import AVFoundation
 struct FillingVideoPlayerView: UIViewRepresentable {
     let player: AVPlayer
     var videoGravity: AVLayerVideoGravity = .resizeAspectFill
+    var onReadyForDisplay: (() -> Void)? = nil
 
     final class PlayerView: UIView {
         override static var layerClass: AnyClass { AVPlayerLayer.self }
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
     }
 
+    @MainActor
+    final class Coordinator {
+        private weak var observedPlayer: AVPlayer?
+        private var readinessObservation: NSKeyValueObservation?
+
+        func observe(
+            layer: AVPlayerLayer,
+            player: AVPlayer,
+            onReadyForDisplay: (() -> Void)?
+        ) {
+            guard observedPlayer !== player else {
+                if layer.isReadyForDisplay { onReadyForDisplay?() }
+                return
+            }
+            readinessObservation = nil
+            observedPlayer = player
+            readinessObservation = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                Task { @MainActor in onReadyForDisplay?() }
+            }
+        }
+
+        func cancel() {
+            readinessObservation = nil
+            observedPlayer = nil
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
         view.playerLayer.player = player
         view.playerLayer.videoGravity = videoGravity
+        context.coordinator.observe(
+            layer: view.playerLayer,
+            player: player,
+            onReadyForDisplay: onReadyForDisplay
+        )
         return view
     }
 
     func updateUIView(_ uiView: PlayerView, context: Context) {
         uiView.playerLayer.player = player
         uiView.playerLayer.videoGravity = videoGravity
+        context.coordinator.observe(
+            layer: uiView.playerLayer,
+            player: player,
+            onReadyForDisplay: onReadyForDisplay
+        )
+    }
+
+    static func dismantleUIView(_ uiView: PlayerView, coordinator: Coordinator) {
+        coordinator.cancel()
+        uiView.playerLayer.player = nil
     }
 }
 

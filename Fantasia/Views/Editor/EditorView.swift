@@ -36,6 +36,7 @@ struct EditorView: View {
     @State private var playerItemStatusObservation: NSKeyValueObservation?
     @State private var playerItemFailureObservation: NSObjectProtocol?
     @State private var playerRebuildGeneration: UInt = 0
+    @State private var previewSurfaceReady = false
     @State private var scrubSeekInFlight = false
     @State private var pendingScrubTarget: Double?
     @State private var slowScrubMode = false
@@ -610,8 +611,18 @@ struct EditorView: View {
 
             ZStack {
                 if let player {
-                    FillingVideoPlayerView(player: player, videoGravity: .resizeAspect)
+                    FillingVideoPlayerView(
+                        player: player,
+                        videoGravity: .resizeAspect,
+                        onReadyForDisplay: {
+                            guard self.player === player else { return }
+                            previewSurfaceReady = true
+                        }
+                    )
                 } else {
+                    Color.black
+                }
+                if !previewSurfaceReady {
                     Color.black
                     Image(systemName: "film")
                         .font(.system(size: 32))
@@ -899,6 +910,7 @@ struct EditorView: View {
         // The editor composition is assembled entirely from validated local cache files. Waiting
         // to minimize network stalls can leave composition-backed playback parked indefinitely.
         avPlayer.automaticallyWaitsToMinimizeStalling = false
+        previewSurfaceReady = false
         player = avPlayer
         observePlayerItemStatus(item, on: avPlayer)
         observePlayerItemFailure(item, on: avPlayer)
@@ -1050,6 +1062,7 @@ struct EditorView: View {
         timeObserverToken = nil
         player?.pause()
         player = nil
+        previewSurfaceReady = false
     }
 
     private func tearDownPlayer() {
