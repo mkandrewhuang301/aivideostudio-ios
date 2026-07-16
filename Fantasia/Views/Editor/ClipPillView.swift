@@ -125,6 +125,9 @@ struct ClipPillView: View {
 
             mediaContent
         }
+        // Establish the uniform slot before clipping. `scaledToFill` can otherwise paint beyond a
+        // content-sized clip and then escape a frame applied later in the modifier chain.
+        .frame(width: effectiveWidth, height: 58)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         // 13-26 M3: strokeBorder — see AudioPillView's identical fix comment (a centered stroke
         // rendered 1pt past the pill frame on every side, breaking edge alignment with the rows
@@ -139,7 +142,6 @@ struct ClipPillView: View {
         .overlay(alignment: .leading) {
             Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1)
         }
-        .frame(width: effectiveWidth, height: 58)
         // 13-22 i12: floating/scaled/shadowed/z-raised treatment for the ONE dragged clip; every
         // OTHER clip (including this one when idle) stays flat. The collapse/expand of
         // `effectiveWidth` above and this scale/shadow both animate via the `.animation` below.
@@ -239,23 +241,27 @@ struct ClipPillView: View {
 
     @ViewBuilder
     private var reorderThumb: some View {
-        if clip.mediaType == "image" {
-            if let urlString = clip.url, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholderGlyph
+        Group {
+            if clip.mediaType == "image" {
+                if let urlString = clip.url, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            placeholderGlyph
+                        }
                     }
+                } else {
+                    placeholderGlyph
                 }
+            } else if let firstFrame = filmstripFrames[0] {
+                Image(uiImage: firstFrame).resizable().scaledToFill()
             } else {
                 placeholderGlyph
             }
-        } else if let firstFrame = filmstripFrames[0] {
-            Image(uiImage: firstFrame).resizable().scaledToFill()
-        } else {
-            placeholderGlyph
         }
+        .frame(width: reorderSlotWidth, height: 58)
+        .clipped()
     }
 
     private var durationBadge: some View {
