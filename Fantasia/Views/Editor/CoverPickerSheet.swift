@@ -23,6 +23,7 @@ struct CoverPickerSheet: View {
     @State private var composition: AVMutableComposition?
     @State private var videoComposition: AVMutableVideoComposition?
     @State private var ranges: [EditorCompositionBuilder.ClipRange] = []
+    @State private var sourceGenerators: [String: AVAssetImageGenerator] = [:]
     @State private var totalDuration: Double = 0
 
     @State private var scrubbedTime: Double = 0
@@ -346,32 +347,93 @@ struct CoverPickerSheet: View {
 
     /// FAST during-drag frame: ½-second tolerance snaps to a cheap nearby keyframe.
     private func generateFastPreview(at time: Double) async {
-        guard let composition else { return }
-        let generator = AVAssetImageGenerator(asset: composition)
-        generator.appliesPreferredTrackTransform = true
-        generator.videoComposition = videoComposition
-        generator.maximumSize = canvasPixelSize
-        let fastTolerance = CMTime(value: 1, timescale: 2)
-        generator.requestedTimeToleranceBefore = fastTolerance
-        generator.requestedTimeToleranceAfter = fastTolerance
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
-        previewImage = UIImage(cgImage: cgImage)
+        guard let active = activeClip(at: time),
+              let image = await sourceImage(
+                for: active.clip,
+                localTime: active.localTime,
+                tolerance: CMTime(value: 1, timescale: 2)
+              ) else { return }
+        previewImage = image
     }
 
     /// PRECISE frame (zero tolerance) — initial load, drag-end landing, and the frame Save uses.
     private func generatePreview(at time: Double) async {
-        guard let composition else { return }
-        let generator = AVAssetImageGenerator(asset: composition)
-        generator.appliesPreferredTrackTransform = true
-        generator.videoComposition = videoComposition
-        generator.maximumSize = canvasPixelSize
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return }
+        guard let active = activeClip(at: time),
+              let image = await sourceImage(
+                for: active.clip,
+                localTime: active.localTime,
+                tolerance: .zero
+              ) else { return }
         if Task.isCancelled { return }
-        previewImage = UIImage(cgImage: cgImage)
+        canvasPixelSize = capLongEdge(
+            CGSize(
+                width: image.size.width * image.scale,
+                height: image.size.height * image.scale
+            ),
+            maxEdge: 1440
+        )
+        canvasAspect = canvasPixelSize.width / canvasPixelSize.height
+        previewImage = image
+    }
+
+    /// Resolves the project-timeline playhead to a source clip and that asset's local timeline.
+    /// Ranges are half-open; the project endpoint is assigned to the final clip so the rightmost
+    /// strip position still produces a cover frame.
+    private func activeClip(at time: Double) -> (clip: ProjectClip, localTime: Double)? {
+        guard !ranges.isEmpty else { return nil }
+        let clampedTime = min(max(0, time), totalDuration)
+
+        let activeRange: EditorCompositionBuilder.ClipRange?
+        if let last = ranges.last, clampedTime >= last.end {
+            activeRange = last
+        } else {
+            activeRange = ranges.first { clampedTime >= $0.start && clampedTime < $0.end }
+        }
+
+        guard let activeRange,
+              let clip = project.clips.first(where: { $0.id == activeRange.clipId }) else { return nil }
+        return (clip, clip.trimStartSeconds + (clampedTime - activeRange.start))
+    }
+
+    /// Produces an uncomposited source frame. The project-canvas AVVideoComposition is
+    /// intentionally absent here so aspect-fit letterbox bars can never enter the saved cover.
+    private func sourceImage(
+        for clip: ProjectClip,
+        localTime: Double,
+        tolerance: CMTime
+    ) async -> UIImage? {
+        if clip.mediaType == "image" {
+            guard let url = await sourceURL(for: clip) else { return nil }
+            let data: Data?
+            if url.isFileURL {
+                data = try? Data(contentsOf: url)
+            } else {
+                data = try? await URLSession.shared.data(from: url).0
+            }
+            return data.flatMap(UIImage.init(data:))
+        }
+
+        guard let generator = await sourceGenerator(for: clip) else { return nil }
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        let cmTime = CMTime(seconds: localTime, preferredTimescale: 600)
+        guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    private func sourceGenerator(for clip: ProjectClip) async -> AVAssetImageGenerator? {
+        if let cached = sourceGenerators[clip.id] { return cached }
+        guard let url = await sourceURL(for: clip) else { return nil }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1440, height: 1440)
+        sourceGenerators[clip.id] = generator
+        return generator
+    }
+
+    private func sourceURL(for clip: ProjectClip) async -> URL? {
+        guard let urlString = clip.url, let remoteURL = URL(string: urlString) else { return nil }
+        return await ClipFileCache.shared.localURL(clipId: clip.id, remoteURL: remoteURL)
     }
 
     private func generateStrip(cellCount: Int, stripPx: CGFloat) async {
@@ -524,12 +586,17 @@ struct CoverPickerSheet: View {
 
     private func capLongEdge(_ size: CGSize, maxEdge: CGFloat) -> CGSize {
         let long = max(size.width, size.height)
-        guard long > maxEdge else { return size }
-        let scale = maxEdge / long
+        guard long > 0 else { return size }
+        let scale = min(1, maxEdge / long)
         return CGSize(
-            width: (size.width * scale).rounded(.down),
-            height: (size.height * scale).rounded(.down)
+            width: evenFloor(size.width * scale),
+            height: evenFloor(size.height * scale)
         )
+    }
+
+    private func evenFloor(_ value: CGFloat) -> CGFloat {
+        let floored = max(2, Int(value.rounded(.down)))
+        return CGFloat(floored.isMultiple(of: 2) ? floored : floored - 1)
     }
 
     private func aspectFraction(for ratio: String) -> CGFloat {
@@ -1125,4 +1192,3 @@ private struct CoverPhotoOverlayItemView: View {
             }
     }
 }
-
