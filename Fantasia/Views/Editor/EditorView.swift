@@ -41,6 +41,7 @@ struct EditorView: View {
     @State private var slowScrubMode = false
     @State private var pendingScrubLandingTarget: Double?
     @State private var scrubSessionGeneration: UInt = 0
+    @State private var scrubLandingRequestVersion: UInt = 0
     @State private var scrubFrameLadder = ScrubFrameLadder()
     @State private var showsScrubFrame = false
 
@@ -105,6 +106,7 @@ struct EditorView: View {
                     // A new generation prevents an older gesture's slow seek completion from
                     // leaking adaptive tolerance into this drag.
                     scrubSessionGeneration &+= 1
+                    scrubLandingRequestVersion &+= 1
                     slowScrubMode = false
                     pendingScrubLandingTarget = nil
                     showsScrubFrame = true
@@ -315,6 +317,7 @@ struct EditorView: View {
     }
 
     private func requestPreciseScrubLanding(at targetSeconds: Double) {
+        scrubLandingRequestVersion &+= 1
         pendingScrubLandingTarget = targetSeconds
         finishPreciseScrubLandingIfPossible()
     }
@@ -330,7 +333,9 @@ struct EditorView: View {
         scrubSeekInFlight = true
         let target = CMTime(seconds: targetSeconds, preferredTimescale: 600)
         let seekPlayer = player
-        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+        let landingVersion = scrubLandingRequestVersion
+        let landingSession = scrubSessionGeneration
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
             Task { @MainActor in
                 guard self.player === seekPlayer else {
                     scrubSeekInFlight = false
@@ -339,11 +344,19 @@ struct EditorView: View {
                 scrubSeekInFlight = false
                 if state.isScrubbing {
                     drainScrubSeeks()
-                } else {
+                } else if landingVersion == scrubLandingRequestVersion,
+                          landingSession == scrubSessionGeneration,
+                          finished {
                     // Keep the ladder visible until this exact seek completion, avoiding a flash
                     // of the player's stale pre-scrub frame during the handoff.
                     showsScrubFrame = false
                     if state.isPlaying { player.play() }
+                } else if landingVersion == scrubLandingRequestVersion,
+                          landingSession == scrubSessionGeneration {
+                    // AVPlayer reports false when another operation interrupts the exact seek.
+                    // Retain the ladder and retry only the still-current landing request.
+                    pendingScrubLandingTarget = targetSeconds
+                    finishPreciseScrubLandingIfPossible()
                 }
             }
         }

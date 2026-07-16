@@ -310,6 +310,7 @@ struct CoverPickerSheet: View {
                 if stripDragStartTime == nil {
                     stripDragStartTime = scrubbedTime
                     showsScrubFrame = true
+                    errorMessage = nil
                     // A precise request already decoding may finish during this drag. Invalidate
                     // it so ladder display remains authoritative until the release landing.
                     previewRequestVersion &+= 1
@@ -433,6 +434,7 @@ struct CoverPickerSheet: View {
         pendingPreviewRequest = request
         expectedPrecisePreviewVersion = quality == .precise ? request.version : nil
         measuredDisplayVersion = nil
+        errorMessage = nil
 
         guard !isPreviewRenderInFlight else { return }
         isPreviewRenderInFlight = true
@@ -450,6 +452,13 @@ struct CoverPickerSheet: View {
                 if result.quality == .precise {
                     showsScrubFrame = false
                 }
+            } else if request.quality == .precise {
+                // Never strand the cover UI behind a ladder image when the exact source decode
+                // fails. Keep Save disabled, expose the last good preview, and give the user a
+                // clear recovery path by sliding to another position.
+                showsScrubFrame = false
+                measuredDisplayVersion = nil
+                errorMessage = "Couldn't load this frame. Slide slightly and try again."
             }
         }
         isPreviewRenderInFlight = false
@@ -517,9 +526,31 @@ struct CoverPickerSheet: View {
         }
 
         guard let generator = await sourceGenerator(for: clip, quality: quality) else { return nil }
-        let cmTime = CMTime(seconds: localTime, preferredTimescale: 600)
+        let safeLocalTime = await decodableSourceTime(
+            requested: localTime,
+            clip: clip,
+            asset: generator.asset
+        )
+        let cmTime = CMTime(seconds: safeLocalTime, preferredTimescale: 600)
         guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+
+    /// AVAssetImageGenerator treats an asset's exact duration as outside its half-open frame
+    /// range. Clamp endpoint selections just inside the source boundary, mirroring the editor's
+    /// precise-landing boundary nudge while preserving the displayed project time.
+    private func decodableSourceTime(
+        requested: Double,
+        clip: ProjectClip,
+        asset: AVAsset
+    ) async -> Double {
+        let loadedDuration = try? await asset.load(.duration)
+        let assetEnd = loadedDuration?.seconds ?? 0
+        let declaredEnd = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? 0
+        let positiveEnds = [assetEnd, declaredEnd].filter { $0.isFinite && $0 > 0 }
+        guard let sourceEnd = positiveEnds.min() else { return max(clip.trimStartSeconds, requested) }
+        let lastDecodableTime = max(clip.trimStartSeconds, sourceEnd - 0.02)
+        return min(max(clip.trimStartSeconds, requested), lastDecodableTime)
     }
 
     private func sourceGenerator(

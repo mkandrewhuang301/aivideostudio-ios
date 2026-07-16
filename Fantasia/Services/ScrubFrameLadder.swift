@@ -24,6 +24,7 @@ final class ScrubFrameLadder {
     }()
     private var frameKeys: [String: [Int: NSString]] = [:]
     private var generationTasks: [String: Task<Void, Never>] = [:]
+    private var generationTokens: [String: UUID] = [:]
     private var completedClipIds: Set<String> = []
     private var presentClipIds: Set<String> = []
 
@@ -42,6 +43,10 @@ final class ScrubFrameLadder {
         let removedIds = presentClipIds.subtracting(currentIds)
         for clipId in removedIds {
             generationTasks[clipId]?.cancel()
+            // Invalidate the token before clearing the slot. A cancelled task may still unwind
+            // after the same clip id is re-added; it must not publish into or clear that newer
+            // generation.
+            generationTokens[clipId] = nil
             generationTasks[clipId] = nil
             completedClipIds.remove(clipId)
             if let keys = frameKeys.removeValue(forKey: clipId)?.values {
@@ -61,11 +66,7 @@ final class ScrubFrameLadder {
 
         for clip in orderedVideos {
             guard generationTasks[clip.id] == nil, !completedClipIds.contains(clip.id) else { continue }
-            let task = Task(priority: .utility) { [weak self] in
-                guard let self else { return }
-                await self.generateFrames(for: clip)
-            }
-            generationTasks[clip.id] = task
+            startGeneration(for: clip)
         }
     }
 
@@ -78,14 +79,25 @@ final class ScrubFrameLadder {
         _ = revision
         guard let range = activeRange(at: globalTime, ranges: ranges),
               let clip = clips.first(where: { $0.id == range.clipId }),
-              clip.mediaType == "video",
-              let keys = frameKeys[clip.id]
+              clip.mediaType == "video"
         else { return nil }
 
         let sourceTime = max(0, clip.trimStartSeconds + (globalTime - range.start))
-        var bucket = Int(floor((sourceTime + 0.000_001) / Self.stepSeconds))
+        let requestedBucket = Int(floor((sourceTime + 0.000_001) / Self.stepSeconds))
+        let keys = frameKeys[clip.id]
+
+        // NSCache can evict an individual frame after a clip-wide generation completed. Detect
+        // that missing requested bucket and start one bounded replacement pass; the existing
+        // earlier-frame fallback remains available while regeneration progresses.
+        let requestedImage = keys?[requestedBucket].flatMap(imageCache.object)
+        if requestedImage == nil, generationTasks[clip.id] == nil {
+            startGeneration(for: clip)
+        }
+        if let requestedImage { return requestedImage }
+
+        var bucket = requestedBucket - 1
         while bucket >= 0 {
-            if let key = keys[bucket], let image = imageCache.object(forKey: key) {
+            if let key = keys?[bucket], let image = imageCache.object(forKey: key) {
                 return image
             }
             bucket -= 1
@@ -93,15 +105,26 @@ final class ScrubFrameLadder {
         return nil
     }
 
-    private func generateFrames(for clip: ProjectClip) async {
-        defer { generationTasks[clip.id] = nil }
-        guard presentClipIds.contains(clip.id),
+    private func startGeneration(for clip: ProjectClip) {
+        guard generationTasks[clip.id] == nil, presentClipIds.contains(clip.id) else { return }
+        let token = UUID()
+        completedClipIds.remove(clip.id)
+        generationTokens[clip.id] = token
+        generationTasks[clip.id] = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.generateFrames(for: clip, token: token)
+        }
+    }
+
+    private func generateFrames(for clip: ProjectClip, token: UUID) async {
+        defer { finishGeneration(clipId: clip.id, token: token) }
+        guard isCurrentGeneration(clipId: clip.id, token: token),
               let urlString = clip.url,
               let remoteURL = URL(string: urlString)
         else { return }
 
         let localURL = await ClipFileCache.shared.localURL(clipId: clip.id, remoteURL: remoteURL)
-        guard !Task.isCancelled, presentClipIds.contains(clip.id) else { return }
+        guard !Task.isCancelled, isCurrentGeneration(clipId: clip.id, token: token) else { return }
 
         let asset = AVURLAsset(url: localURL)
         let loadedDuration = try? await asset.load(.duration)
@@ -109,7 +132,9 @@ final class ScrubFrameLadder {
         let declaredDuration = clip.originalDurationSeconds ?? 0
         let duration = max(assetDuration.isFinite ? assetDuration : 0, declaredDuration)
         guard duration > 0 else {
-            completedClipIds.insert(clip.id)
+            if isCurrentGeneration(clipId: clip.id, token: token) {
+                completedClipIds.insert(clip.id)
+            }
             return
         }
 
@@ -125,7 +150,7 @@ final class ScrubFrameLadder {
         generator.requestedTimeToleranceAfter = tolerance
 
         for await result in generator.images(for: times) {
-            guard !Task.isCancelled, presentClipIds.contains(clip.id) else {
+            guard !Task.isCancelled, isCurrentGeneration(clipId: clip.id, token: token) else {
                 generator.cancelAllCGImageGeneration()
                 return
             }
@@ -137,9 +162,19 @@ final class ScrubFrameLadder {
             revision &+= 1
         }
 
-        if presentClipIds.contains(clip.id) {
+        if isCurrentGeneration(clipId: clip.id, token: token) {
             completedClipIds.insert(clip.id)
         }
+    }
+
+    private func isCurrentGeneration(clipId: String, token: UUID) -> Bool {
+        presentClipIds.contains(clipId) && generationTokens[clipId] == token
+    }
+
+    private func finishGeneration(clipId: String, token: UUID) {
+        guard generationTokens[clipId] == token else { return }
+        generationTasks[clipId] = nil
+        generationTokens[clipId] = nil
     }
 
     private func activeRange(
