@@ -38,6 +38,7 @@ struct EditorView: View {
     @State private var pendingScrubTarget: Double?
     @State private var slowScrubMode = false
     @State private var pendingScrubLandingTarget: Double?
+    @State private var scrubSessionGeneration: UInt = 0
 
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
@@ -97,7 +98,10 @@ struct EditorView: View {
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.isScrubbing) { _, isScrubbing in
                 if isScrubbing {
-                    // A new drag supersedes any not-yet-issued landing from the previous drag.
+                    // A new generation prevents an older gesture's slow seek completion from
+                    // leaking adaptive tolerance into this drag.
+                    scrubSessionGeneration &+= 1
+                    slowScrubMode = false
                     pendingScrubLandingTarget = nil
                     return
                 }
@@ -283,13 +287,16 @@ struct EditorView: View {
             : .zero
         let started = CACurrentMediaTime()
         let seekPlayer = player
+        let seekSessionGeneration = scrubSessionGeneration
         player.seek(to: target, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
             Task { @MainActor in
                 guard self.player === seekPlayer else {
                     scrubSeekInFlight = false
                     return
                 }
-                if CACurrentMediaTime() - started > 0.25 {
+                if seekSessionGeneration == scrubSessionGeneration,
+                   state.isScrubbing,
+                   CACurrentMediaTime() - started > 0.25 {
                     slowScrubMode = true
                 }
                 scrubSeekInFlight = false

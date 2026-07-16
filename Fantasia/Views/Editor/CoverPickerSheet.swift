@@ -11,6 +11,32 @@ import SwiftUI
 import AVFoundation
 import PhotosUI
 
+private enum CoverPreviewQuality: String {
+    case fast
+    case precise
+
+    var tolerance: CMTime {
+        switch self {
+        case .fast: CMTime(value: 1, timescale: 2)
+        case .precise: .zero
+        }
+    }
+}
+
+private struct CoverPreviewRequest {
+    let version: UInt
+    let time: Double
+    let quality: CoverPreviewQuality
+}
+
+private struct CoverPreviewResult {
+    let version: UInt
+    let quality: CoverPreviewQuality
+    let image: UIImage
+    let pixelSize: CGSize
+    let aspect: CGFloat
+}
+
 struct CoverPickerSheet: View {
     @Environment(ProjectManager.self) private var projectManager
     @Environment(\.dismiss) private var dismiss
@@ -27,7 +53,7 @@ struct CoverPickerSheet: View {
     @State private var totalDuration: Double = 0
 
     @State private var scrubbedTime: Double = 0
-    @State private var previewImage: UIImage?
+    @State private var previewResult: CoverPreviewResult?
     @State private var stripFrames: [UIImage?] = []
     @State private var stripCellCount = 0
     @State private var isLoadingComposition = true
@@ -35,11 +61,12 @@ struct CoverPickerSheet: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    // 13-26 M5: latest-wins preview generation (replaces the cancel-storm debounce — see
-    // schedulePreviewRegeneration's doc comment). `pendingTime` is the newest scrubbed time not
-    // yet rendered; `isGeneratingPreview` is true while the drain loop runs.
-    @State private var isGeneratingPreview = false
-    @State private var pendingTime: Double?
+    // One serialized, versioned coordinator owns both fast and precise preview generation.
+    @State private var isPreviewRenderInFlight = false
+    @State private var pendingPreviewRequest: CoverPreviewRequest?
+    @State private var previewRequestVersion: UInt = 0
+    @State private var expectedPrecisePreviewVersion: UInt?
+    @State private var measuredDisplayVersion: UInt?
     @State private var stripDragStartTime: Double?
 
     // Ephemeral overlay state — never persisted; see file header.
@@ -48,14 +75,29 @@ struct CoverPickerSheet: View {
     @State private var selectedTab: CoverEditorTab = .frame
     @State private var selectedPhotoItem: PhotosPickerItem?
 
-    @State private var canvasPixelSize = CGSize(width: 1080, height: 1920)
-    @State private var canvasAspect: CGFloat = 9.0 / 16.0
+    @State private var fallbackCanvasPixelSize = CGSize(width: 1080, height: 1920)
+    @State private var fallbackCanvasAspect: CGFloat = 9.0 / 16.0
+    @State private var previewContainerSize: CGSize = .zero
     @State private var canvasDisplaySize: CGSize = .zero
 
     private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051) // #0A0A0D
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)               // #8C59FF
     private let stripCellWidth: CGFloat = 46
     private let stripCellHeight: CGFloat = 64
+
+    private var previewImage: UIImage? { previewResult?.image }
+    private var canvasPixelSize: CGSize { previewResult?.pixelSize ?? fallbackCanvasPixelSize }
+    private var canvasAspect: CGFloat { previewResult?.aspect ?? fallbackCanvasAspect }
+    private var isCurrentPrecisePreviewReady: Bool {
+        guard let result = previewResult,
+              result.quality == .precise,
+              result.version == expectedPrecisePreviewVersion,
+              result.version == measuredDisplayVersion,
+              canvasDisplaySize.width > 0,
+              canvasDisplaySize.height > 0
+        else { return false }
+        return true
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,7 +187,7 @@ struct CoverPickerSheet: View {
                 .padding(.vertical, 8)
                 .background(accent, in: Capsule())
             }
-            .disabled(isSaving || previewImage == nil)
+            .disabled(isSaving || !isCurrentPrecisePreviewReady)
             .accessibilityLabel("Save cover")
         }
         .padding(.horizontal, 8)
@@ -183,13 +225,13 @@ struct CoverPickerSheet: View {
                 )
                 .frame(width: fitted.width, height: fitted.height)
                 .position(x: fitted.midX, y: fitted.midY)
-                .onGeometryChange(for: CGSize.self, of: { $0.size }) {
-                    canvasDisplaySize = $0
-                }
             }
             .coordinateSpace(name: "coverCanvas")
             .contentShape(Rectangle())
             .onTapGesture { selectedOverlayId = nil }
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) {
+                updatePreviewContainerSize($0)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -258,14 +300,13 @@ struct CoverPickerSheet: View {
                 let start = stripDragStartTime ?? scrubbedTime
                 let next = start - value.translation.width / stripPx
                 scrubbedTime = min(max(0, next), totalDuration)
-                schedulePreviewRegeneration()
+                requestPreview(at: scrubbedTime, quality: .fast)
             }
             .onEnded { _ in
                 stripDragStartTime = nil
                 // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
                 // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
-                let finalTime = scrubbedTime
-                Task { await generatePreview(at: finalTime) }
+                requestPreview(at: scrubbedTime, quality: .precise)
             }
     }
 
@@ -321,7 +362,15 @@ struct CoverPickerSheet: View {
     private func loadComposition() async {
         isLoadingComposition = true
         mediaLoadFailed = false
-        previewImage = nil
+        // Invalidate any older coordinator work without starting a second drain. If one request
+        // is already decoding, its stale completion will release the slot and pick up the new
+        // precise request below.
+        previewRequestVersion &+= 1
+        pendingPreviewRequest = nil
+        expectedPrecisePreviewVersion = nil
+        measuredDisplayVersion = nil
+        previewResult = nil
+        canvasDisplaySize = .zero
         stripFrames = []
         stripCellCount = 0
         sourceGenerators.removeAll()
@@ -337,70 +386,74 @@ struct CoverPickerSheet: View {
         totalDuration = builtRanges.last?.end ?? 0
 
         if let renderSize = builtVideoComposition?.renderSize, renderSize.width > 0, renderSize.height > 0 {
-            canvasPixelSize = capLongEdge(renderSize, maxEdge: 1440)
-            canvasAspect = renderSize.width / renderSize.height
+            fallbackCanvasPixelSize = capLongEdge(renderSize, maxEdge: 1440)
+            fallbackCanvasAspect = renderSize.width / renderSize.height
         } else {
-            canvasAspect = aspectFraction(for: project.aspectRatio)
-            canvasPixelSize = capLongEdge(
-                CGSize(width: 1080, height: 1080 / canvasAspect),
+            fallbackCanvasAspect = aspectFraction(for: project.aspectRatio)
+            fallbackCanvasPixelSize = capLongEdge(
+                CGSize(width: 1080, height: 1080 / fallbackCanvasAspect),
                 maxEdge: 1440
             )
         }
 
-        await generatePreview(at: scrubbedTime)
+        requestPreview(at: scrubbedTime, quality: .precise)
         isLoadingComposition = false
     }
 
-    /// 13-26 M5: latest-wins throttling. The old cancel+120ms-sleep debounce cancelled the pending
-    /// task on EVERY drag change — during continuous strip movement no render ever survived to
-    /// completion, so the big preview sat frozen until the finger stopped (the reported "strip
-    /// slides but preview never updates" bug). Now: every change just records the newest time;
-    /// exactly one drain loop runs at a time, rendering FAST (½s-tolerance, keyframe-near) frames
-    /// back-to-back, always picking up the most recent pending time next — the preview visibly
-    /// tracks the drag at whatever rate the device can decode. The strip gesture's .onEnded fires
-    /// one final PRECISE render at the resting time.
-    private func schedulePreviewRegeneration() {
-        pendingTime = scrubbedTime
-        guard !isGeneratingPreview else { return }
-        isGeneratingPreview = true
-        Task {
-            while let t = pendingTime {
-                pendingTime = nil
-                await generateFastPreview(at: t)
+    /// One latest-wins request slot backs both drag previews and release landings. A precise
+    /// request replaces any unissued fast request; an already-issued stale request is allowed to
+    /// finish but can never publish.
+    private func requestPreview(at time: Double, quality: CoverPreviewQuality) {
+        previewRequestVersion &+= 1
+        let request = CoverPreviewRequest(
+            version: previewRequestVersion,
+            time: time,
+            quality: quality
+        )
+        pendingPreviewRequest = request
+        expectedPrecisePreviewVersion = quality == .precise ? request.version : nil
+        measuredDisplayVersion = nil
+
+        guard !isPreviewRenderInFlight else { return }
+        isPreviewRenderInFlight = true
+        Task { await drainPreviewRequests() }
+    }
+
+    private func drainPreviewRequests() async {
+        while let request = pendingPreviewRequest {
+            pendingPreviewRequest = nil
+            let result = await renderPreview(request)
+            guard request.version == previewRequestVersion else { continue }
+            if let result {
+                previewResult = result
+                synchronizeDisplayGeometry(for: result, container: previewContainerSize)
             }
-            isGeneratingPreview = false
         }
+        isPreviewRenderInFlight = false
     }
 
-    /// FAST during-drag frame: ½-second tolerance snaps to a cheap nearby keyframe.
-    private func generateFastPreview(at time: Double) async {
-        guard let active = activeClip(at: time),
+    private func renderPreview(_ request: CoverPreviewRequest) async -> CoverPreviewResult? {
+        guard let active = activeClip(at: request.time),
               let image = await sourceImage(
                 for: active.clip,
                 localTime: active.localTime,
-                tolerance: CMTime(value: 1, timescale: 2)
-              ) else { return }
-        previewImage = image
-    }
-
-    /// PRECISE frame (zero tolerance) — initial load, drag-end landing, and the frame Save uses.
-    private func generatePreview(at time: Double) async {
-        guard let active = activeClip(at: time),
-              let image = await sourceImage(
-                for: active.clip,
-                localTime: active.localTime,
-                tolerance: .zero
-              ) else { return }
-        if Task.isCancelled { return }
-        canvasPixelSize = capLongEdge(
+                quality: request.quality
+              ) else { return nil }
+        let pixelSize = capLongEdge(
             CGSize(
                 width: image.size.width * image.scale,
                 height: image.size.height * image.scale
             ),
             maxEdge: 1440
         )
-        canvasAspect = canvasPixelSize.width / canvasPixelSize.height
-        previewImage = image
+        guard pixelSize.width > 0, pixelSize.height > 0 else { return nil }
+        return CoverPreviewResult(
+            version: request.version,
+            quality: request.quality,
+            image: image,
+            pixelSize: pixelSize,
+            aspect: pixelSize.width / pixelSize.height
+        )
     }
 
     /// Resolves the project-timeline playhead to a source clip and that asset's local timeline.
@@ -427,7 +480,7 @@ struct CoverPickerSheet: View {
     private func sourceImage(
         for clip: ProjectClip,
         localTime: Double,
-        tolerance: CMTime
+        quality: CoverPreviewQuality
     ) async -> UIImage? {
         if clip.mediaType == "image" {
             guard let url = await sourceURL(for: clip) else { return nil }
@@ -440,21 +493,27 @@ struct CoverPickerSheet: View {
             return data.flatMap(UIImage.init(data:))
         }
 
-        guard let generator = await sourceGenerator(for: clip) else { return nil }
-        generator.requestedTimeToleranceBefore = tolerance
-        generator.requestedTimeToleranceAfter = tolerance
+        guard let generator = await sourceGenerator(for: clip, quality: quality) else { return nil }
         let cmTime = CMTime(seconds: localTime, preferredTimescale: 600)
         guard let (cgImage, _) = try? await generator.image(at: cmTime) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 
-    private func sourceGenerator(for clip: ProjectClip) async -> AVAssetImageGenerator? {
-        if let cached = sourceGenerators[clip.id] { return cached }
+    private func sourceGenerator(
+        for clip: ProjectClip,
+        quality: CoverPreviewQuality
+    ) async -> AVAssetImageGenerator? {
+        // Fast and precise decoders are configured once and never have their tolerances mutated
+        // while an async image request may be using them.
+        let cacheKey = "\(clip.id):\(quality.rawValue)"
+        if let cached = sourceGenerators[cacheKey] { return cached }
         guard let url = await sourceURL(for: clip) else { return nil }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 1440, height: 1440)
-        sourceGenerators[clip.id] = generator
+        generator.requestedTimeToleranceBefore = quality.tolerance
+        generator.requestedTimeToleranceAfter = quality.tolerance
+        sourceGenerators[cacheKey] = generator
         return generator
     }
 
@@ -555,13 +614,13 @@ struct CoverPickerSheet: View {
     // MARK: - Save
 
     private func saveCover() async {
-        guard let previewImage else {
-            errorMessage = "No frame selected."
+        guard isCurrentPrecisePreviewReady, let previewResult else {
+            errorMessage = "The selected frame is still loading."
             return
         }
         isSaving = true
         errorMessage = nil
-        guard let jpeg = renderCompositeJPEG(frameImage: previewImage) else {
+        guard let jpeg = renderCompositeJPEG(previewResult: previewResult) else {
             isSaving = false
             errorMessage = "Couldn't render cover — try again."
             return
@@ -579,26 +638,57 @@ struct CoverPickerSheet: View {
     }
 
     @MainActor
-    private func renderCompositeJPEG(frameImage: UIImage) -> Data? {
+    private func renderCompositeJPEG(previewResult: CoverPreviewResult) -> Data? {
         // Preview points become output pixels exactly once, at composite time. Because the
         // display rect and source frame share an aspect, width and height produce one scale.
-        let displayToPixelScale = canvasDisplaySize.width > 0
-            ? canvasPixelSize.width / canvasDisplaySize.width
-            : 1
+        guard previewResult.version == measuredDisplayVersion,
+              canvasDisplaySize.width > 0 else { return nil }
+        let displayToPixelScale = previewResult.pixelSize.width / canvasDisplaySize.width
         let view = CoverCompositeView(
-            frameImage: frameImage,
-            canvasSize: canvasPixelSize,
+            frameImage: previewResult.image,
+            canvasSize: previewResult.pixelSize,
             displayToPixelScale: displayToPixelScale,
             overlays: coverOverlays
         )
         let renderer = ImageRenderer(content: view)
-        renderer.proposedSize = ProposedViewSize(canvasPixelSize)
+        renderer.proposedSize = ProposedViewSize(previewResult.pixelSize)
         renderer.scale = 1.0
         guard let uiImage = renderer.uiImage else { return nil }
         return uiImage.jpegData(compressionQuality: 0.9)
     }
 
     // MARK: - Helpers
+
+    private func updatePreviewContainerSize(_ size: CGSize) {
+        previewContainerSize = size
+        guard let previewResult else {
+            canvasDisplaySize = .zero
+            measuredDisplayVersion = nil
+            return
+        }
+        synchronizeDisplayGeometry(for: previewResult, container: size)
+    }
+
+    private func synchronizeDisplayGeometry(
+        for result: CoverPreviewResult,
+        container: CGSize
+    ) {
+        guard result.version == previewRequestVersion,
+              container.width > 0,
+              container.height > 0 else {
+            canvasDisplaySize = .zero
+            measuredDisplayVersion = nil
+            return
+        }
+        let displaySize = aspectFitRect(container: container, contentAspect: result.aspect).size
+        guard displaySize.width > 0, displaySize.height > 0 else {
+            canvasDisplaySize = .zero
+            measuredDisplayVersion = nil
+            return
+        }
+        canvasDisplaySize = displaySize
+        measuredDisplayVersion = result.version
+    }
 
     private func stripPixelsPerSecond(viewportWidth: CGFloat) -> CGFloat {
         guard totalDuration > 0 else { return 44 }
