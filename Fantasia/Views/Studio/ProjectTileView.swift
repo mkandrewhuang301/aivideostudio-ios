@@ -113,18 +113,14 @@ struct ProjectTileView: View {
     @ViewBuilder
     private var thumbnail: some View {
         // 13-24 K7: image must never propose its own size — Color.clear fills the fixed 9:16
-        // shell; AsyncImage lives in an overlay and is clipped to that shell.
+        // shell; the processed thumbnail lives in an overlay and is clipped to that shell.
         Color.clear
             .overlay {
                 ZStack {
                     theme.surfaceStrong
                     if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            } else {
-                                theme.surfaceStrong
-                            }
+                        LetterboxThumbnailView(url: url) {
+                            theme.surfaceStrong
                         }
                     } else {
                         Image(systemName: "film")

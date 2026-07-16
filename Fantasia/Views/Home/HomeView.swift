@@ -277,12 +277,8 @@ struct HomeView: View {
             .overlay {
                 ZStack {
                     if let project, let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            } else {
-                                gradient
-                            }
+                        LetterboxThumbnailView(url: url) {
+                            gradient
                         }
                     } else {
                         gradient

@@ -682,18 +682,14 @@ struct TimelineTrackView: View {
         } label: {
             ZStack(alignment: .bottomLeading) {
                 // 13-26 M6.4: crop-safe skeleton — Color.clear owns the 52×58 layout frame; the
-                // AsyncImage fills it via the overlay and gets .clipped() to it, so a 16:9 cover
+                // The processed thumbnail fills it via the overlay and gets .clipped(), so a 16:9 cover
                 // image shows a centered CROP instead of letterbox bars, and the oversized image
                 // can never inflate the card's layout/hit frame (the scaledToFill trap).
                 Color.clear
                     .overlay {
                         if let urlString = state.project.thumbnailUrl, let url = URL(string: urlString) {
-                            AsyncImage(url: url) { phase in
-                                if let image = phase.image {
-                                    image.resizable().scaledToFill()
-                                } else {
-                                    Color(red: 0.11, green: 0.11, blue: 0.137)
-                                }
+                            LetterboxThumbnailView(url: url) {
+                                Color(red: 0.11, green: 0.11, blue: 0.137)
                             }
                         } else {
                             Color(red: 0.11, green: 0.11, blue: 0.137)
