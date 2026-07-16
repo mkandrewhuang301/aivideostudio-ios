@@ -13,7 +13,7 @@
 // the lowest row whose already-placed occupants it doesn't overlap; no writes for legacy data).
 // Long-press (0.4s) lifts a pill and moves it across time (horizontal) AND rows (vertical, finger
 // crossing a 28pt band; one row below the last = create a new row); dropping onto an overlap
-// snaps back with a toast. TimelineTrackView hosts this inside its vertically-scrollable tracks
+// bumps down to the first free row. TimelineTrackView hosts this inside its vertically-scrollable tracks
 // viewport; its textSectionHeight math mirrors `effectiveRows` so section height =
 // (maxOccupiedRow + 1) × 28, minimum one row.
 
@@ -104,14 +104,6 @@ struct TextOverlayTrackRow: View {
                 textPlaceholderRow
                     .frame(height: rowHeight, alignment: .leading)
             } else {
-                // M8.5: target row band highlight while a pill is lifted.
-                if liftedOverlayId != nil, let band = liftTargetRow {
-                    Color.white.opacity(0.06)
-                        .frame(width: max(state.visualStripEndPx(pxPerSecond: pxPerSecond), 60), height: rowHeight)
-                        .offset(y: CGFloat(band) * rowHeight)
-                        .allowsHitTesting(false)
-                }
-
                 ForEach(state.project.textOverlays) { overlay in
                     TextOverlayPillView(
                         overlay: overlay,
@@ -130,6 +122,11 @@ struct TextOverlayTrackRow: View {
                         onLiftDragChanged: { _, location, startLocation in
                             liftDragChanged(overlay: overlay, location: location, startLocation: startLocation)
                         },
+                        liftedRowOffsetY: CGFloat(
+                            liftedOverlayId == overlay.id
+                                ? (liftTargetRow ?? (rowsById[overlay.id] ?? 0)) - (rowsById[overlay.id] ?? 0)
+                                : 0
+                        ) * rowHeight,
                         onLiftEnded: { commitLift(overlay: overlay, currentRow: rowsById[overlay.id] ?? 0) }
                     )
                     .offset(
@@ -207,18 +204,17 @@ struct TextOverlayTrackRow: View {
         let newEnd = newStart + duration
         guard abs(newStart - overlay.startSeconds) > 0.0001 || targetRow != currentRow else { return }
 
-        // Drop rule (user-locked): overlapping another text in the target row is INVALID — snap
-        // back (nothing was mutated optimistically yet, so clearing lift state above IS the snap
-        // back) and surface the toast.
+        // Drop rule: walk downward from the hovered row until the moved interval is free. The walk
+        // is unbounded by the current max row, so maxRow + 1 naturally creates a new row.
         let rowsById = Self.effectiveRows(for: state.project.textOverlays)
-        let overlapsAnother = state.project.textOverlays.contains { other in
+        var resolvedRow = targetRow
+        while state.project.textOverlays.contains(where: { other in
             other.id != overlay.id
-                && (rowsById[other.id] ?? 0) == targetRow
-                && newStart < other.endSeconds && newEnd > other.startSeconds
-        }
-        if overlapsAnother {
-            onError("Overlaps another text")
-            return
+                && (rowsById[other.id] ?? 0) == resolvedRow
+                && newStart < other.endSeconds
+                && newEnd > other.startSeconds
+        }) {
+            resolvedRow += 1
         }
 
         // Optimistic commit + undo (before-values captured from the pre-mutation `overlay`).
@@ -226,13 +222,13 @@ struct TextOverlayTrackRow: View {
         let before = (start: overlay.startSeconds, end: overlay.endSeconds, row: currentRow)
         state.project.textOverlays[idx].startSeconds = newStart
         state.project.textOverlays[idx].endSeconds = newEnd
-        state.project.textOverlays[idx].rowIndex = targetRow
+        state.project.textOverlays[idx].rowIndex = resolvedRow
 
         let id = overlay.id
         Task {
             do {
                 try await projectManager.updateTextOverlay(
-                    textId: id, rowIndex: targetRow, startSeconds: newStart, endSeconds: newEnd
+                    textId: id, rowIndex: resolvedRow, startSeconds: newStart, endSeconds: newEnd
                 )
                 syncProjectFromManager()
                 state.history.record(UndoableAction(
@@ -244,7 +240,7 @@ struct TextOverlayTrackRow: View {
                     },
                     redo: {
                         try await projectManager.updateTextOverlay(
-                            textId: id, rowIndex: targetRow, startSeconds: newStart, endSeconds: newEnd
+                            textId: id, rowIndex: resolvedRow, startSeconds: newStart, endSeconds: newEnd
                         )
                     }
                 ))

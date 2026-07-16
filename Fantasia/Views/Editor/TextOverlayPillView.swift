@@ -39,6 +39,9 @@ struct TextOverlayPillView: View {
     /// coordinates — location minus startLocation therefore captures BOTH finger movement and any
     /// content scrolled underneath by an edge auto-scroll loop).
     var onLiftDragChanged: (CGSize, CGPoint, CGPoint) -> Void = { _, _, _ in }
+    /// Parent-computed row-band offset. It changes only when the finger crosses a row boundary,
+    /// so the lifted pill snaps between rows instead of drifting continuously between them.
+    var liftedRowOffsetY: CGFloat = 0
     /// 13-26 M8: fires exactly once per lift on ANY termination path (release, cancel,
     /// interruption) — GestureState-backed, so the lift can never stick.
     var onLiftEnded: () -> Void = {}
@@ -113,7 +116,7 @@ struct TextOverlayPillView: View {
         // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
         .offset(
             x: liftTranslation.width + trimHandleOffsetX + edgeScrollCompensationX,
-            y: liftTranslation.height
+            y: isLifted ? liftedRowOffsetY : 0
         )
         // 13-26 M8: when GestureState resets (any exit path), always tear the lift down.
         .onChange(of: liftGestureActive) { _, active in
