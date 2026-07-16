@@ -344,6 +344,13 @@ struct EditorView: View {
             Task { @MainActor in
                 guard self.player === seekPlayer else {
                     scrubSeekInFlight = false
+                    if landingVersion == scrubLandingRequestVersion,
+                       landingSession == scrubSessionGeneration,
+                       pendingScrubLandingTarget == nil {
+                        // The active seek belonged to the player that was just replaced. Preserve
+                        // its still-current target exactly once; never overwrite a newer landing.
+                        pendingScrubLandingTarget = targetSeconds
+                    }
                     finishPreciseScrubLandingIfPossible()
                     return
                 }
@@ -919,6 +926,11 @@ struct EditorView: View {
 
         let seekTime = CMTime(seconds: state.currentTime, preferredTimescale: 600)
         await avPlayer.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        guard rebuildGeneration == playerRebuildGeneration, player === avPlayer else { return }
+        // A precise scrub landing may have been requeued while this replacement player was being
+        // assembled. Its mismatch callback could not drain with no current player, so guarantee a
+        // handoff now that the replacement has been installed and primed.
+        finishPreciseScrubLandingIfPossible()
         if state.isPlaying {
             currentPlayEnd = computePlayEnd()
             avPlayer.play()
