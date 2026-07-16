@@ -169,14 +169,19 @@ struct TimelineTrackView: View {
     private let reorderSlotWidth: CGFloat = 46
     private let reorderSquareSpacing: CGFloat = 4
 
-    /// 13-24 K1: overlay slot pitch (square + spacing). Uses playBoxWidth+8 as the left dock
-    /// reserved space when sizing available width.
+    /// Overlay slot pitch (square + spacing). The 24pt visual floor is applied HERE so rendering,
+    /// row clamps, and hit projection all consume the same effective pitch.
     private func reorderPitch(viewportWidth: CGFloat) -> CGFloat {
         let n = max(liveOrder.count, 1)
         let minX = playBoxWidth + 8
         let available = max(viewportWidth - minX - 8, 50)
         let nominal = reorderSlotWidth + reorderSquareSpacing // 50
-        return min(nominal, max(available / CGFloat(n), available / 12))
+        let minimum = 24 + reorderSquareSpacing
+        return max(minimum, min(nominal, max(available / CGFloat(n), available / 12)))
+    }
+
+    private func reorderSquareWidth(viewportWidth: CGFloat) -> CGFloat {
+        max(0, reorderPitch(viewportWidth: viewportWidth) - reorderSquareSpacing)
     }
 
     /// Place the pressed clip's square under the lift/finger anchor, then clamp so nothing starts
@@ -678,8 +683,7 @@ struct TimelineTrackView: View {
     /// before); hit-testing is disabled on the whole overlay so the live drag keeps flowing to
     /// the hidden in-content pill underneath.
     private func reorderRowOverlay(viewportWidth: CGFloat) -> some View {
-        let pitch = reorderPitch(viewportWidth: viewportWidth)
-        let squareWidth = max(24, pitch - reorderSquareSpacing)
+        let squareWidth = reorderSquareWidth(viewportWidth: viewportWidth)
         return HStack(spacing: reorderSquareSpacing) {
             ForEach(displayOrderClips) { clip in
                 ClipPillView(
@@ -975,7 +979,7 @@ struct TimelineTrackView: View {
         let contentOffset = viewportWidth / 2 - state.currentTime * pxPerSecond
         let renderedWidth = max(duration(of: clip) * pxPerSecond, 30)
         let pillMidX = clipStart * pxPerSecond + contentOffset + renderedWidth / 2
-        let halfSlot = reorderSlotWidth / 2
+        let halfSlot = reorderSquareWidth(viewportWidth: viewportWidth) / 2
         reorderAnchorX = min(max(pillMidX, playBoxWidth + 8 + halfSlot), viewportWidth - 8 - halfSlot)
         didLatchReorderAnchorToFinger = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
