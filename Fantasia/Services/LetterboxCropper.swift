@@ -10,7 +10,9 @@ enum LetterboxCropper {
     private static let analysisWidth = 48
     private static let darkLuminance: Double = 0.055
     private static let minimumBandFraction: Double = 0.06
-    private static let maximumCombinedBandFraction: Double = 0.45
+    private static let maximumBandFraction: Double = 0.38
+    // 16:9 content baked into a 9:16 frame leaves ~34.2% bands per side, ~68.4% combined.
+    private static let maximumCombinedBandFraction: Double = 0.72
     private static let maximumAsymmetry: Double = 0.25
 
     static func stripLetterbox(_ image: UIImage) -> UIImage {
@@ -97,6 +99,8 @@ enum LetterboxCropper {
         let asymmetry = Double(abs(leading - trailing)) / Double(max(leading, trailing))
         guard leadingFraction >= minimumBandFraction,
               trailingFraction >= minimumBandFraction,
+              leadingFraction <= maximumBandFraction,
+              trailingFraction <= maximumBandFraction,
               asymmetry <= maximumAsymmetry,
               combinedFraction <= maximumCombinedBandFraction
         else { return nil }
