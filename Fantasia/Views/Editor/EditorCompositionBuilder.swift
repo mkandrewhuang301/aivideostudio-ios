@@ -64,7 +64,8 @@ enum EditorCompositionBuilder {
     static func build(clips: [ProjectClip], aspectRatio: String) async -> (
         composition: AVMutableComposition,
         videoComposition: AVMutableVideoComposition?,
-        ranges: [ClipRange]
+        ranges: [ClipRange],
+        isDegraded: Bool
     )? {
         let sorted = clips.sorted { $0.sortOrder < $1.sortOrder }
         guard !sorted.isEmpty else { return nil }
@@ -140,7 +141,7 @@ enum EditorCompositionBuilder {
             print(
                 "[EditorCompositionBuilder] degraded build: inserted \(composition.duration.seconds)s of expected \(cursor.seconds)s — media unavailable (stale URLs?)"
             )
-            return (composition, nil, ranges)
+            return (composition, nil, ranges, true)
         }
 
         // Force the last instruction to end exactly at the composition's real duration so
@@ -166,7 +167,7 @@ enum EditorCompositionBuilder {
             videoComposition = vc
         }
 
-        return (composition, videoComposition, ranges)
+        return (composition, videoComposition, ranges, false)
     }
 
     static func duration(of clip: ProjectClip) -> Double {

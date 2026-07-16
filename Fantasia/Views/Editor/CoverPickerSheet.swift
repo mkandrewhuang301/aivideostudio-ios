@@ -298,7 +298,7 @@ struct CoverPickerSheet: View {
 
     private func loadComposition() async {
         isLoadingComposition = true
-        guard let (built, builtVideoComposition, builtRanges) = await EditorCompositionBuilder.build(
+        guard let (built, builtVideoComposition, builtRanges, _) = await EditorCompositionBuilder.build(
             clips: project.clips, aspectRatio: project.aspectRatio
         ) else {
             isLoadingComposition = false

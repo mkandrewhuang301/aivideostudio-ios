@@ -25,8 +25,10 @@ actor ClipFileCache {
     /// 500MB LRU cap — enforced after every successful insert (never blocks the caller; runs
     /// synchronously at the end of the insert since we're already off the main actor here).
     private static let maxCacheBytes: Int64 = 500 * 1024 * 1024
+    private static let minimumValidPayloadBytes: Int64 = 1024
 
     private var inFlight: [String: Task<URL, Never>] = [:]
+    private var didSweepCorruptEntries = false
 
     private static var cacheDirectory: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -47,6 +49,11 @@ actor ClipFileCache {
     /// (download failure, disk-full, etc.) this returns `remoteURL` unchanged — callers never fail
     /// because of this cache.
     func localURL(clipId: String, remoteURL: URL) async -> URL {
+        if !didSweepCorruptEntries {
+            didSweepCorruptEntries = true
+            sweepCorruptEntries()
+        }
+
         let dest = Self.fileURL(clipId: clipId, remoteURL: remoteURL)
 
         if FileManager.default.fileExists(atPath: dest.path) {
@@ -63,7 +70,22 @@ actor ClipFileCache {
 
         let task = Task<URL, Never> {
             do {
-                let (tmpURL, _) = try await URLSession.shared.download(from: remoteURL)
+                let (tmpURL, response) = try await URLSession.shared.download(from: remoteURL)
+                if let http = response as? HTTPURLResponse,
+                   !(200...299).contains(http.statusCode) {
+                    #if DEBUG
+                    print("[ClipFileCache] refusing to cache \(clipId): HTTP \(http.statusCode)")
+                    #endif
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    return remoteURL
+                }
+                guard !Self.isCorruptPayload(at: tmpURL) else {
+                    #if DEBUG
+                    print("[ClipFileCache] refusing to cache \(clipId): invalid payload")
+                    #endif
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    return remoteURL
+                }
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: tmpURL, to: dest)
                 #if DEBUG
@@ -81,6 +103,34 @@ actor ClipFileCache {
         inFlight[clipId] = task
         defer { inFlight[clipId] = nil }
         return await task.value
+    }
+
+    /// One-time, actor-isolated repair for cache entries written before HTTP/payload validation
+    /// existed. R2's expired-URL response is a tiny XML document, so both the size and signature
+    /// checks deliberately match the validation applied to new downloads above.
+    private func sweepCorruptEntries() {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: Self.cacheDirectory, includingPropertiesForKeys: [.fileSizeKey]
+        ) else { return }
+
+        for fileURL in entries where Self.isCorruptPayload(at: fileURL) {
+            try? FileManager.default.removeItem(at: fileURL)
+            #if DEBUG
+            print("[ClipFileCache] removed corrupt cache entry \(fileURL.lastPathComponent)")
+            #endif
+        }
+    }
+
+    private static func isCorruptPayload(at url: URL) -> Bool {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           Int64(size) < minimumValidPayloadBytes {
+            return true
+        }
+
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let prefix = try? handle.read(upToCount: 16) else { return false }
+        return prefix.starts(with: Data("<?xml".utf8)) || prefix.starts(with: Data("<Error".utf8))
     }
 
     /// Deletes any cached file(s) for the given clip ids — called on project delete (any extension,

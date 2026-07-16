@@ -61,6 +61,7 @@ struct EditorView: View {
     // time observer auto-pauses at (recomputed from `state.selection` each time Play is pressed).
     @State private var clipRanges: [EditorCompositionBuilder.ClipRange] = []
     @State private var currentPlayEnd: Double = .infinity
+    @State private var didAttemptCachePurge = false
 
     // Forced-dark palette (13-UI-SPEC.md Color contract) — NOT theme.background/theme.surface.
     private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051)   // #0A0A0D
@@ -707,9 +708,15 @@ struct EditorView: View {
     private func rebuildPlayer() async {
         tearDownPlayerObserverOnly()
         await refreshOriginalAspectFraction()
-        guard let (composition, videoComposition, ranges) = await EditorCompositionBuilder.build(
+        guard let (composition, videoComposition, ranges, isDegraded) = await EditorCompositionBuilder.build(
             clips: state.project.clips, aspectRatio: state.aspectRatio
         ) else { return }
+        if isDegraded, !didAttemptCachePurge {
+            didAttemptCachePurge = true
+            await ClipFileCache.shared.remove(clipIds: state.project.clips.map(\.id))
+            await projectManager.refreshLoadedProjectURLs()
+            return
+        }
         clipRanges = ranges
         // 13-26 M4: every internal boundary except 0 and the final end — dropLast() removes the
         // LAST range (its .end IS the composition's total duration, explicitly excluded).
