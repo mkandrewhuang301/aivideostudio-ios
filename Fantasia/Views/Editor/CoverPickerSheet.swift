@@ -68,6 +68,8 @@ struct CoverPickerSheet: View {
     @State private var expectedPrecisePreviewVersion: UInt?
     @State private var measuredDisplayVersion: UInt?
     @State private var stripDragStartTime: Double?
+    @State private var scrubFrameLadder = ScrubFrameLadder()
+    @State private var showsScrubFrame = false
 
     // Ephemeral overlay state — never persisted; see file header.
     @State private var coverOverlays: [CoverOverlay] = []
@@ -85,9 +87,18 @@ struct CoverPickerSheet: View {
     private let stripCellWidth: CGFloat = 46
     private let stripCellHeight: CGFloat = 64
 
-    private var previewImage: UIImage? { previewResult?.image }
+    private var ladderFrame: UIImage? {
+        guard showsScrubFrame else { return nil }
+        return scrubFrameLadder.frame(project: project.clips, at: scrubbedTime, ranges: ranges)
+    }
+    private var previewImage: UIImage? { ladderFrame ?? previewResult?.image }
     private var canvasPixelSize: CGSize { previewResult?.pixelSize ?? fallbackCanvasPixelSize }
-    private var canvasAspect: CGFloat { previewResult?.aspect ?? fallbackCanvasAspect }
+    private var canvasAspect: CGFloat {
+        if let ladderFrame, ladderFrame.size.height > 0 {
+            return ladderFrame.size.width / ladderFrame.size.height
+        }
+        return previewResult?.aspect ?? fallbackCanvasAspect
+    }
     private var isCurrentPrecisePreviewReady: Bool {
         guard let result = previewResult,
               result.quality == .precise,
@@ -296,11 +307,19 @@ struct CoverPickerSheet: View {
     private func stripDragGesture(stripPx: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                if stripDragStartTime == nil { stripDragStartTime = scrubbedTime }
+                if stripDragStartTime == nil {
+                    stripDragStartTime = scrubbedTime
+                    showsScrubFrame = true
+                    // A precise request already decoding may finish during this drag. Invalidate
+                    // it so ladder display remains authoritative until the release landing.
+                    previewRequestVersion &+= 1
+                    pendingPreviewRequest = nil
+                    expectedPrecisePreviewVersion = nil
+                    measuredDisplayVersion = nil
+                }
                 let start = stripDragStartTime ?? scrubbedTime
                 let next = start - value.translation.width / stripPx
                 scrubbedTime = min(max(0, next), totalDuration)
-                requestPreview(at: scrubbedTime, quality: .fast)
             }
             .onEnded { _ in
                 stripDragStartTime = nil
@@ -384,6 +403,7 @@ struct CoverPickerSheet: View {
         videoComposition = builtVideoComposition
         ranges = builtRanges
         totalDuration = builtRanges.last?.end ?? 0
+        scrubFrameLadder.warm(project: project.clips, ranges: builtRanges, at: scrubbedTime)
 
         if let renderSize = builtVideoComposition?.renderSize, renderSize.width > 0, renderSize.height > 0 {
             fallbackCanvasPixelSize = capLongEdge(renderSize, maxEdge: 1440)
@@ -427,6 +447,9 @@ struct CoverPickerSheet: View {
             if let result {
                 previewResult = result
                 synchronizeDisplayGeometry(for: result, container: previewContainerSize)
+                if result.quality == .precise {
+                    showsScrubFrame = false
+                }
             }
         }
         isPreviewRenderInFlight = false

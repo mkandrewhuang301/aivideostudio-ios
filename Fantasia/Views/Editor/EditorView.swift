@@ -41,6 +41,8 @@ struct EditorView: View {
     @State private var slowScrubMode = false
     @State private var pendingScrubLandingTarget: Double?
     @State private var scrubSessionGeneration: UInt = 0
+    @State private var scrubFrameLadder = ScrubFrameLadder()
+    @State private var showsScrubFrame = false
 
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
@@ -105,6 +107,7 @@ struct EditorView: View {
                     scrubSessionGeneration &+= 1
                     slowScrubMode = false
                     pendingScrubLandingTarget = nil
+                    showsScrubFrame = true
                     return
                 }
                 slowScrubMode = false
@@ -336,8 +339,11 @@ struct EditorView: View {
                 scrubSeekInFlight = false
                 if state.isScrubbing {
                     drainScrubSeeks()
-                } else if state.isPlaying {
-                    player.play()
+                } else {
+                    // Keep the ladder visible until this exact seek completion, avoiding a flash
+                    // of the player's stale pre-scrub frame during the handoff.
+                    showsScrubFrame = false
+                    if state.isPlaying { player.play() }
                 }
             }
         }
@@ -595,6 +601,21 @@ struct EditorView: View {
                         }
                     }
                 }
+                // Q1: the dense source-frame ladder is the visible scrub path. Serialized player
+                // seeks continue underneath so the final precise handoff starts nearby.
+                if showsScrubFrame,
+                   let scrubFrame = scrubFrameLadder.frame(
+                    project: state.project.clips,
+                    at: state.currentTime,
+                    ranges: clipRanges
+                   ) {
+                    Color.black
+                    Image(uiImage: scrubFrame)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: size.width, height: size.height)
+                        .allowsHitTesting(false)
+                }
                 // F11 (Plan 13-21): tap-outside-deselects catcher — sits BEHIND
                 // TextOverlayCanvasView (added via `.overlay` below, which layers on top of this
                 // whole ZStack), so a tap on an actual text overlay's own hit target still wins;
@@ -826,6 +847,11 @@ struct EditorView: View {
             return
         }
         clipRanges = ranges
+        scrubFrameLadder.warm(
+            project: state.project.clips,
+            ranges: ranges,
+            at: state.currentTime
+        )
         // 13-26 M4: every internal boundary except 0 and the final end — dropLast() removes the
         // LAST range (its .end IS the composition's total duration, explicitly excluded).
         state.clipBoundaries = ranges.dropLast().map(\.end)
