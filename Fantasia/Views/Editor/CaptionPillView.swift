@@ -62,6 +62,12 @@ struct CaptionPillView: View {
     // movement). nil = idle, render from `cue`'s committed values.
     @State private var previewStart: Double? = nil
     @State private var previewEnd: Double? = nil
+    @State private var bodyDragCancelledForZoom = false
+    @State private var leftTrimCancelledForZoom = false
+    @State private var rightTrimCancelledForZoom = false
+    @GestureState private var bodyDragGestureActive = false
+    @GestureState private var leftTrimGestureActive = false
+    @GestureState private var rightTrimGestureActive = false
 
     private let blue = Color(red: 0.169, green: 0.561, blue: 0.851)         // #2B8FD9
     private let pillHeight: CGFloat = 28
@@ -105,6 +111,15 @@ struct CaptionPillView: View {
         }
         .onChange(of: isZooming) { _, zooming in
             if zooming { cancelActiveDragForZoom() }
+        }
+        .onChange(of: bodyDragGestureActive) { wasActive, isActive in
+            if !wasActive, isActive { bodyDragCancelledForZoom = false }
+        }
+        .onChange(of: leftTrimGestureActive) { wasActive, isActive in
+            if !wasActive, isActive { leftTrimCancelledForZoom = false }
+        }
+        .onChange(of: rightTrimGestureActive) { wasActive, isActive in
+            if !wasActive, isActive { rightTrimCancelledForZoom = false }
         }
     }
 
@@ -195,16 +210,18 @@ struct CaptionPillView: View {
     private var bodyDragGesture: some Gesture {
         // 13-22 i14: named coordinate space — see TextOverlayPillView's identical gesture doc.
         DragGesture(minimumDistance: 3, coordinateSpace: .named("timeline"))
+            .updating($bodyDragGestureActive) { _, active, _ in active = true }
             .onChanged { value in
-                guard !isZooming else { return }
+                guard !isZooming, !bodyDragCancelledForZoom else { return }
                 onSelect()
                 if dragStartContentOffset == nil { dragStartContentOffset = contentOffset }
                 dragTranslation = value.translation.width
                 onBodyDragLocationChanged(value.location.x)
             }
             .onEnded { value in
-                guard !isZooming else {
-                    cancelActiveDragForZoom()
+                if isZooming { cancelActiveDragForZoom() }
+                if bodyDragCancelledForZoom {
+                    bodyDragCancelledForZoom = false
                     return
                 }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
@@ -221,8 +238,9 @@ struct CaptionPillView: View {
 
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($leftTrimGestureActive) { _, active, _ in active = true }
             .onChanged { value in
-                guard !isZooming else { return }
+                guard !isZooming, !leftTrimCancelledForZoom else { return }
                 if leftDragStartTime == nil { leftDragStartTime = cue.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? cue.startSeconds) + deltaSeconds
@@ -231,8 +249,9 @@ struct CaptionPillView: View {
                 previewStart = newStart
             }
             .onEnded { _ in
-                guard !isZooming else {
-                    cancelActiveDragForZoom()
+                if isZooming { cancelActiveDragForZoom() }
+                if leftTrimCancelledForZoom {
+                    leftTrimCancelledForZoom = false
                     return
                 }
                 let finalStart = previewStart ?? cue.startSeconds
@@ -246,8 +265,9 @@ struct CaptionPillView: View {
 
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($rightTrimGestureActive) { _, active, _ in active = true }
             .onChanged { value in
-                guard !isZooming else { return }
+                guard !isZooming, !rightTrimCancelledForZoom else { return }
                 if rightDragStartTime == nil { rightDragStartTime = cue.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? cue.startSeconds
@@ -255,8 +275,9 @@ struct CaptionPillView: View {
                 previewEnd = newEnd
             }
             .onEnded { _ in
-                guard !isZooming else {
-                    cancelActiveDragForZoom()
+                if isZooming { cancelActiveDragForZoom() }
+                if rightTrimCancelledForZoom {
+                    rightTrimCancelledForZoom = false
                     return
                 }
                 let finalStart = previewStart ?? cue.startSeconds
@@ -270,6 +291,9 @@ struct CaptionPillView: View {
 
     private func cancelActiveDragForZoom() {
         let wasBodyDragging = dragStartContentOffset != nil
+        if wasBodyDragging { bodyDragCancelledForZoom = true }
+        if leftDragStartTime != nil { leftTrimCancelledForZoom = true }
+        if rightDragStartTime != nil { rightTrimCancelledForZoom = true }
         dragTranslation = 0
         dragStartContentOffset = nil
         leftDragStartTime = nil

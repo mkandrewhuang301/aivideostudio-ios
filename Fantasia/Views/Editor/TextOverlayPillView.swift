@@ -65,6 +65,7 @@ struct TextOverlayPillView: View {
     @GestureState private var liftGestureActive = false
     @State private var isLifted = false
     @State private var liftTranslation: CGSize = .zero
+    @State private var liftTerminalHandled = false
 
     private let amber = Color(red: 0.851, green: 0.478, blue: 0.169)      // #D97A2B
     private let pillHeight: CGFloat = 28
@@ -121,9 +122,10 @@ struct TextOverlayPillView: View {
             x: liftTranslation.width + trimHandleOffsetX + edgeScrollCompensationX,
             y: isLifted ? liftedRowOffsetY : 0
         )
-        // 13-26 M8: when GestureState resets (any exit path), always tear the lift down.
+        // GestureState reset means interruption/cancellation unless explicit onEnded already
+        // handled the terminal event. It must never persist a partial lift.
         .onChange(of: liftGestureActive) { _, active in
-            if !active { finishLift() }
+            if !active { cancelLiftIfNeeded() }
         }
         .onChange(of: isZooming) { _, zooming in
             if zooming { cancelInteractionsForZoom() }
@@ -156,6 +158,7 @@ struct TextOverlayPillView: View {
                 switch value {
                 case .first(true):
                     guard !isLifted else { break }
+                    liftTerminalHandled = false
                     isLifted = true
                     if dragStartContentOffset == nil { dragStartContentOffset = contentOffset }
                     onLift()
@@ -169,16 +172,26 @@ struct TextOverlayPillView: View {
                 }
             }
             .onEnded { _ in
-                finishLift() // idempotent duplicate of the GestureState exit
+                commitLiftIfNeeded()
             }
     }
 
-    private func finishLift() {
-        guard isLifted else { return }
+    private func commitLiftIfNeeded() {
+        guard isLifted, !liftTerminalHandled else { return }
+        liftTerminalHandled = true
         isLifted = false
         liftTranslation = .zero
         dragStartContentOffset = nil
         onLiftEnded()
+    }
+
+    private func cancelLiftIfNeeded() {
+        guard isLifted, !liftTerminalHandled else { return }
+        liftTerminalHandled = true
+        isLifted = false
+        liftTranslation = .zero
+        dragStartContentOffset = nil
+        onLiftCancelled()
     }
 
     // MARK: - Edge-handle retime (start/end independently) — unchanged by M8.
@@ -233,14 +246,10 @@ struct TextOverlayPillView: View {
     }
 
     private func cancelInteractionsForZoom() {
-        let wasLifted = isLifted
-        isLifted = false
-        liftTranslation = .zero
-        dragStartContentOffset = nil
+        cancelLiftIfNeeded()
         leftDragStartTime = nil
         rightDragStartTime = nil
         previewStart = nil
         previewEnd = nil
-        if wasLifted { onLiftCancelled() }
     }
 }
