@@ -66,7 +66,7 @@ final class EditorState {
 
     /// Plan 13-21 F5: the timeline's shared px-per-second zoom level — moved here from
     /// TimelineTrackView's local constant so the pinch gesture (TimelineTrackView) and every pill/
-    /// row/ruler consumer read the SAME live value. Clamped to [12, 120] by the pinch gesture
+    /// row/ruler consumer read the SAME live value. Clamped to [8, 240] by the pinch gesture
     /// itself; 44 (the original hard-coded constant) stays the default so nothing else changes at
     /// rest.
     var pxPerSecond: Double = 44

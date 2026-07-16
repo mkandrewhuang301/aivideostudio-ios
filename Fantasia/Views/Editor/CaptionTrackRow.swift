@@ -59,6 +59,7 @@ struct CaptionTrackRow: View {
                     cue: cue,
                     pxPerSecond: pxPerSecond,
                     isSelected: state.selection == .caption(cue.id),
+                    isZooming: state.isZooming,
                     isEditing: editingCueId == cue.id,
                     onSelect: {
                         // F10 (Plan 13-21): animated snap to this cue's own window before selecting.

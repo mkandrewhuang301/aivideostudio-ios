@@ -67,6 +67,7 @@ struct AudioTrackRow: View {
                             clip: clip,
                             pxPerSecond: pxPerSecond,
                             isSelected: state.selection == .audio(clip.id),
+                            isZooming: state.isZooming,
                             totalDuration: state.visualStripEndSeconds(pxPerSecond: pxPerSecond),
                             onSelect: {
                                 // F10 (Plan 13-21): animated snap to this pill's own window BEFORE

@@ -109,6 +109,7 @@ struct TextOverlayTrackRow: View {
                         overlay: overlay,
                         pxPerSecond: pxPerSecond,
                         isSelected: state.selection == .text(overlay.id),
+                        isZooming: state.isZooming,
                         onSelect: {
                             // F10 (Plan 13-21): animated snap to this pill's own window before selecting.
                             state.snapPlayhead(toWindow: overlay.startSeconds, overlay.endSeconds)
@@ -127,7 +128,8 @@ struct TextOverlayTrackRow: View {
                                 ? (liftTargetRow ?? (rowsById[overlay.id] ?? 0)) - (rowsById[overlay.id] ?? 0)
                                 : 0
                         ) * rowHeight,
-                        onLiftEnded: { commitLift(overlay: overlay, currentRow: rowsById[overlay.id] ?? 0) }
+                        onLiftEnded: { commitLift(overlay: overlay, currentRow: rowsById[overlay.id] ?? 0) },
+                        onLiftCancelled: { cancelLift(overlayId: overlay.id) }
                     )
                     .offset(
                         x: overlay.startSeconds * pxPerSecond,
@@ -166,6 +168,7 @@ struct TextOverlayTrackRow: View {
     // MARK: - 13-26 M8: lift & move (long-press drag across time + rows)
 
     private func beginLift(overlay: TextOverlay, currentRow: Int) {
+        guard !state.isZooming else { return }
         liftedOverlayId = overlay.id
         liftTargetRow = currentRow
         liftDeltaX = 0
@@ -174,7 +177,7 @@ struct TextOverlayTrackRow: View {
     }
 
     private func liftDragChanged(overlay: TextOverlay, location: CGPoint, startLocation: CGPoint) {
-        guard liftedOverlayId == overlay.id else { return }
+        guard !state.isZooming, liftedOverlayId == overlay.id else { return }
         liftDeltaX = location.x - startLocation.x
 
         // Vertical: the finger's y within the text section picks the target row band; one row
@@ -254,6 +257,14 @@ struct TextOverlayTrackRow: View {
                 onError("Couldn't save change")
             }
         }
+    }
+
+    private func cancelLift(overlayId: String) {
+        guard liftedOverlayId == overlayId else { return }
+        stopEdgeScroll()
+        liftedOverlayId = nil
+        liftTargetRow = nil
+        liftDeltaX = 0
     }
 
     // MARK: - Mutations

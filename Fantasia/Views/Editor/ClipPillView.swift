@@ -175,7 +175,14 @@ struct ClipPillView: View {
         .onAppear { committedPxPerSecond = pxPerSecond }
         // F5 / K2: pinch ended — resync layout px so cells resample at the new zoom bucket.
         .onChange(of: isZooming) { wasZooming, nowZooming in
-            if wasZooming, !nowZooming { committedPxPerSecond = pxPerSecond }
+            if nowZooming {
+                leftDragStartTrim = nil
+                rightDragStartTrim = nil
+                previewTrimStart = nil
+                previewTrimEnd = nil
+            } else if wasZooming {
+                committedPxPerSecond = pxPerSecond
+            }
         }
         // 13-24 K1: when GestureState resets (any exit path), always tear down reorder mode.
         .onChange(of: reorderGestureActive) { _, active in
@@ -334,6 +341,7 @@ struct ClipPillView: View {
                 state = true
             }
             .onChanged { value in
+                guard !isZooming else { return }
                 switch value {
                 case .first(true):
                     onReorderLift()
@@ -355,6 +363,7 @@ struct ClipPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if leftDragStartTrim == nil { leftDragStartTrim = clip.trimStartSeconds }
                 let deltaSec = value.translation.width / pxPerSecond
                 var newStart = (leftDragStartTrim ?? clip.trimStartSeconds) + deltaSec
@@ -363,6 +372,12 @@ struct ClipPillView: View {
                 previewTrimStart = newStart
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    leftDragStartTrim = nil
+                    previewTrimStart = nil
+                    previewTrimEnd = nil
+                    return
+                }
                 let finalStart = previewTrimStart ?? clip.trimStartSeconds
                 let finalEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
                 leftDragStartTrim = nil
@@ -375,6 +390,7 @@ struct ClipPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if rightDragStartTrim == nil {
                     rightDragStartTrim = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
                 }
@@ -386,6 +402,12 @@ struct ClipPillView: View {
                 previewTrimEnd = newEnd
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    rightDragStartTrim = nil
+                    previewTrimStart = nil
+                    previewTrimEnd = nil
+                    return
+                }
                 let finalStart = previewTrimStart ?? clip.trimStartSeconds
                 let finalEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
                 rightDragStartTrim = nil

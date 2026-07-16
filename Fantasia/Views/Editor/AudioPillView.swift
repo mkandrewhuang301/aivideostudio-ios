@@ -36,6 +36,7 @@ struct AudioPillView: View {
     let clip: AudioClip
     let pxPerSecond: Double
     let isSelected: Bool
+    let isZooming: Bool
     /// 13-23 J5 / 13-24 K3: visual strip end in seconds (accounts for clip 30pt min-width floors).
     /// An audio clip can never render or drag past this bound.
     let totalDuration: Double
@@ -131,6 +132,9 @@ struct AudioPillView: View {
         }
         // F2: offset LAST — see ClipPillView's identical fix for the full explanation.
         .offset(x: dragTranslation + trimHandleOffsetX + edgeScrollCompensationX)
+        .onChange(of: isZooming) { _, zooming in
+            if zooming { cancelActiveDragForZoom() }
+        }
     }
 
     private var handle: some View {
@@ -150,12 +154,17 @@ struct AudioPillView: View {
         // 13-22 i14: named coordinate space — see TextOverlayPillView's identical gesture doc.
         DragGesture(minimumDistance: 3, coordinateSpace: .named("timeline"))
             .onChanged { value in
+                guard !isZooming else { return }
                 onSelect()
                 if dragStartContentOffset == nil { dragStartContentOffset = contentOffset }
                 dragTranslation = value.translation.width
                 onBodyDragLocationChanged(value.location.x)
             }
             .onEnded { value in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 dragTranslation = 0
                 dragStartContentOffset = nil
@@ -172,6 +181,7 @@ struct AudioPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if leftDragStart == nil {
                     leftDragStart = (clip.startOffsetSeconds, clip.trimStartSeconds)
                 }
@@ -186,6 +196,10 @@ struct AudioPillView: View {
                 previewTrimStart = newTrimStart
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let finalOffset = previewOffset ?? clip.startOffsetSeconds
                 let finalTrimStart = previewTrimStart ?? clip.trimStartSeconds
                 let finalTrimEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)
@@ -200,6 +214,7 @@ struct AudioPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if rightDragStartTrimEnd == nil {
                     rightDragStartTrimEnd = clip.trimEndSeconds ?? clip.trimStartSeconds
                 }
@@ -215,6 +230,10 @@ struct AudioPillView: View {
                 previewTrimEnd = newEnd
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let finalOffset = previewOffset ?? clip.startOffsetSeconds
                 let finalTrimStart = previewTrimStart ?? clip.trimStartSeconds
                 let finalTrimEnd = previewTrimEnd ?? (clip.trimEndSeconds ?? clip.trimStartSeconds)
@@ -224,5 +243,17 @@ struct AudioPillView: View {
                 previewTrimStart = nil
                 previewTrimEnd = nil
             }
+    }
+
+    private func cancelActiveDragForZoom() {
+        let wasBodyDragging = dragStartContentOffset != nil
+        dragTranslation = 0
+        dragStartContentOffset = nil
+        leftDragStart = nil
+        rightDragStartTrimEnd = nil
+        previewOffset = nil
+        previewTrimStart = nil
+        previewTrimEnd = nil
+        if wasBodyDragging { onBodyDragEnded() }
     }
 }

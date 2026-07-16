@@ -23,6 +23,7 @@ struct TextOverlayPillView: View {
     let overlay: TextOverlay
     let pxPerSecond: Double
     let isSelected: Bool
+    let isZooming: Bool
     let onSelect: () -> Void
     /// Fires once, on edge-handle drag release, with the final (startSeconds, endSeconds) — the
     /// CALLER (TextOverlayTrackRow) PATCHes via `ProjectManager.updateTextOverlay`.
@@ -45,6 +46,8 @@ struct TextOverlayPillView: View {
     /// 13-26 M8: fires exactly once per lift on ANY termination path (release, cancel,
     /// interruption) — GestureState-backed, so the lift can never stick.
     var onLiftEnded: () -> Void = {}
+    /// Cancels an active lift when a two-finger zoom takes ownership of the timeline.
+    var onLiftCancelled: () -> Void = {}
 
     @State private var leftDragStartTime: Double? = nil
     @State private var rightDragStartTime: Double? = nil
@@ -122,6 +125,9 @@ struct TextOverlayPillView: View {
         .onChange(of: liftGestureActive) { _, active in
             if !active { finishLift() }
         }
+        .onChange(of: isZooming) { _, zooming in
+            if zooming { cancelInteractionsForZoom() }
+        }
     }
 
     private var handle: some View {
@@ -146,6 +152,7 @@ struct TextOverlayPillView: View {
                 state = true
             }
             .onChanged { value in
+                guard !isZooming else { return }
                 switch value {
                 case .first(true):
                     guard !isLifted else { break }
@@ -179,6 +186,7 @@ struct TextOverlayPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if leftDragStartTime == nil { leftDragStartTime = overlay.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? overlay.startSeconds) + deltaSeconds
@@ -187,6 +195,10 @@ struct TextOverlayPillView: View {
                 previewStart = newStart
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelInteractionsForZoom()
+                    return
+                }
                 let finalStart = previewStart ?? overlay.startSeconds
                 let finalEnd = previewEnd ?? overlay.endSeconds
                 leftDragStartTime = nil
@@ -199,6 +211,7 @@ struct TextOverlayPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if rightDragStartTime == nil { rightDragStartTime = overlay.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? overlay.startSeconds
@@ -206,6 +219,10 @@ struct TextOverlayPillView: View {
                 previewEnd = newEnd
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelInteractionsForZoom()
+                    return
+                }
                 let finalStart = previewStart ?? overlay.startSeconds
                 let finalEnd = previewEnd ?? overlay.endSeconds
                 rightDragStartTime = nil
@@ -213,5 +230,17 @@ struct TextOverlayPillView: View {
                 previewStart = nil
                 previewEnd = nil
             }
+    }
+
+    private func cancelInteractionsForZoom() {
+        let wasLifted = isLifted
+        isLifted = false
+        liftTranslation = .zero
+        dragStartContentOffset = nil
+        leftDragStartTime = nil
+        rightDragStartTime = nil
+        previewStart = nil
+        previewEnd = nil
+        if wasLifted { onLiftCancelled() }
     }
 }

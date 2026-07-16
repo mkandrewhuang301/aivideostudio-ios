@@ -27,6 +27,7 @@ struct CaptionPillView: View {
     let cue: CaptionCue
     let pxPerSecond: Double
     let isSelected: Bool
+    let isZooming: Bool
     /// Set by the caller (CaptionTrackRow) when this cue is both selected AND the user tapped
     /// the pencil affordance — swaps the pill's label for an inline transcript-editable TextField.
     let isEditing: Bool
@@ -101,6 +102,9 @@ struct CaptionPillView: View {
             } else {
                 isTextFieldFocused = false
             }
+        }
+        .onChange(of: isZooming) { _, zooming in
+            if zooming { cancelActiveDragForZoom() }
         }
     }
 
@@ -192,12 +196,17 @@ struct CaptionPillView: View {
         // 13-22 i14: named coordinate space — see TextOverlayPillView's identical gesture doc.
         DragGesture(minimumDistance: 3, coordinateSpace: .named("timeline"))
             .onChanged { value in
+                guard !isZooming else { return }
                 onSelect()
                 if dragStartContentOffset == nil { dragStartContentOffset = contentOffset }
                 dragTranslation = value.translation.width
                 onBodyDragLocationChanged(value.location.x)
             }
             .onEnded { value in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 dragTranslation = 0
                 dragStartContentOffset = nil
@@ -213,6 +222,7 @@ struct CaptionPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if leftDragStartTime == nil { leftDragStartTime = cue.startSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? cue.startSeconds) + deltaSeconds
@@ -221,6 +231,10 @@ struct CaptionPillView: View {
                 previewStart = newStart
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let finalStart = previewStart ?? cue.startSeconds
                 let finalEnd = previewEnd ?? cue.endSeconds
                 leftDragStartTime = nil
@@ -233,6 +247,7 @@ struct CaptionPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard !isZooming else { return }
                 if rightDragStartTime == nil { rightDragStartTime = cue.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? cue.startSeconds
@@ -240,6 +255,10 @@ struct CaptionPillView: View {
                 previewEnd = newEnd
             }
             .onEnded { _ in
+                guard !isZooming else {
+                    cancelActiveDragForZoom()
+                    return
+                }
                 let finalStart = previewStart ?? cue.startSeconds
                 let finalEnd = previewEnd ?? cue.endSeconds
                 rightDragStartTime = nil
@@ -247,6 +266,17 @@ struct CaptionPillView: View {
                 previewStart = nil
                 previewEnd = nil
             }
+    }
+
+    private func cancelActiveDragForZoom() {
+        let wasBodyDragging = dragStartContentOffset != nil
+        dragTranslation = 0
+        dragStartContentOffset = nil
+        leftDragStartTime = nil
+        rightDragStartTime = nil
+        previewStart = nil
+        previewEnd = nil
+        if wasBodyDragging { onBodyDragEnded() }
     }
 
     // MARK: - Tap-to-edit commit (Spike 002's validated pattern, adapted to this timeline pill)

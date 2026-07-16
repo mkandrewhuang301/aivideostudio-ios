@@ -136,8 +136,11 @@ struct TimelineTrackView: View {
     @State private var tracksScrubStartTime: Double? = nil
     @State private var tracksScrollStartY: CGFloat? = nil
 
-    // F5: pinch-to-zoom start value, captured on the gesture's first change.
+    // Q5: pinch state captures both scale and the timeline time under the gesture centroid.
     @State private var pinchStartPxPerSecond: Double? = nil
+    @State private var pinchAnchorTime: Double? = nil
+    @State private var pinchStartLocationX: CGFloat? = nil
+    @GestureState private var magnifyGestureActive = false
 
     // MARK: - 13-22 i12: long-press reorder state. `liveOrder` is a LOCAL preview ordering (clip
     // IDs) distinct from the server-authoritative `sortedClips` — only ever populated while
@@ -267,12 +270,9 @@ struct TimelineTrackView: View {
                 .offset(y: fixedRegionHeight)
             }
             .clipped()
-            // F5: pinch-to-zoom over the WHOLE timeline block (ruler + clip row + tracks viewport),
-            // simultaneous with every other gesture here — `contentOffset`/`-tracksScrollY` above
-            // both derive from `state.currentTime`/`pxPerSecond`, not a separate scroll-position
-            // variable, so changing `pxPerSecond` alone re-centers the content around the
-            // screen-fixed playhead automatically (no separate "anchor at playhead" math needed).
-            .simultaneousGesture(magnificationGesture)
+            // Q5: preserve the timeline time under the two-finger centroid instead of anchoring
+            // every zoom at the fixed playhead.
+            .simultaneousGesture(magnificationGesture(viewportWidth: viewportWidth))
             .overlay(alignment: .topLeading) {
                 // Left docks (Task B / 13-20 i3) — current/total time over the ruler row.
                 // Opaque background so scrolling content passes visually UNDER it. Each dock is
@@ -346,6 +346,10 @@ struct TimelineTrackView: View {
         // always relative to the TIMELINE'S OWN viewport, not any single descendant's local frame.
         .coordinateSpace(name: "timeline")
         .coordinateSpace(name: "timelineBlock")
+        .onChange(of: magnifyGestureActive) { _, active in
+            // GestureState resets on end, cancellation, and interruption.
+            if !active { finishMagnification() }
+        }
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
@@ -364,7 +368,7 @@ struct TimelineTrackView: View {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
                 // 13-22 i12: suppressed while reorder mode is active.
-                guard reorderingClipId == nil else { return }
+                guard reorderingClipId == nil, !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                 state.isScrubbing = true
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
@@ -391,7 +395,7 @@ struct TimelineTrackView: View {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
                 // 13-22 i12: suppressed while reorder mode is active.
-                guard reorderingClipId == nil else { return }
+                guard reorderingClipId == nil, !state.isZooming else { return }
                 if tracksDragAxis == nil {
                     tracksDragAxis = abs(value.translation.width) >= abs(value.translation.height) ? .horizontal : .vertical
                     switch tracksDragAxis {
@@ -424,34 +428,70 @@ struct TimelineTrackView: View {
 
     // MARK: - Pinch-to-zoom (F5, Plan 13-21)
 
-    private var magnificationGesture: some Gesture {
-        MagnificationGesture()
+    private func magnificationGesture(viewportWidth: CGFloat) -> some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.01)
+            .updating($magnifyGestureActive) { _, active, _ in
+                active = true
+            }
             .onChanged { value in
-                // 13-22 i12: suppressed while reorder mode is active.
+                // Reorder owns a one-finger lifted interaction and suppresses zoom entirely.
                 guard reorderingClipId == nil else { return }
                 if pinchStartPxPerSecond == nil {
-                    pinchStartPxPerSecond = state.pxPerSecond
+                    let startPx = state.pxPerSecond
+                    let locationX = value.startLocation.x
+                    pinchStartPxPerSecond = startPx
+                    pinchStartLocationX = locationX
+                    pinchAnchorTime = state.currentTime
+                        + Double(locationX - viewportWidth / 2) / startPx
+                    scrubDragStartTime = nil
+                    tracksDragAxis = nil
+                    tracksScrubStartTime = nil
+                    tracksScrollStartY = nil
                     state.isZooming = true
+                    // The anchored pinch also moves currentTime. Treat that clock motion as a
+                    // scrub so EditorView uses its serialized ladder-backed seek path instead of
+                    // launching an unbounded exact AVPlayer seek on every magnification sample.
+                    state.isScrubbing = true
                 }
-                guard let start = pinchStartPxPerSecond else { return }
-                state.pxPerSecond = min(max(start * value, 12), 120)
+                guard let startPx = pinchStartPxPerSecond,
+                      let locationX = pinchStartLocationX,
+                      let anchorTime = pinchAnchorTime
+                else { return }
+                let nextPx = min(max(startPx * Double(value.magnification), 8), 240)
+                state.pxPerSecond = nextPx
+                state.isScrubbing = true
+                state.currentTime = state.clampTime(
+                    anchorTime - Double(locationX - viewportWidth / 2) / nextPx
+                )
             }
             .onEnded { _ in
-                pinchStartPxPerSecond = nil
-                state.isZooming = false
+                finishMagnification()
             }
     }
 
-    // MARK: - Ruler (F5, Plan 13-21): ADAPTIVE label interval — the first of [1, 2, 5, 10, 30, 60]
-    // seconds where `interval * pxPerSecond >= 56` (labels never crowd closer than ~56pt apart).
-    // At the default 44px/s that's 2s labels; pinch in far enough and it steps down to 1s, pinch
-    // out and it steps up through 5s/10s/30s/60s. A dot marks the MIDPOINT between each pair of
-    // labels (was: a fixed dot every 0.5s, independent of the label interval — 13-20 i4.3).
+    private func finishMagnification() {
+        guard pinchStartPxPerSecond != nil || state.isZooming else { return }
+        pinchStartPxPerSecond = nil
+        pinchAnchorTime = nil
+        pinchStartLocationX = nil
+        state.isZooming = false
+        state.isScrubbing = false
+    }
 
-    private static let labelIntervalCandidates: [Double] = [1, 2, 5, 10, 30, 60]
+    // MARK: - Ruler: first tier in [0.5, 1, 2, 5, 10, 30, 60] whose pixel spacing is >=56pt.
+    // The 0.5 tier keeps whole-second labels and uses midpoint dots for half-seconds; wider tiers
+    // keep the same midpoint-dot rule while labels step out to avoid crowding.
+
+    private static let labelIntervalCandidates: [Double] = [0.5, 1, 2, 5, 10, 30, 60]
+
+    private var rulerTier: Double {
+        Self.labelIntervalCandidates.first { $0 * pxPerSecond >= 56 }
+            ?? Self.labelIntervalCandidates.last!
+    }
 
     private var labelInterval: Double {
-        Self.labelIntervalCandidates.first { $0 * pxPerSecond >= 56 } ?? Self.labelIntervalCandidates.last!
+        // The 0.5 tier densifies dots only; labels remain whole seconds (never "00:00.5").
+        max(1, rulerTier)
     }
 
     private func ruler(contentWidth: Double) -> some View {
@@ -924,7 +964,7 @@ struct TimelineTrackView: View {
     private func startReorder(clip: ProjectClip, viewportWidth: CGFloat) {
         // Idempotency guard — the long-press `.first(true)` phase inside ClipPillView's sequenced
         // gesture may deliver more than once before the sequence advances to `.second`.
-        guard reorderingClipId != clip.id else { return }
+        guard !state.isZooming, reorderingClipId != clip.id else { return }
         let clips = sortedClips
         guard let index = clips.firstIndex(where: { $0.id == clip.id }) else { return }
         liveOrder = clips.map(\.id)
@@ -949,7 +989,7 @@ struct TimelineTrackView: View {
         startLocation: CGFloat,
         viewportWidth: CGFloat
     ) {
-        guard reorderingClipId == clip.id, reorderOriginalIndex != nil else { return }
+        guard !state.isZooming, reorderingClipId == clip.id, reorderOriginalIndex != nil else { return }
         if !didLatchReorderAnchorToFinger {
             reorderAnchorX = startLocation
             didLatchReorderAnchorToFinger = true
