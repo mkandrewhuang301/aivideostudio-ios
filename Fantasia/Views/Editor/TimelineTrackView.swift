@@ -34,6 +34,23 @@
 import SwiftUI
 import UIKit
 
+/// SwiftUI can finish a descendant tap recognizer after the ancestor scrub recognizer has already
+/// moved the timeline. Keep those recognizers simultaneous (so swipes that start on pills still
+/// scrub), but suppress any tap action from that same moving touch sequence.
+final class TimelineTapSelectionGate {
+    private let clock = ContinuousClock()
+    private var lastMovementAt: ContinuousClock.Instant?
+
+    func noteMovement(at instant: ContinuousClock.Instant? = nil) {
+        lastMovementAt = instant ?? clock.now
+    }
+
+    func acceptsTap(at instant: ContinuousClock.Instant? = nil) -> Bool {
+        guard let lastMovementAt else { return true }
+        return lastMovementAt.duration(to: instant ?? clock.now) > .milliseconds(150)
+    }
+}
+
 struct TimelineTrackView: View {
     @Environment(ProjectManager.self) private var projectManager
 
@@ -62,6 +79,8 @@ struct TimelineTrackView: View {
     // hard-coded `let pxPerSecond: Double = 44` so the pinch gesture below and every pill/row/ruler
     // consumer — all of which already read `pxPerSecond` from this view — see the SAME live value).
     private var pxPerSecond: Double { state.pxPerSecond }
+
+    @State private var tapSelectionGate = TimelineTapSelectionGate()
 
     // MARK: - Layout constants (13-20 i2/i3/i4 — pixel-level source of truth is the locked sketch)
 
@@ -235,7 +254,10 @@ struct TimelineTrackView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .gesture(scrubGesture)
-                    .onTapGesture { state.select(.none) }
+                    .onTapGesture {
+                        guard tapSelectionGate.acceptsTap() else { return }
+                        state.select(.none)
+                    }
 
                 VStack(alignment: .leading, spacing: rulerToClipSpacing) {
                     ruler(contentWidth: contentWidth)
@@ -253,9 +275,9 @@ struct TimelineTrackView: View {
                         // 13-26 M7: onAddAudio/onAddDefaultText now thread INTO the rows — each
                         // row draws its own empty-state placeholder (single source of geometry).
                         VStack(alignment: .leading, spacing: 0) {
-                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError, onAddAudio: onAddAudio)
-                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, onError: onError, onAddDefaultText: onAddDefaultText)
-                            CaptionTrackRow(state: state, pxPerSecond: pxPerSecond, viewportWidth: viewportWidth, contentOffset: contentOffset)
+                            AudioTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, shouldAcceptPillTap: { tapSelectionGate.acceptsTap() }, onError: onError, onAddAudio: onAddAudio)
+                            TextOverlayTrackRow(state: state, pxPerSecond: pxPerSecond, rowHeight: trackRowHeight, viewportWidth: viewportWidth, contentOffset: contentOffset, shouldAcceptPillTap: { tapSelectionGate.acceptsTap() }, onError: onError, onAddDefaultText: onAddDefaultText)
+                            CaptionTrackRow(state: state, pxPerSecond: pxPerSecond, viewportWidth: viewportWidth, contentOffset: contentOffset, shouldAcceptPillTap: { tapSelectionGate.acceptsTap() })
                         }
 
                         // 13-22 i11 (user decision): rail tiles (♪/T) + empty-state placeholders
@@ -271,7 +293,10 @@ struct TimelineTrackView: View {
                 .clipped()
                 .contentShape(Rectangle())
                 .gesture(tracksGesture)
-                .onTapGesture { state.select(.none) } // F11: plain tap on empty tracks background deselects
+                .onTapGesture {
+                    guard tapSelectionGate.acceptsTap() else { return }
+                    state.select(.none)
+                } // F11: plain tap on empty tracks background deselects
                 .offset(y: fixedRegionHeight)
             }
             .clipped()
@@ -376,12 +401,14 @@ struct TimelineTrackView: View {
                 guard reorderingClipId == nil, !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                 state.isScrubbing = true
+                tapSelectionGate.noteMovement()
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
                 let deltaTime = -value.translation.width / pxPerSecond
                 state.currentTime = state.clampTime(startTime + deltaTime)
             }
             .onEnded { _ in
+                if scrubDragStartTime != nil { tapSelectionGate.noteMovement() }
                 scrubDragStartTime = nil
                 state.isScrubbing = false
             }
@@ -401,6 +428,7 @@ struct TimelineTrackView: View {
             .onChanged { value in
                 // 13-22 i12: suppressed while reorder mode is active.
                 guard reorderingClipId == nil, !state.isZooming else { return }
+                tapSelectionGate.noteMovement()
                 if tracksDragAxis == nil {
                     tracksDragAxis = abs(value.translation.width) >= abs(value.translation.height) ? .horizontal : .vertical
                     switch tracksDragAxis {
@@ -424,6 +452,7 @@ struct TimelineTrackView: View {
                 }
             }
             .onEnded { _ in
+                if tracksDragAxis != nil { tapSelectionGate.noteMovement() }
                 tracksDragAxis = nil
                 tracksScrubStartTime = nil
                 tracksScrollStartY = nil
@@ -641,6 +670,7 @@ struct TimelineTrackView: View {
                     // J7: the hidden in-content row has no visual role while reordering — the
                     // viewport-space reorderRowOverlay renders the drag; no offset needed here.
                     dragOffsetX: 0,
+                    shouldAcceptTap: { tapSelectionGate.acceptsTap() },
                     onSelect: { selectClip(clip) },
                     onTrimChange: { newStart, newEnd in
                         updateClipTrim(clipId: clip.id, start: newStart, end: newEnd)

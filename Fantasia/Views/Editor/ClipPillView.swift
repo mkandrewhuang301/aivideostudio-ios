@@ -56,6 +56,9 @@ struct ClipPillView: View {
     /// original uniform square (used by the hidden in-content row, whose collapsed size no longer
     /// matters visually).
     var reorderSlotWidth: CGFloat = 46
+    /// The timeline owns scrub recognition. It rejects a tap that ends immediately after that
+    /// same touch moved, while leaving this pill gesture-free for plain-drag scrub fall-through.
+    var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
     /// Fires live, on every edge-handle drag change, with the clip's updated (trimStart, trimEnd)
     /// in seconds — the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
@@ -154,7 +157,10 @@ struct ClipPillView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .onTapGesture {
+            guard shouldAcceptTap() else { return }
+            onSelect()
+        }
         .highPriorityGesture(reorderGesture)
         .overlay(alignment: .leading) {
             if isSelected && !isReordering { handle.highPriorityGesture(leftHandleGesture) }

@@ -37,6 +37,7 @@ struct AudioTrackRow: View {
     /// EdgeAutoScroll.swift.
     let viewportWidth: CGFloat
     let contentOffset: CGFloat
+    var shouldAcceptPillTap: () -> Bool = { true }
     /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
     /// local value has been reverted — see TimelineTrackView's identical param doc comment.
     var onError: (String) -> Void = { _ in }
@@ -69,6 +70,7 @@ struct AudioTrackRow: View {
                             isSelected: state.selection == .audio(clip.id),
                             isZooming: state.isZooming,
                             totalDuration: state.visualStripEndSeconds(pxPerSecond: pxPerSecond),
+                            shouldAcceptTap: shouldAcceptPillTap,
                             onSelect: {
                                 // F10 (Plan 13-21): animated snap to this pill's own window BEFORE
                                 // selecting, mirroring TimelineTrackView.selectClip's snap.

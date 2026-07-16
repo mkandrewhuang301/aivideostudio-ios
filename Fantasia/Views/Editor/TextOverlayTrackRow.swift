@@ -32,6 +32,7 @@ struct TextOverlayTrackRow: View {
     /// EdgeAutoScroll.swift).
     let viewportWidth: CGFloat
     let contentOffset: CGFloat
+    var shouldAcceptPillTap: () -> Bool = { true }
     /// 13-23 J1: surfaces "Couldn't save change" when an optimistic retime's PATCH fails and the
     /// local value has been reverted — see TimelineTrackView's identical param doc comment.
     var onError: (String) -> Void = { _ in }
@@ -110,6 +111,7 @@ struct TextOverlayTrackRow: View {
                         pxPerSecond: pxPerSecond,
                         isSelected: state.selection == .text(overlay.id),
                         isZooming: state.isZooming,
+                        shouldAcceptTap: shouldAcceptPillTap,
                         onSelect: {
                             // F10 (Plan 13-21): animated snap to this pill's own window before selecting.
                             state.snapPlayhead(toWindow: overlay.startSeconds, overlay.endSeconds)

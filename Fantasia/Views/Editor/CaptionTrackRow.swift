@@ -26,6 +26,7 @@ struct CaptionTrackRow: View {
     /// identical param doc comment.
     let viewportWidth: CGFloat
     let contentOffset: CGFloat
+    var shouldAcceptPillTap: () -> Bool = { true }
 
     private let rowHeight: CGFloat = 30
 
@@ -61,6 +62,7 @@ struct CaptionTrackRow: View {
                     isSelected: state.selection == .caption(cue.id),
                     isZooming: state.isZooming,
                     isEditing: editingCueId == cue.id,
+                    shouldAcceptTap: shouldAcceptPillTap,
                     onSelect: {
                         // F10 (Plan 13-21): animated snap to this cue's own window before selecting.
                         state.snapPlayhead(toWindow: cue.startSeconds, cue.endSeconds)

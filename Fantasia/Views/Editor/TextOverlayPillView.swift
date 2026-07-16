@@ -24,6 +24,7 @@ struct TextOverlayPillView: View {
     let pxPerSecond: Double
     let isSelected: Bool
     let isZooming: Bool
+    var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
     /// Fires once, on edge-handle drag release, with the final (startSeconds, endSeconds) — the
     /// CALLER (TextOverlayTrackRow) PATCHes via `ProjectManager.updateTextOverlay`.
@@ -109,7 +110,10 @@ struct TextOverlayPillView: View {
         .shadow(color: .black.opacity(isLifted ? 0.4 : 0), radius: isLifted ? 8 : 0, y: isLifted ? 3 : 0)
         .zIndex(isLifted ? 10 : 0)
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .onTapGesture {
+            guard shouldAcceptTap() else { return }
+            onSelect()
+        }
         .highPriorityGesture(liftGesture)
         .overlay(alignment: .leading) {
             if isSelected && !isLifted { handle.highPriorityGesture(leftHandleGesture) }

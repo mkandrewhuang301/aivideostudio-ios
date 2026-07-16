@@ -31,6 +31,7 @@ struct CaptionPillView: View {
     /// Set by the caller (CaptionTrackRow) when this cue is both selected AND the user tapped
     /// the pencil affordance — swaps the pill's label for an inline transcript-editable TextField.
     let isEditing: Bool
+    var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
     /// Fires once, on drag release (body move OR edge-handle retime), with the final
     /// (startSeconds, endSeconds) — the CALLER (CaptionTrackRow) PATCHes via
@@ -142,7 +143,10 @@ struct CaptionPillView: View {
                 .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
         )
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .onTapGesture {
+            guard shouldAcceptTap() else { return }
+            onSelect()
+        }
         .highPriorityGesture(bodyDragGesture)
         .overlay(alignment: .leading) {
             if isSelected { handle.highPriorityGesture(leftHandleGesture) }

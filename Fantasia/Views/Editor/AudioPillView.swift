@@ -40,6 +40,7 @@ struct AudioPillView: View {
     /// 13-23 J5 / 13-24 K3: visual strip end in seconds (accounts for clip 30pt min-width floors).
     /// An audio clip can never render or drag past this bound.
     let totalDuration: Double
+    var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
     /// Fires once, on drag release (body move OR either edge-handle retrim), with the final
     /// (startOffsetSeconds, trimStartSeconds, trimEndSeconds) — the CALLER (AudioTrackRow) PATCHes
@@ -128,7 +129,10 @@ struct AudioPillView: View {
                 .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
         )
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .onTapGesture {
+            guard shouldAcceptTap() else { return }
+            onSelect()
+        }
         .highPriorityGesture(bodyDragGesture)
         .overlay(alignment: .leading) {
             if isSelected { handle.highPriorityGesture(leftHandleGesture) }
