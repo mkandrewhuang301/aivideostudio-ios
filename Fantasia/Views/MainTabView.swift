@@ -1,6 +1,6 @@
 // MainTabView.swift
 // Fantasia
-// Custom tab bar: Feed (left) + Generate center diamond + Library (right).
+// Custom tab bar: Home + Studio + elevated Create + Cast + Library.
 
 import SwiftUI
 
@@ -9,7 +9,7 @@ struct MainTabView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
-    @State private var selectedTab = 1   // open on Generate by default
+    @State private var selectedTab = 2   // open on Create by default
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
     @State private var selectedPreset: Preset?
@@ -39,7 +39,7 @@ struct MainTabView: View {
             ZStack(alignment: .bottom) {
                 TabView(selection: $selectedTab) {
                     HomeView(
-                        onNavigateToGenerate: { selectedTab = 1 },
+                        onNavigateToGenerate: { selectedTab = 2 },
                         onSelectPreset: { preset in
                             if preset.presetId == "magic-editor" {
                                 magicEditorPreset = preset
@@ -53,13 +53,20 @@ struct MainTabView: View {
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(0)
-                    NavigationStack { GenerateView() }
+                    NavigationStack { StudioHubView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(1)
+                    NavigationStack { GenerateView() }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(2)
+                    CastCheckpointView()
+                        .safeAreaInset(edge: .top, spacing: 0) { topBar() }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(3)
                     LibraryView()
                         .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
                         .toolbar(.hidden, for: .tabBar)
-                        .tag(2)
+                        .tag(4)
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Color.clear.frame(height: tabBarHeight + bottomLift)
@@ -101,17 +108,17 @@ struct MainTabView: View {
         .ignoresSafeArea(edges: .bottom)
         .environment(drawer)
         .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
-            selectedTab = 1
+            selectedTab = 2
         }
         .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
-            selectedTab = 1
+            selectedTab = 2
         }
         // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
         // Also close the Magic Editor cover here (it no longer self-dismisses — presenter-driven
         // close avoids a double-dismiss bounce; no-op for other presets whose item is already nil).
         .onReceive(NotificationCenter.default.publisher(for: .generationSubmitted)) { _ in
             magicEditorPreset = nil
-            selectedTab = 1
+            selectedTab = 2
         }
         .nameAsReferenceAlert()
         .sheet(isPresented: $showProfileSheet) {
@@ -216,7 +223,7 @@ struct MainTabView: View {
 
     private var customTabBar: some View {
         GeometryReader { geo in
-            let third = geo.size.width / 3
+            let slotWidth = geo.size.width / 5
             ZStack(alignment: .top) {
                 Rectangle()
                     .fill(theme.recessedBackground.opacity(0.9))
@@ -224,38 +231,37 @@ struct MainTabView: View {
                     .frame(height: tabBarHeight)
 
                 HStack(spacing: 0) {
-                    tabButton(0, "Home", "house").frame(width: third)
-                    Color.clear.frame(width: third)
-                    tabButton(2, "Library", "square.grid.2x2").frame(width: third)
+                    tabButton(0, "Home", "house").frame(width: slotWidth)
+                    tabButton(1, "Studio", "slider.horizontal.3").frame(width: slotWidth)
+                    Color.clear.frame(width: slotWidth)
+                    tabButton(3, "Cast", "person.2").frame(width: slotWidth)
+                    tabButton(4, "Library", "square.grid.2x2").frame(width: slotWidth)
                 }
                 .frame(height: tabBarHeight)
 
-                // Dividers at exact 1/3 and 2/3 of the bar width
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: third)
+                // Separate all five destinations consistently while keeping the dividers subtle.
+                ForEach(1..<5, id: \.self) { boundary in
                     Rectangle()
                         .fill(theme.textTertiary)
                         .frame(width: 0.5, height: 36)
-                    Spacer()
-                    Rectangle()
-                        .fill(theme.textTertiary)
-                        .frame(width: 0.5, height: 36)
-                    Color.clear.frame(width: third)
+                        .position(
+                            x: slotWidth * CGFloat(boundary),
+                            y: tabBarHeight / 2
+                        )
                 }
-                .frame(height: tabBarHeight)
 
                 VStack {
                     Spacer()
-                    Text("Generate")
+                    Text("Create")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(selectedTab == 1 ? theme.textPrimary : theme.textTertiary)
+                        .foregroundStyle(selectedTab == 2 ? theme.textPrimary : theme.textTertiary)
                         .padding(.bottom, 7)
                 }
                 .frame(height: tabBarHeight)
 
                 HStack {
                     Spacer()
-                    Button { selectedTab = 1 } label: {
+                    Button { selectedTab = 2 } label: {
                         ZStack {
                             RoundedRectangle(cornerRadius: 13)
                                 .fill(LinearGradient(
@@ -269,13 +275,14 @@ struct MainTabView: View {
                                 .shadow(color: Color(red: 0.47, green: 0.39, blue: 0.90).opacity(0.45), radius: 8, x: 0, y: 4)
                                 .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
                                 .rotationEffect(.degrees(45))
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .semibold))
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
                         }
                         .frame(width: 54, height: 54)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Create")
                     Spacer()
                 }
                 .offset(y: -14)
@@ -298,6 +305,27 @@ struct MainTabView: View {
             .frame(height: tabBarHeight)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Temporary destination used only for the tab-bar visual checkpoint. The full server-driven
+/// Cast page replaces this after the navigation treatment is approved.
+private struct CastCheckpointView: View {
+    @Environment(ThemeManager.self) private var theme
+
+    var body: some View {
+        ZStack {
+            theme.background.ignoresSafeArea()
+            VStack(spacing: 10) {
+                Image(systemName: "person.2")
+                    .font(.system(size: 34, weight: .light))
+                Text("Cast")
+                    .font(.title3.weight(.semibold))
+                Text("Characters are coming soon")
+                    .font(.subheadline)
+            }
+            .foregroundStyle(theme.textTertiary)
+        }
     }
 }
 
