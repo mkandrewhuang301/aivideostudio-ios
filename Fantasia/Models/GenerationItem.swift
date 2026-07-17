@@ -53,6 +53,11 @@ struct GenerationParams: Codable, Equatable {
     // Format workers best-effort stamp the current multi-stage pipeline step. Absent on every
     // freeform/preset row and on older format rows, so existing decode paths remain unchanged.
     let stageLabel: String?
+    // Tools queue: derived Translate Video rows expose product-safe metadata while the provider
+    // model remains an implementation detail.
+    let tool: String?
+    let outputLanguage: String?
+    let sourceDurationSeconds: Double?
 
     enum CodingKeys: String, CodingKey {
         case resolution
@@ -65,6 +70,9 @@ struct GenerationParams: Codable, Equatable {
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
         case stageLabel = "stage_label"
+        case tool
+        case outputLanguage = "output_language"
+        case sourceDurationSeconds = "source_duration_seconds"
     }
 
     init(
@@ -77,7 +85,10 @@ struct GenerationParams: Codable, Equatable {
         height: Int?,
         presetId: String? = nil,
         presetInputUploadIds: [String?]? = nil,
-        stageLabel: String? = nil
+        stageLabel: String? = nil,
+        tool: String? = nil,
+        outputLanguage: String? = nil,
+        sourceDurationSeconds: Double? = nil
     ) {
         self.resolution = resolution
         self.duration = duration
@@ -89,6 +100,9 @@ struct GenerationParams: Codable, Equatable {
         self.presetId = presetId
         self.presetInputUploadIds = presetInputUploadIds
         self.stageLabel = stageLabel
+        self.tool = tool
+        self.outputLanguage = outputLanguage
+        self.sourceDurationSeconds = sourceDurationSeconds
     }
 }
 
@@ -190,6 +204,8 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     /// Pixelcut's ProRes 4444 output contains real alpha. Feed/library thumbnails place this
     /// preset over a neutral checkerboard so transparent regions remain legible in either theme.
     var usesTransparencyBackdrop: Bool { params.presetId == "remove-background-video" }
+
+    var isVideoTranslation: Bool { params.tool == "video_translation" }
 
     /// The presigned R2 URL for the completed media (video or image).
     /// Backend returns image URLs under the `video_url` key to avoid a breaking API change.

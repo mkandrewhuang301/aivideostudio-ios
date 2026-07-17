@@ -42,6 +42,7 @@ struct GenerationDetailSheet: View {
     // plain String, not an Identifiable model.
     @State private var editSourceURLString: String?
     @State private var showMaskEditor = false
+    @State private var showVideoTranslation = false
 
     // D-4 (09.2-10 Task 3): preset Remix fork — mirrors GenerationCardView's own
     // presetRegistry/presetForRemix/remixPrefillSlots/matchedPreset exactly, so a preset row's
@@ -172,7 +173,9 @@ struct GenerationDetailSheet: View {
                             // Preset rows are branded, not model-exposed — the underlying model is
                             // an implementation detail (and the backend nulls it for presets, D-G).
                             // Show the preset's own title instead of the raw model name.
-                            if item.isPreset {
+                            if item.isVideoTranslation {
+                                paramRow("Tool", value: "Translate Video")
+                            } else if item.isPreset {
                                 paramRow("Preset", value: matchedPreset?.title ?? "Preset")
                             } else {
                                 paramRow("Model", value: ModelCatalog.displayName(for: item.model))
@@ -184,6 +187,9 @@ struct GenerationDetailSheet: View {
                                     paramRow("Resolution", value: "\(w) × \(h)", showDivider: hasCredits)
                                 }
                             } else {
+                                if let language = item.params.outputLanguage {
+                                    paramRow("Language", value: language)
+                                }
                                 paramRow("Resolution", value: item.params.resolution ?? "—")
                                 paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
                                 paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
@@ -219,6 +225,10 @@ struct GenerationDetailSheet: View {
                                         showAnimateConfirm = true
                                     }
                                     .disabled(isAnimating)
+                                } else {
+                                    circleActionButton("captions.bubble", "Translate") {
+                                        showVideoTranslation = true
+                                    }
                                 }
                                 // Magic Editor (09.2-10, SC4): image items only, deliberately not
                                 // on every feed card (Home "Magic Editor" card is the other entry).
@@ -375,6 +385,15 @@ struct GenerationDetailSheet: View {
                 .environment(generationManager)
                 .environment(creditManager)
                 .environment(ratesManager)
+                .environment(theme)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showVideoTranslation) {
+            VideoTranslationSheet(item: item)
+                .environment(generationManager)
+                .environment(creditManager)
                 .environment(theme)
                 .presentationBackground(theme.background)
                 .presentationDetents([.large])
@@ -765,3 +784,226 @@ struct GenerationDetailSheet: View {
         }
     }
 }
+
+// MARK: - Translate Video
+
+private struct VideoTranslationSheet: View {
+    let item: GenerationItem
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(GenerationManager.self) private var generationManager
+    @Environment(CreditManager.self) private var creditManager
+    @Environment(ThemeManager.self) private var theme
+
+    @State private var selectedLanguage = videoTranslationLanguages[0]
+    @State private var measuredDurationSeconds: Double?
+    @State private var isMeasuring = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+
+    private var estimatedDurationSeconds: Double? {
+        measuredDurationSeconds
+            ?? item.params.sourceDurationSeconds
+            ?? item.params.duration.map(Double.init)
+    }
+
+    private var estimatedCostCredits: Int? {
+        estimatedDurationSeconds.map { Int(ceil($0)) * 5 }
+    }
+
+    private var isTooLong: Bool {
+        (estimatedDurationSeconds ?? 0) > 480
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Translate the speech and on-screen speaker into another language.")
+                        .font(.subheadline)
+                        .foregroundStyle(theme.textSecondary)
+
+                    HStack {
+                        Label("Up to 8 minutes", systemImage: "clock")
+                        Spacer()
+                        if let cost = estimatedCostCredits {
+                            Text("Est. \(cost) credits")
+                                .fontWeight(.semibold)
+                        } else if isMeasuring {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Checking cost…")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(theme.textSecondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+
+                List(videoTranslationLanguages, id: \.self) { language in
+                    Button {
+                        selectedLanguage = language
+                    } label: {
+                        HStack {
+                            Text(language)
+                                .foregroundStyle(theme.textPrimary)
+                            Spacer()
+                            if language == selectedLanguage {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color(red: 0.545, green: 0.427, blue: 0.839))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(theme.surface)
+                }
+                .listStyle(.plain)
+
+                if isTooLong {
+                    Text("This video is longer than the 8-minute limit.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                } else if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                }
+
+                Button {
+                    Task { await submitTranslation() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSubmitting { ProgressView().tint(.white) }
+                        Text(buttonTitle)
+                            .font(.body.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .foregroundStyle(.white)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
+                                     Color(red: 0.357, green: 0.561, blue: 0.851)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 14)
+                    )
+                }
+                .buttonStyle(PressableButtonStyle())
+                .disabled(isSubmitting || estimatedCostCredits == nil || isTooLong)
+                .opacity((estimatedCostCredits == nil || isTooLong) ? 0.5 : 1)
+                .padding(20)
+            }
+            .background(theme.background)
+            .navigationTitle("Translate Video")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task { await measureDurationIfNeeded() }
+    }
+
+    private var buttonTitle: String {
+        if isSubmitting { return "Translating…" }
+        if let cost = estimatedCostCredits { return "Translate to \(selectedLanguage) · \(cost) credits" }
+        return "Checking video…"
+    }
+
+    private func measureDurationIfNeeded() async {
+        guard measuredDurationSeconds == nil,
+              let urlString = item.completedMediaUrl,
+              let url = URL(string: urlString) else { return }
+        isMeasuring = true
+        defer { isMeasuring = false }
+        do {
+            let duration = try await AVURLAsset(url: url).load(.duration)
+            let seconds = duration.seconds
+            if seconds.isFinite, seconds > 0 {
+                measuredDurationSeconds = seconds
+            }
+        } catch {
+            // Existing generated videos carry params.duration, so this is normally only reached
+            // for older/imported rows. Keep the CTA disabled if no honest estimate is available.
+            if estimatedDurationSeconds == nil {
+                errorMessage = "Couldn’t check this video’s duration. Please try again."
+            }
+        }
+    }
+
+    private func submitTranslation() async {
+        guard !isSubmitting, let cost = estimatedCostCredits, !isTooLong else { return }
+        isSubmitting = true
+        errorMessage = nil
+
+        let placeholderId = "local-" + UUID().uuidString
+        let placeholder = GenerationItem(
+            localPlaceholderId: placeholderId,
+            model: "",
+            mediaType: .video,
+            prompt: nil,
+            params: GenerationParams(
+                resolution: item.params.resolution,
+                duration: estimatedDurationSeconds.map { Int(ceil($0)) },
+                aspectRatio: item.params.aspectRatio,
+                audioEnabled: true,
+                hasReference: true,
+                width: nil,
+                height: nil,
+                tool: "video_translation",
+                outputLanguage: selectedLanguage,
+                sourceDurationSeconds: estimatedDurationSeconds
+            ),
+            costCredits: cost,
+            referenceUrls: nil,
+            createdAt: Date()
+        )
+        generationManager.insertLocalPlaceholder(placeholder)
+
+        do {
+            let submitted = try await APIClient.shared.translateVideo(
+                id: item.id,
+                outputLanguage: selectedLanguage
+            )
+            generationManager.promoteLocalPlaceholder(localId: placeholderId, toRealId: submitted.generationId)
+            generationManager.startPolling(forceRefresh: true)
+            await creditManager.fetchBalance()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            dismiss()
+            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
+        } catch let apiError as APIError {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            if case .unexpectedResponse(_, let code) = apiError {
+                switch code {
+                case "INSUFFICIENT_CREDITS": errorMessage = "Insufficient credits."
+                case "VIDEO_TOO_LONG": errorMessage = "This video is longer than the 8-minute limit."
+                case "DURATION_UNAVAILABLE": errorMessage = "Couldn’t read this video’s duration."
+                default: errorMessage = "Translation couldn’t start. Please try again."
+                }
+            } else {
+                errorMessage = "Translation couldn’t start. Please try again."
+            }
+            await creditManager.fetchBalance()
+            isSubmitting = false
+        } catch {
+            generationManager.removeLocalPlaceholder(id: placeholderId)
+            errorMessage = "Translation couldn’t start. Please try again."
+            isSubmitting = false
+        }
+    }
+}
+
+private let videoTranslationLanguages = [
+    "Spanish", "French", "German", "Italian", "Portuguese", "Hindi", "Japanese", "Korean",
+    "Mandarin", "Arabic", "Russian", "Indonesian", "Vietnamese (Vietnam)", "Turkish", "Polish",
+    "Thai (Thailand)", "Filipino", "Dutch"
+]

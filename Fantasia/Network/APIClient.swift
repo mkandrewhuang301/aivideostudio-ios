@@ -164,6 +164,17 @@ actor APIClient {
         try await submitGenerationBody(body)
     }
 
+    // POST /api/generations/:id/translate — source media is resolved server-side from the owned
+    // completed generation. The app sends only the exact provider-enum language value.
+    func translateVideo(id: String, outputLanguage: String) async throws -> GenerationSubmitResponse {
+        let body = try JSONEncoder().encode(VideoTranslationRequestBody(outputLanguage: outputLanguage))
+        return try await authorizedRequest(
+            path: "api/generations/\(id)/translate",
+            method: "POST",
+            body: body
+        )
+    }
+
     // POST /api/generations — server-resolved Formats path. The body contains only user choices;
     // formatResolver owns provider routing and authoritative duration-tier billing.
     func submitFormatGeneration(
@@ -972,6 +983,14 @@ struct GenerationSubmitResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case generationId = "generation_id"
         case status
+    }
+}
+
+private struct VideoTranslationRequestBody: Encodable {
+    let outputLanguage: String
+
+    enum CodingKeys: String, CodingKey {
+        case outputLanguage = "output_language"
     }
 }
 
