@@ -107,12 +107,12 @@ struct HomeView: View {
 
                     if !videoEffectsPresets.isEmpty {
                         sectionHeader("Video Effects")
-                        effectsGrid(videoEffectsPresets)
+                        effectsRow(videoEffectsPresets)
                     }
 
                     if !photoEffectsPresets.isEmpty {
                         sectionHeader("Photo Effects")
-                        effectsGrid(photoEffectsPresets)
+                        effectsRow(photoEffectsPresets)
                     }
 
                 }
@@ -362,18 +362,18 @@ struct HomeView: View {
             .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
     }
 
-    // MARK: - Video Effects / Photo Effects (same 2-col tile grid, different rows)
+    // MARK: - Video Effects / Photo Effects (single horizontal shelf per section)
 
-    private func effectsGrid(_ presets: [Preset]) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-            spacing: 10
-        ) {
-            ForEach(presets) { preset in
-                PresetTileView(preset: preset, onTap: onSelectPreset)
+    private func effectsRow(_ presets: [Preset]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 10) {
+                ForEach(presets) { preset in
+                    PresetTileView(preset: preset, onTap: onSelectPreset)
+                        .frame(width: 148)
+                }
             }
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
     }
 
     // MARK: - Jump back in (small, familiar recent-preset shelf)
