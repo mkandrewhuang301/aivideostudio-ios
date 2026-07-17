@@ -276,8 +276,8 @@ struct MainTabView: View {
                                 .shadow(color: Color(red: 0.47, green: 0.39, blue: 0.90).opacity(0.45), radius: 8, x: 0, y: 4)
                                 .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
                                 .rotationEffect(.degrees(45))
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 15, weight: .semibold))
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white)
                         }
                         .frame(width: 54, height: 54)
