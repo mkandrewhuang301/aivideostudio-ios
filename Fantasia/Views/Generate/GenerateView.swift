@@ -212,7 +212,8 @@ struct GenerateView: View {
             model: selectedModel,
             durationSeconds: selectedDuration,
             resolution: selectedResolution,
-            hasVideoReference: hasVideoReference
+            hasVideoReference: hasVideoReference,
+            audioEnabled: audioEnabled
         )
     }
 
@@ -2103,7 +2104,8 @@ struct GenerateView: View {
                 model: item.model,
                 durationSeconds: item.params.duration ?? 0,
                 resolution: item.params.resolution ?? "720p",
-                hasVideoReference: hasVideoRef
+                hasVideoReference: hasVideoRef,
+                audioEnabled: item.params.audioEnabled ?? true
             )
         }
         guard creditManager.creditsBalance >= cost else { return }

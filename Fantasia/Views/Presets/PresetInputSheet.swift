@@ -1180,13 +1180,11 @@ struct PresetInputSheet: View {
     /// GET /rates by RatesManager (Plan 05, D-18) rather than the registry's own snapshot value,
     /// since RatesManager is the single live source of truth the composer itself already uses.
     // AI Influencer Pro tier pricing (D-25) — mirrors the backend's computeCharacterReplaceProCost
-    // exactly (Kling v3 Motion Control 'std' mode, $0.07/sec -> 7 credits/sec, PLUS the Wan 2.7
+    // exactly (Kling v3 Motion Control 'std' mode via Replicate, live rate from /rates, PLUS Wan 2.7
     // Image composite's flat $0.03 -> 3 credits). Deliberately Kling's 'std' tier, not 'pro' — this
     // preset's "Pro" tier is the 3-step compositing pipeline itself, not Kling's own quality flag
-    // (2026-07-13, user-clarified). Hardcoded here rather than added to the preset registry
-    // schema — this is a one-off special case for a single preset's second tier, not a
-    // generalized pricing axis every preset needs.
-    private let aiInfluencerProCreditsPerSec = 7
+    // (2026-07-13, user-clarified). Kept outside the preset registry schema because this is a
+    // one-off special case for a single preset's second tier, not a generalized pricing axis.
     private let aiInfluencerProFlatCredits = 3
 
     private var displayCost: Int {
@@ -1198,7 +1196,7 @@ struct PresetInputSheet: View {
             let rawSeconds = videoSlotDurationSeconds ?? 0
             let cappedSeconds = maxSeconds.map { min(rawSeconds, Double($0)) } ?? rawSeconds
             if isAIInfluencerPreset && qualityTier == .pro {
-                return Int(ceil(cappedSeconds * Double(aiInfluencerProCreditsPerSec))) + aiInfluencerProFlatCredits
+                return Int(ceil(cappedSeconds * ratesManager.klingMotionStandardRate - 1e-9)) + aiInfluencerProFlatCredits
             }
             if preset.mediaType == "avatar" {
                 return Int(ceil(cappedSeconds * ratesManager.dreamactorRate))

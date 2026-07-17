@@ -16,6 +16,10 @@ final class RatesManager {
     // Flat credits/sec for DreamActor (Motion Transfer avatar runs) — not resolution-tiered.
     // D-18: PresetInputSheet shows the exact live cost from this before Generate.
     private(set) var dreamactorRate: Double = 5.0
+    // fal.ai Kling v3 Standard image-to-video: live audio-off/audio-on credits/sec.
+    private(set) var falKlingV3StandardRates: [String: Double] = RatesManager.falKlingFallback
+    // Replicate Kling v3 Motion Control std+audio rate used by AI Influencer Pro.
+    private(set) var klingMotionStandardRate: Double = RatesManager.klingMotionStandardFallback
     // Video upscaler (Enhancer): [tier ("standard"|"pro"): [resolution: [fpsBand ("lte30"|"gt30"): credits/sec]]]
     private(set) var upscalerRates: [String: [String: [String: Double]]] = RatesManager.upscalerFallback
     private(set) var isLoaded = false
@@ -49,6 +53,8 @@ final class RatesManager {
 
     // DreamActor $0.05/sec × CENTS_PER_DOLLAR (100) = 5.0 credits/sec (generationService.ts DREAMACTOR_RATE).
     private static let dreamactorFallback: Double = 5.0
+    private static let falKlingFallback: [String: Double] = ["audioOff": 8.4, "audioOn": 12.6]
+    private static let klingMotionStandardFallback: Double = 25.2
 
     // bytedance/video-upscaler tiered fallback, converted from VIDEO_UPSCALER_RATES ($/sec) to
     // credits/sec via the cents rule (× 100). Matches generationService.ts verbatim.
@@ -78,6 +84,8 @@ final class RatesManager {
             }
             grokImagineRate = response.grokImagineRate ?? 8
             dreamactorRate = response.dreamactorRate ?? Self.dreamactorFallback
+            falKlingV3StandardRates = response.falKlingV3StandardRates ?? Self.falKlingFallback
+            klingMotionStandardRate = response.klingMotionStandardRate ?? Self.klingMotionStandardFallback
             upscalerRates = response.upscalerRates ?? Self.upscalerFallback
             lastLoadDate = Date()
         } catch {
@@ -85,6 +93,8 @@ final class RatesManager {
                 rates = Self.fallback
                 imageCosts = Self.imageCostFallback
                 dreamactorRate = Self.dreamactorFallback
+                falKlingV3StandardRates = Self.falKlingFallback
+                klingMotionStandardRate = Self.klingMotionStandardFallback
                 upscalerRates = Self.upscalerFallback
             }
         }
@@ -101,10 +111,17 @@ final class RatesManager {
         await load()
     }
 
-    func cost(model: String, durationSeconds: Int, resolution: String, hasVideoReference: Bool) -> Int {
+    func cost(model: String, durationSeconds: Int, resolution: String, hasVideoReference: Bool, audioEnabled: Bool = true) -> Int {
         // Flat credits/sec, not resolution-tiered — bypasses the `rates` table entirely.
         if model == "xai/grok-imagine-video-1.5" {
             return Int(ceil(Double(durationSeconds) * Double(grokImagineRate)))
+        }
+        if model == "fal-ai/kling-video/v3/standard/image-to-video" {
+            let key = audioEnabled ? "audioOn" : "audioOff"
+            let rate = falKlingV3StandardRates[key] ?? Self.falKlingFallback[key]!
+            // Avoid charging one extra credit when a decimal rate lands microscopically above
+            // an exact integer because of floating-point representation (for example 5 × 8.4).
+            return Int(ceil(Double(durationSeconds) * rate - 1e-9))
         }
         let table = rates.isEmpty ? Self.fallback : rates
         let rateSet = hasVideoReference ? "videoIn" : "nonVideoIn"

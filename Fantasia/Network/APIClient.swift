@@ -856,6 +856,8 @@ struct RatesResponse: Decodable {
     // and video-upscaler (Enhancer) rates, both already on the cents scale server-side.
     let dreamactorRate: Double?      // flat credits/sec for bytedance/dreamactor-m2.0
     let upscalerRates: [String: [String: [String: Double]]]?  // [tier: [resolution: [fpsBand: credits/sec]]]
+    let falKlingV3StandardRates: [String: Double]? // audioOff/audioOn credits per second
+    let klingMotionStandardRate: Double? // Replicate Motion Control std+audio credits per second
 
     enum CodingKeys: String, CodingKey {
         case rates
@@ -863,6 +865,8 @@ struct RatesResponse: Decodable {
         case grokImagineRate = "grokImagineRate"
         case dreamactorRate = "dreamactorRate"
         case upscalerRates = "upscalerRates"
+        case falKlingV3StandardRates = "falKlingV3StandardRates"
+        case klingMotionStandardRate = "klingMotionStandardRate"
     }
 }
 

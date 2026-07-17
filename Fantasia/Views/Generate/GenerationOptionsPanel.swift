@@ -53,6 +53,9 @@ enum ModelCatalog {
         ModelOption(id: "xai/grok-imagine-video-1.5",  name: "Grok Imagine 1.5",
                     tagline: "More creative freedom, fewer restrictions — image-to-video with synced audio",
                     requiresImage: true),
+        ModelOption(id: "fal-ai/kling-video/v3/standard/image-to-video", name: "Kling 3.0 Standard",
+                    tagline: "Cinematic image-to-video with optional native audio",
+                    requiresImage: true),
     ]
     static let image: [ModelOption] = [
         ModelOption(id: "openai/gpt-image-2-high",   name: "GPT Image 2 · High",
@@ -146,8 +149,12 @@ struct GenerationOptionsPanel: View {
                 } else {
                     menuPill("Resolution", icon: "sparkles", value: selectedResolution) {
                         Picker("Resolution", selection: $selectedResolution) {
-                            Text("480p").tag("480p")
-                            Text("720p").tag("720p")
+                            if selectedModel == "fal-ai/kling-video/v3/standard/image-to-video" {
+                                Text("Standard").tag("720p")
+                            } else {
+                                Text("480p").tag("480p")
+                                Text("720p").tag("720p")
+                            }
                             if selectedModel == "bytedance/seedance-2.0" {
                                 Text("1080p").tag("1080p")
                                 Text("4K").tag("4k")
@@ -155,18 +162,24 @@ struct GenerationOptionsPanel: View {
                         }
                     }
                     .onChange(of: selectedModel) { _, newModel in
-                        let supported = ["bytedance/seedance-2.0": ["480p", "720p", "1080p", "4k"]]
+                        let supported = [
+                            "bytedance/seedance-2.0": ["480p", "720p", "1080p", "4k"],
+                            "fal-ai/kling-video/v3/standard/image-to-video": ["720p"],
+                        ]
                         let validForModel = supported[newModel] ?? ["480p", "720p"]
                         if !validForModel.contains(selectedResolution) { selectedResolution = "720p" }
                     }
 
-                    menuPill("Aspect Ratio", icon: "aspectratio", value: selectedAspectRatio) {
-                        Picker("Aspect Ratio", selection: $selectedAspectRatio) {
-                            Text("16:9 · Landscape").tag("16:9")
-                            Text("9:16 · TikTok / Reels").tag("9:16")
-                            Text("1:1 · Square").tag("1:1")
-                            Text("4:3 · Landscape").tag("4:3")
-                            Text("3:4 · Portrait").tag("3:4")
+                    // Kling's start image defines framing; its Standard i2v schema has no aspect input.
+                    if selectedModel != "fal-ai/kling-video/v3/standard/image-to-video" {
+                        menuPill("Aspect Ratio", icon: "aspectratio", value: selectedAspectRatio) {
+                            Picker("Aspect Ratio", selection: $selectedAspectRatio) {
+                                Text("16:9 · Landscape").tag("16:9")
+                                Text("9:16 · TikTok / Reels").tag("9:16")
+                                Text("1:1 · Square").tag("1:1")
+                                Text("4:3 · Landscape").tag("4:3")
+                                Text("3:4 · Portrait").tag("3:4")
+                            }
                         }
                     }
                 }
