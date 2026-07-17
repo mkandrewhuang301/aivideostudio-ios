@@ -50,6 +50,9 @@ struct GenerationParams: Codable, Equatable {
     // Swap). MUST stay `[String?]` (not `[String]`) — a `null` JSON element would otherwise throw
     // a decoding error for the entire GenerationItem.
     let presetInputUploadIds: [String?]?
+    // Format workers best-effort stamp the current multi-stage pipeline step. Absent on every
+    // freeform/preset row and on older format rows, so existing decode paths remain unchanged.
+    let stageLabel: String?
 
     enum CodingKeys: String, CodingKey {
         case resolution
@@ -61,6 +64,7 @@ struct GenerationParams: Codable, Equatable {
         case height
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
+        case stageLabel = "stage_label"
     }
 
     init(
@@ -72,7 +76,8 @@ struct GenerationParams: Codable, Equatable {
         width: Int?,
         height: Int?,
         presetId: String? = nil,
-        presetInputUploadIds: [String?]? = nil
+        presetInputUploadIds: [String?]? = nil,
+        stageLabel: String? = nil
     ) {
         self.resolution = resolution
         self.duration = duration
@@ -83,6 +88,7 @@ struct GenerationParams: Codable, Equatable {
         self.height = height
         self.presetId = presetId
         self.presetInputUploadIds = presetInputUploadIds
+        self.stageLabel = stageLabel
     }
 }
 

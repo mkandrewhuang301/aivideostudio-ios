@@ -161,6 +161,38 @@ actor APIClient {
 
     // POST /api/generations — GEN-01, GEN-02, GEN-03
     func submitGeneration(body: GenerationRequestBody) async throws -> GenerationSubmitResponse {
+        try await submitGenerationBody(body)
+    }
+
+    // POST /api/generations — server-resolved Formats path. The body contains only user choices;
+    // formatResolver owns provider routing and authoritative duration-tier billing.
+    func submitFormatGeneration(
+        formatId: String,
+        styleId: String,
+        prompt: String,
+        durationSeconds: Int,
+        voiceId: String,
+        music: String,
+        aspectRatio: String?,
+        attachmentIds: [String] = [],
+        sourceUrl: String? = nil
+    ) async throws -> GenerationSubmitResponse {
+        let trimmedSourceURL = sourceUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = FormatGenerationRequestBody(
+            formatId: formatId,
+            styleId: styleId,
+            prompt: prompt,
+            durationSeconds: durationSeconds,
+            voiceId: voiceId,
+            music: music,
+            aspectRatio: aspectRatio,
+            attachmentIds: attachmentIds.isEmpty ? nil : attachmentIds,
+            sourceUrl: trimmedSourceURL?.isEmpty == false ? trimmedSourceURL : nil
+        )
+        return try await submitGenerationBody(body)
+    }
+
+    private func submitGenerationBody<Body: Encodable>(_ body: Body) async throws -> GenerationSubmitResponse {
         let bodyData = try JSONEncoder().encode(body)
         return try await authorizedRequest(path: "api/generations", method: "POST", body: bodyData)
     }
@@ -933,6 +965,32 @@ struct GenerationSubmitResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case generationId = "generation_id"
         case status
+    }
+}
+
+// Formats submission body. Optional grounding fields are nil on the common path so synthesized
+// Encodable omits them entirely instead of sending an empty attachment_ids array or source_url.
+private struct FormatGenerationRequestBody: Encodable {
+    let formatId: String
+    let styleId: String
+    let prompt: String
+    let durationSeconds: Int
+    let voiceId: String
+    let music: String
+    let aspectRatio: String?
+    let attachmentIds: [String]?
+    let sourceUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case formatId = "format_id"
+        case styleId = "style_id"
+        case prompt
+        case durationSeconds = "duration_seconds"
+        case voiceId = "voice_id"
+        case music
+        case aspectRatio = "aspect_ratio"
+        case attachmentIds = "attachment_ids"
+        case sourceUrl = "source_url"
     }
 }
 

@@ -13,6 +13,8 @@ private let explainerAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
 struct ExplainerFormatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var theme
+    @Environment(GenerationManager.self) private var generationManager
+    @Environment(CreditManager.self) private var creditManager
 
     let format: Format
 
@@ -281,7 +283,7 @@ struct ExplainerFormatSheet: View {
                     chipButton(
                         title: "Attach files",
                         systemImage: "plus",
-                        isDisabled: attachedItems.count >= 3
+                        isDisabled: isSubmitting || attachedItems.count >= 3
                     ) {
                         showsAttachmentSource = true
                     }
@@ -290,7 +292,7 @@ struct ExplainerFormatSheet: View {
                     chipButton(
                         title: "Link",
                         systemImage: "link",
-                        isDisabled: false
+                        isDisabled: isSubmitting
                     ) {
                         withAnimation(.easeOut(duration: 0.18)) {
                             showsSourceURL.toggle()
@@ -377,6 +379,7 @@ struct ExplainerFormatSheet: View {
             .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
+        .disabled(isSubmitting)
         .accessibilityLabel("Remove \(item.fileName)")
     }
 
@@ -628,13 +631,119 @@ struct ExplainerFormatSheet: View {
         format.durationTiers.first { $0.seconds == selectedDuration }?.credits ?? 0
     }
 
-    /// Task 2 wires this action to attachment upload, format submission, and feed refresh. Keeping
-    /// the state transition here establishes the complete locked submitting visual for Task 1.
     private func generate() async {
-        guard isValid else { return }
+        guard isValid, let selectedStyleId else { return }
         isSubmitting = true
-        await Task.yield()
-        isSubmitting = false
+        defer { isSubmitting = false }
+
+        let trimmedPrompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSourceURL = sourceUrlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var localPlaceholderId: String?
+
+        do {
+            // D-11: lazy and fail-closed. Nothing is uploaded until Generate is tapped, and a
+            // single failed upload prevents the generation request from being sent at all.
+            let attachmentIds = try await uploadAttachmentIDs()
+
+            let placeholderId = "local-" + UUID().uuidString
+            localPlaceholderId = placeholderId
+            generationManager.insertLocalPlaceholder(GenerationItem(
+                localPlaceholderId: placeholderId,
+                model: "",
+                mediaType: .video,
+                prompt: trimmedPrompt,
+                params: GenerationParams(
+                    resolution: nil,
+                    duration: selectedDuration,
+                    aspectRatio: selectedAspectRatio,
+                    audioEnabled: true,
+                    hasReference: (!attachmentIds.isEmpty || !trimmedSourceURL.isEmpty) ? true : nil,
+                    width: nil,
+                    height: nil
+                ),
+                costCredits: selectedTierCredits,
+                referenceUrls: nil,
+                createdAt: Date()
+            ))
+
+            let submitted = try await APIClient.shared.submitFormatGeneration(
+                formatId: format.formatId,
+                styleId: selectedStyleId,
+                prompt: trimmedPrompt,
+                durationSeconds: selectedDuration,
+                voiceId: selectedVoiceId,
+                music: selectedMusic,
+                aspectRatio: selectedAspectRatio,
+                attachmentIds: attachmentIds,
+                sourceUrl: trimmedSourceURL.isEmpty ? nil : trimmedSourceURL
+            )
+
+            generationManager.promoteLocalPlaceholder(
+                localId: placeholderId,
+                toRealId: submitted.generationId
+            )
+            generationManager.startPolling(forceRefresh: true)
+            await creditManager.fetchBalance()
+            NotificationCenter.default.post(name: .generationSubmitted, object: nil)
+            dismiss()
+        } catch ExplainerSubmitError.attachmentUploadFailed {
+            if let localPlaceholderId {
+                generationManager.removeLocalPlaceholder(id: localPlaceholderId)
+            }
+            errorMessage = "One of your attachments couldn't be uploaded. Nothing was submitted."
+        } catch let apiError as APIError {
+            if let localPlaceholderId {
+                generationManager.removeLocalPlaceholder(id: localPlaceholderId)
+            }
+            if case .unexpectedResponse(_, let code) = apiError, code == "INSUFFICIENT_CREDITS" {
+                errorMessage = "Insufficient credits."
+                await creditManager.fetchBalance()
+            } else if case .unexpectedResponse(_, let code) = apiError,
+                      code == "content_policy_violation" {
+                errorMessage = "This may not adhere to our community guidelines. Please try again."
+            } else if case .unexpectedResponse(_, let code?) = apiError,
+                      ["INVALID_FORMAT", "INVALID_STYLE", "INVALID_DURATION", "INVALID_ASPECT_RATIO"].contains(code) {
+                errorMessage = "One of these format options is no longer available. Reopen the sheet and try again."
+            } else if case .unexpectedResponse(_, let code?) = apiError,
+                      ["INVALID_ATTACHMENT", "INVALID_INPUT"].contains(code) {
+                errorMessage = "Check the attached sources and link, then try again."
+            } else {
+                errorMessage = "An error has occurred. Please try again."
+            }
+        } catch {
+            if let localPlaceholderId {
+                generationManager.removeLocalPlaceholder(id: localPlaceholderId)
+            }
+            errorMessage = "An error has occurred. Please try again."
+        }
+    }
+
+    private func uploadAttachmentIDs() async throws -> [String] {
+        var uploadIds: [String] = []
+        for index in attachedItems.indices {
+            if let existingId = attachedItems[index].uploadId {
+                uploadIds.append(existingId)
+                continue
+            }
+
+            let item = attachedItems[index]
+            let response: UploadResponse
+            do {
+                response = try await APIClient.shared.uploadReferenceMedia(
+                    data: item.data,
+                    mimeType: item.mimeType,
+                    fileName: item.fileName
+                )
+            } catch {
+                throw ExplainerSubmitError.attachmentUploadFailed
+            }
+            guard let uploadId = response.id else {
+                throw ExplainerSubmitError.attachmentUploadFailed
+            }
+            attachedItems[index].uploadId = uploadId
+            uploadIds.append(uploadId)
+        }
+        return uploadIds
     }
 
     // MARK: - Helpers
@@ -814,4 +923,9 @@ private struct ExplainerAttachedItem: Identifiable {
     let mimeType: String
     let fileName: String
     let thumbnail: UIImage?
+    var uploadId: String? = nil
+}
+
+private enum ExplainerSubmitError: Error {
+    case attachmentUploadFailed
 }

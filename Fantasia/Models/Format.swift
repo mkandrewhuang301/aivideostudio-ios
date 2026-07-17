@@ -9,6 +9,7 @@ struct Format: Codable, Identifiable, Equatable {
     let title: String
     let subtitle: String?
     let section: String
+    let badge: String?
     let sortOrder: Int
     let status: String
     let tile: FormatTile
@@ -29,6 +30,7 @@ struct Format: Codable, Identifiable, Equatable {
         case title
         case subtitle
         case section
+        case badge
         case sortOrder = "sort_order"
         case status
         case tile

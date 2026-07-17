@@ -369,7 +369,11 @@ struct GenerationCardView: View {
                     Text("\(Int(animatedProgress * 100))%")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
-                    if !generationManager.isOnline {
+                    if let stageLabel = activeStageLabel {
+                        Text(stageLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if !generationManager.isOnline {
                         Text("Waiting for connection…")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -446,6 +450,12 @@ struct GenerationCardView: View {
         default:
             Color.white.opacity(0.03)
         }
+    }
+
+    private var activeStageLabel: String? {
+        guard let raw = item.params.stageLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        return raw
     }
 
     // Shimmer: pulsing gradient overlay (premium feel)

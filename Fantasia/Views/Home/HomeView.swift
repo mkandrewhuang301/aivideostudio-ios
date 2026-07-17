@@ -11,7 +11,9 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(ThemeManager.self) private var theme
+    @Environment(FormatRegistryManager.self) private var formatsRegistry
     @State private var registry = PresetRegistryManager()
+    @State private var presentedFormat: Format?
     // Phase 13, Plan 09 (D-06): the Studio hub is the ONLY entry point into Edit Studio, opened
     // exclusively from this hero tap — self-contained here (not bubbled up to MainTabView like
     // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
@@ -59,6 +61,12 @@ struct HomeView: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    private var formatsToShow: [Format] {
+        formatsRegistry.formats
+            .filter { $0.isLive && $0.section == "formats" }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     var body: some View {
         ZStack {
             background
@@ -67,6 +75,15 @@ struct HomeView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let heroPreset {
                         heroCard(heroPreset)
+                    }
+
+                    if !formatsToShow.isEmpty {
+                        sectionHeader("Formats")
+                        VStack(spacing: 10) {
+                            ForEach(formatsToShow) { format in
+                                formatRow(format)
+                            }
+                        }
                     }
 
                     if !showsPresets.isEmpty {
@@ -92,7 +109,10 @@ struct HomeView: View {
                 .padding(.bottom, 110)
             }
         }
-        .task { await registry.loadIfNeeded() }
+        .task {
+            await registry.loadIfNeeded()
+            await formatsRegistry.loadIfNeeded()
+        }
         .task {
             await heroProjectManager.loadProjects()
         }
@@ -102,6 +122,12 @@ struct HomeView: View {
                 StudioHubView()
             }
             .environment(theme)
+        }
+        .sheet(item: $presentedFormat) { format in
+            ExplainerFormatSheet(format: format)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
     }
 
@@ -337,6 +363,100 @@ struct HomeView: View {
             }
         }
         .padding(.horizontal, 12)
+    }
+
+    // MARK: - Formats (server-driven full-width rows below the Edit Studio hero)
+
+    private func formatRow(_ format: Format) -> some View {
+        Button {
+            presentedFormat = format
+        } label: {
+            HStack(spacing: 16) {
+                Color.clear
+                    .frame(width: 84, height: 84)
+                    .overlay {
+                        formatArtwork(format)
+                            .allowsHitTesting(false)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .clipped()
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(format.title)
+                            .font(.system(size: 17, weight: .heavy))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+
+                        if let badge = format.badge, !badge.isEmpty {
+                            Text(badge)
+                                .font(.system(size: 8.5, weight: .heavy))
+                                .tracking(0.7)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(explainerAccentGradient, in: RoundedRectangle(cornerRadius: 5))
+                        }
+                    }
+
+                    if let subtitle = format.subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(16)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel("\(format.title), \(format.subtitle ?? "Format")")
+        .accessibilityHint("Opens format options")
+    }
+
+    @ViewBuilder
+    private func formatArtwork(_ format: Format) -> some View {
+        if let rawURL = format.tile.posterUrl,
+           let url = URL(string: rawURL),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "https" || scheme == "http" {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    formatArtworkFallback
+                }
+            }
+        } else {
+            formatArtworkFallback
+        }
+    }
+
+    private var formatArtworkFallback: some View {
+        explainerAccentGradient
+            .overlay {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 25, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+    }
+
+    private var explainerAccentGradient: LinearGradient {
+        LinearGradient(
+            colors: [accent, Color(red: 0.357, green: 0.561, blue: 0.851)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     // MARK: - Avatar Center (App Store feature-card idiom — text header, ONE full-width row card)
