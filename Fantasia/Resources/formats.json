@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "formats": [
+    {
+      "format_id": "explainer",
+      "title": "Explainer",
+      "subtitle": "A narrated, animated video from any topic",
+      "section": "formats",
+      "sort_order": 10,
+      "status": "live",
+      "tile": {
+        "poster_url": "formats/style-thumbs/mixed-media.jpg"
+      },
+      "style_grid": [
+        {
+          "id": "pixel-art",
+          "label": "Pixel Art",
+          "thumb_url": "formats/style-thumbs/pixel-art.jpg"
+        },
+        {
+          "id": "claymation",
+          "label": "Claymation",
+          "thumb_url": "formats/style-thumbs/claymation.jpg"
+        },
+        {
+          "id": "flat-vector",
+          "label": "Flat Vector",
+          "thumb_url": "formats/style-thumbs/flat-vector.jpg"
+        },
+        {
+          "id": "doodle-chalkboard",
+          "label": "Doodle",
+          "thumb_url": "formats/style-thumbs/doodle-chalkboard.jpg"
+        },
+        {
+          "id": "3d-cartoon",
+          "label": "3D Cartoon",
+          "thumb_url": "formats/style-thumbs/3d-cartoon.jpg"
+        },
+        {
+          "id": "mixed-media",
+          "label": "Mixed Media",
+          "thumb_url": "formats/style-thumbs/mixed-media.jpg"
+        }
+      ],
+      "voices": [
+        {
+          "id": "Kore",
+          "label": "Kore"
+        },
+        {
+          "id": "Zephyr",
+          "label": "Zephyr"
+        },
+        {
+          "id": "Aoede",
+          "label": "Aoede"
+        },
+        {
+          "id": "Puck",
+          "label": "Puck"
+        },
+        {
+          "id": "Charon",
+          "label": "Charon"
+        },
+        {
+          "id": "Orus",
+          "label": "Orus"
+        }
+      ],
+      "voice_default": "Kore",
+      "music_moods": [
+        "auto",
+        "uplifting",
+        "ambient",
+        "dramatic",
+        "playful",
+        "none"
+      ],
+      "duration_tiers": [
+        {
+          "seconds": 20,
+          "scene_count": 3,
+          "credits": 325
+        },
+        {
+          "seconds": 30,
+          "scene_count": 4,
+          "credits": 470
+        },
+        {
+          "seconds": 45,
+          "scene_count": 6,
+          "credits": 693
+        },
+        {
+          "seconds": 60,
+          "scene_count": 9,
+          "credits": 930
+        },
+        {
+          "seconds": 90,
+          "scene_count": 13,
+          "credits": 1377
+        }
+      ],
+      "aspect_ratios": [
+        "9:16",
+        "16:9"
+      ],
+      "sheet": {
+        "description": "Type a topic — get a narrated, animated explainer video.",
+        "preparing_label": "Writing your script…"
+      }
+    }
+  ]
+}
