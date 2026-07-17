@@ -20,9 +20,36 @@ struct CaptionStyle: Codable, Equatable {
     var color: String
     var highlightColor: String
     var position: String   // "top" | "middle" | "bottom" — server-validated against this fixed enum
+    // Item 3 (Andrew review, 2026-07-17): optional continuous vertical anchor, 0..1, of the
+    // caption block's CENTER within the canvas — box-CENTER convention, matching SwiftUI
+    // .position(...) semantics (same convention TextOverlay.xNorm/yNorm already use). Set by
+    // dragging the caption block on the preview; server-validated to [0,1]
+    // (backend routes/projects.ts). nil for projects/styles created before this field existed —
+    // CaptionOverlayView.presetYOffsetNorm(for:) then resolves `position` to a preset instead.
+    // MUST match the backend's CAPTION_POSITION_PRESETS numbers exactly (assCaptionBuilder.ts) —
+    // both renderers (this preview + the ASS export burn) must agree on the same anchor.
+    var yOffsetNorm: Double?
 
     enum CodingKeys: String, CodingKey {
-        case fontSize, color, highlightColor, position
+        case fontSize, color, highlightColor, position, yOffsetNorm
+    }
+}
+
+extension CaptionStyle {
+    /// Fallback vertical-center anchors for the top/middle/bottom picker when `yOffsetNorm` is
+    /// nil — MUST match the backend's CAPTION_POSITION_PRESETS (assCaptionBuilder.ts) exactly:
+    /// both the live drag preview (CaptionOverlayView) and the exported video (ASS burn) have to
+    /// resolve the SAME anchor for a project whose style predates this field, or the preview and
+    /// the burned export would disagree.
+    static let positionPresetYOffsetNorm: [String: Double] = [
+        "top": 0.12,
+        "middle": 0.5,
+        "bottom": 0.88,
+    ]
+
+    /// The effective vertical-center anchor (0..1): `yOffsetNorm` when set, else the position preset.
+    var resolvedYOffsetNorm: Double {
+        yOffsetNorm ?? Self.positionPresetYOffsetNorm[position] ?? Self.positionPresetYOffsetNorm["bottom"]!
     }
 }
 

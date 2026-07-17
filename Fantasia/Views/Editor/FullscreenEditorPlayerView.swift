@@ -71,7 +71,11 @@ struct FullscreenEditorPlayerView: View {
                                 .allowsHitTesting(false)
                         }
                         .overlay {
-                            CaptionOverlayView(state: state)
+                            // Item 3 (Andrew review, 2026-07-17): CaptionOverlayView gained a
+                            // vertical drag-to-reposition gesture — isDraggable: false keeps this
+                            // preview-only surface non-interactive for it, same convention as
+                            // TextOverlayCanvasView's showsControls: false above.
+                            CaptionOverlayView(state: state, isDraggable: false)
                         }
                 } else {
                     ProgressView().tint(.white)

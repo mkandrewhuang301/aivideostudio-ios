@@ -31,7 +31,14 @@
 import SwiftUI
 
 struct CaptionOverlayView: View {
+    @Environment(ProjectManager.self) private var projectManager
+
     let state: EditorState
+    /// Item 3 (Andrew review, 2026-07-17): gates ONLY the vertical drag-to-reposition gesture —
+    /// mirrors TextOverlayCanvasView's `showsControls` convention. `false` in
+    /// FullscreenEditorPlayerView (a preview-only surface, never editing); defaults `true` for the
+    /// inline editor's existing mount.
+    var isDraggable: Bool = true
 
     private static let defaultStyle = CaptionStyle(
         fontSize: 22, color: "#FFFFFF", highlightColor: "#8C59FF", position: "bottom"
@@ -41,6 +48,18 @@ struct CaptionOverlayView: View {
         state.project.captionStyle ?? Self.defaultStyle
     }
 
+    /// Best-effort fixed clamp keeping the block's typical rendered size (16-40pt font + the fixed
+    /// padding in captionBackground below) fully on-canvas — not a measured-height guarantee for
+    /// every possible font size/canvas combination, matching the same best-effort convention
+    /// TextOverlayItemView.moveDragGesture already uses for its own (looser, 0.02-0.98) clamp.
+    private static let minYOffsetNorm = 0.06
+    private static let maxYOffsetNorm = 0.94
+
+    /// The effective vertical-center anchor for THIS style (yOffsetNorm if set, else the
+    /// top/middle/bottom preset) — MUST match assCaptionBuilder.ts's resolveCaptionYOffsetNorm
+    /// exactly so the live preview and the burned export never disagree.
+    private var resolvedYOffsetNorm: Double { style.resolvedYOffsetNorm }
+
     /// The one cue whose [startSeconds, endSeconds) window contains the current playhead — nil
     /// renders nothing (deliberate silent gaps between cues, matching Spike 002's behavior).
     private var activeCue: CaptionCue? {
@@ -49,29 +68,63 @@ struct CaptionOverlayView: View {
         }
     }
 
+    // Item 3: live drag preview — a translation IN POINTS added to the resolved anchor's screen
+    // position, already clamped to the same normalized bounds the persisted value will use (see
+    // dragGesture's onChanged below), so release never causes a visible snap-back.
+    @State private var dragOffsetPoints: CGFloat = 0
+
     var body: some View {
-        VStack(spacing: 0) {
-            if style.position == "top" {
-                content
-                Spacer(minLength: 0)
-            } else if style.position == "middle" {
-                Spacer(minLength: 0)
-                content
-                Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 0)
-                content
+        GeometryReader { geo in
+            if let cue = activeCue, !cue.words.isEmpty {
+                karaokeText(for: cue)
+                    .position(
+                        x: geo.size.width / 2,
+                        y: resolvedYOffsetNorm * geo.size.height + dragOffsetPoints
+                    )
+                    // Gesture is always attached; `.allowsHitTesting(isDraggable)` below is the
+                    // ONE gate that keeps FullscreenEditorPlayerView's mount (isDraggable: false)
+                    // fully non-interactive, so there's no optional-Gesture typing to fight here.
+                    .highPriorityGesture(dragGesture(canvasHeight: geo.size.height))
             }
         }
-        .padding(.top, style.position == "top" ? 20 : 0)
-        .padding(.bottom, style.position == "bottom" ? 20 : 0)
+        .allowsHitTesting(isDraggable)
         .animation(.easeOut(duration: 0.12), value: activeCue?.id)
     }
 
-    @ViewBuilder
-    private var content: some View {
-        if let cue = activeCue, !cue.words.isEmpty {
-            karaokeText(for: cue)
+    // MARK: - Item 3: vertical drag-to-reposition (moves ALL cues together — one style-level
+    // offset, not a per-cue property). Live-previews via dragOffsetPoints; PATCHes the style ONCE
+    // on release (never per-cue calls, never continuously during the drag).
+
+    private func dragGesture(canvasHeight: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+            .onChanged { value in
+                let proposedNorm = resolvedYOffsetNorm + value.translation.height / max(canvasHeight, 1)
+                let clampedNorm = min(Self.maxYOffsetNorm, max(Self.minYOffsetNorm, proposedNorm))
+                dragOffsetPoints = (clampedNorm - resolvedYOffsetNorm) * canvasHeight
+            }
+            .onEnded { value in
+                let proposedNorm = resolvedYOffsetNorm + value.translation.height / max(canvasHeight, 1)
+                let clampedNorm = min(Self.maxYOffsetNorm, max(Self.minYOffsetNorm, proposedNorm))
+                dragOffsetPoints = 0
+                Task { await persistYOffsetNorm(clampedNorm) }
+            }
+    }
+
+    private func persistYOffsetNorm(_ yOffsetNorm: Double) async {
+        // Compares against the RESOLVED anchor (not the raw, possibly-nil style.yOffsetNorm) so a
+        // drag that clamps back to exactly the active preset's value is correctly treated as a
+        // no-op instead of firing a redundant PATCH.
+        guard yOffsetNorm != resolvedYOffsetNorm else { return }
+        var newStyle = style
+        newStyle.yOffsetNorm = yOffsetNorm
+        do {
+            try await projectManager.updateCaptionStyle(newStyle)
+            if let refreshed = projectManager.loadedProject { state.project = refreshed }
+        } catch {
+            print("[CaptionOverlayView] updateCaptionStyle (drag) error: \(error)")
+            // Nothing to visually revert — dragOffsetPoints already reset to 0 above and
+            // `resolvedYOffsetNorm` still reads the last-persisted style, so the block simply
+            // stays exactly where it was before this drag.
         }
     }
 

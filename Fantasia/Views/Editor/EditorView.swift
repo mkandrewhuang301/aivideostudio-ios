@@ -715,11 +715,13 @@ struct EditorView: View {
             .overlay {
                 // Plan 16: live karaoke captions (SC5's render half — Delta 6), same letterboxed
                 // canvas frame as the Text overlay layer above so both sit in the same coordinate
-                // space as the AVPlayer surface. Read-only preview, never interactive.
+                // space as the AVPlayer surface. Item 3 (Andrew review, 2026-07-17): no longer
+                // read-only — draggable vertically here (isDraggable defaults true for this
+                // inline mount); FullscreenEditorPlayerView passes isDraggable: false to keep its
+                // own mount preview-only.
                 CaptionOverlayView(state: state)
                     .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .allowsHitTesting(false)
             }
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }

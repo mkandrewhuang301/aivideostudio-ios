@@ -53,6 +53,10 @@ struct CaptionStyleSheet: View {
     @State private var color: String
     @State private var highlightColor: String
     @State private var position: String
+    // Item 3: carried through unchanged by every OTHER control's persist() call (font/color) so
+    // an unrelated edit never silently wipes a drag offset set from the preview; the position
+    // picker below is the one control that deliberately RESETS this to the tapped preset.
+    @State private var yOffsetNorm: Double?
     @State private var errorMessage: String?
     @State private var errorClearTask: Task<Void, Never>?
 
@@ -74,6 +78,7 @@ struct CaptionStyleSheet: View {
         _color = State(initialValue: style.color)
         _highlightColor = State(initialValue: style.highlightColor)
         _position = State(initialValue: style.position)
+        _yOffsetNorm = State(initialValue: style.yOffsetNorm)
     }
 
     var body: some View {
@@ -265,8 +270,17 @@ struct CaptionStyleSheet: View {
             }
             .pickerStyle(.segmented)
             .tint(studioAccent)
-            .onChange(of: position) { oldValue, _ in
-                persist(revert: { position = oldValue })
+            .onChange(of: position) { oldValue, newValue in
+                // Item 3: a preset tap is a deliberate "reset the offset to this anchor" — not a
+                // drag — so it overwrites any previously-dragged yOffsetNorm with this preset's
+                // exact value (same number CaptionOverlayView/the ASS builder resolve to for this
+                // position), keeping `position` and `yOffsetNorm` in agreement.
+                let oldOffset = yOffsetNorm
+                yOffsetNorm = CaptionStyle.positionPresetYOffsetNorm[newValue]
+                persist(revert: {
+                    position = oldValue
+                    yOffsetNorm = oldOffset
+                })
             }
         }
     }
@@ -274,7 +288,10 @@ struct CaptionStyleSheet: View {
     // MARK: - Persistence
 
     private var currentStyle: CaptionStyle {
-        CaptionStyle(fontSize: fontSize, color: color, highlightColor: highlightColor, position: position)
+        CaptionStyle(
+            fontSize: fontSize, color: color, highlightColor: highlightColor, position: position,
+            yOffsetNorm: yOffsetNorm
+        )
     }
 
     /// Fires the PATCH for whatever the current @State values now are; `revert` restores just the

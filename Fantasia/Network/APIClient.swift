@@ -439,12 +439,19 @@ actor APIClient {
         if let title { body["title"] = title }
         if let aspectRatio { body["aspect_ratio"] = aspectRatio }
         if let captionStyle {
-            body["caption_style"] = [
+            var captionStyleBody: [String: Any] = [
                 "fontSize": captionStyle.fontSize,
                 "color": captionStyle.color,
                 "highlightColor": captionStyle.highlightColor,
                 "position": captionStyle.position,
             ]
+            // Item 3: only included when set — an absent key (not a JSON null, which
+            // JSONSerialization can't represent for a Double? anyway) lets the backend's own
+            // CAPTION_POSITION_PRESETS fallback apply for styles that never had a drag offset set.
+            if let yOffsetNorm = captionStyle.yOffsetNorm {
+                captionStyleBody["yOffsetNorm"] = yOffsetNorm
+            }
+            body["caption_style"] = captionStyleBody
         }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let response: ProjectResponse = try await projectRequest(
