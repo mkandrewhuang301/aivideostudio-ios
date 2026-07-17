@@ -119,6 +119,7 @@
 		EE481530CEFACF77B5C77403 /* GenerationPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDACBDAC2663C5E26995727 /* GenerationPickerSheet.swift */; };
 		EE78B0416EB6685D788B8894 /* ProfileCreditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */; };
 		EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F82A13068AFCD7F664A93D4 /* Preset.swift */; };
+		F333DABDD77045657D693ADD /* ExplainerFormatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A3E8C533B5DF79293C9CCC8 /* ExplainerFormatSheet.swift */; };
 		F56776D7581CA304CB2D89BC /* TimelineTrackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */; };
 		F5BC9EED839AD6832329A1EE /* TextOverlayTrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0781CBA7E723CB78D90C3CB4 /* TextOverlayTrackRow.swift */; };
 		F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */; };
@@ -163,6 +164,7 @@
 		42C0949F568AD6AB3810C1C3 /* ZoomPanScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomPanScrollView.swift; sourceTree = "<group>"; };
 		45464ECF7BB6E5D7F0FCB0A6 /* VideoCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCache.swift; sourceTree = "<group>"; };
 		462ABB111EB4D74E5344ECFB /* MaskEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorView.swift; sourceTree = "<group>"; };
+		4A3E8C533B5DF79293C9CCC8 /* ExplainerFormatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplainerFormatSheet.swift; sourceTree = "<group>"; };
 		4A4ECBA84FDBAF62C8708156 /* TextOverlayCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextOverlayCanvasView.swift; sourceTree = "<group>"; };
 		4AA7FE65A0F6F3C578F44B03 /* OfferingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfferingsManager.swift; sourceTree = "<group>"; };
 		4B984BE347A1DD4A2A9F6314 /* TimelineTrackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTrackView.swift; sourceTree = "<group>"; };
@@ -294,6 +296,7 @@
 				395C7109C3476F244209ECA0 /* Components */,
 				DF2083B3E85E43E6FC4C69F9 /* Editor */,
 				A05D8F1766F99A6C3145F3EE /* Feed */,
+				E6637B172F12489D47AA2A8C /* Formats */,
 				FF9119D91C886273102943AD /* Generate */,
 				310917A575E9D26FDCBE414E /* Home */,
 				86F5431A6C3C2F21E257CE04 /* Library */,
@@ -594,6 +597,14 @@
 			path = Editor;
 			sourceTree = "<group>";
 		};
+		E6637B172F12489D47AA2A8C /* Formats */ = {
+			isa = PBXGroup;
+			children = (
+				4A3E8C533B5DF79293C9CCC8 /* ExplainerFormatSheet.swift */,
+			);
+			path = Formats;
+			sourceTree = "<group>";
+		};
 		F4B6126BD29990B46D8DAEA3 /* Generation */ = {
 			isa = PBXGroup;
 			children = (
@@ -750,6 +761,7 @@
 				8B596945B2C0510A24D3739D /* EditorVideoOutputView.swift in Sources */,
 				E46F576F83D1D84CE86717DC /* EditorView.swift in Sources */,
 				43B31DB2BD0904565F710E08 /* EntitlementLevel.swift in Sources */,
+				F333DABDD77045657D693ADD /* ExplainerFormatSheet.swift in Sources */,
 				34C92730ADAA72393BA942A0 /* FantasiaApp.swift in Sources */,
 				1C13DB6E3379720ACD260B16 /* FeedView.swift in Sources */,
 				3E6BDABB8F4F8118DA3CCEDD /* Format.swift in Sources */,
