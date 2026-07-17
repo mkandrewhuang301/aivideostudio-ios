@@ -58,9 +58,23 @@ struct StudioHubView: View {
             }
             .environment(projectManager)
         }
-        .navigationDestination(item: $openedProjectId) { projectId in
-            editorDestination(projectId: projectId)
-                .environment(projectManager)
+        // Item 1 (Andrew review, 2026-07-17): was `.navigationDestination(item:)` (side-push);
+        // Andrew wants the editor to slide up from the bottom instead. EditorView already exits
+        // via `@Environment(\.dismiss)` (topBar close button) and presents all its own sub-sheets
+        // (add-audio, caption style, export status, fullscreen player) via `.sheet`/
+        // `.fullScreenCover`, which nest fine on top of an outer `.fullScreenCover` — no changes
+        // needed there.
+        // `String` isn't `Identifiable`, so `.fullScreenCover(item:)` doesn't apply here (unlike
+        // `.navigationDestination(item:)`, which only needs `Hashable`) — driven off an
+        // isPresented Binding derived from the same optional instead.
+        .fullScreenCover(isPresented: Binding(
+            get: { openedProjectId != nil },
+            set: { if !$0 { openedProjectId = nil } }
+        )) {
+            if let projectId = openedProjectId {
+                editorDestination(projectId: projectId)
+                    .environment(projectManager)
+            }
         }
         // D-04: VERBATIM copy from the existing LibraryThumbnailView/GenerationCardView delete
         // confirmation ("Delete this video?" → here "Delete this project?" / "This cannot be
