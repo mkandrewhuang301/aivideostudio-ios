@@ -9,6 +9,21 @@ import UniformTypeIdentifiers
 import UIKit
 
 private let explainerAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
+// Selected-state accent for the style grid (mockup's teal, distinct from the purple brand accent
+// used for the fallback tile gradients and the aspect-ratio pill fill).
+private let explainerSelectedTeal = Color(red: 0.369, green: 0.918, blue: 0.831)
+
+// Distinct placeholder gradient per style id, used only until real per-style thumb art
+// (`formats/style-thumbs/{id}.jpg`) exists server-side. Six identical purple tiles was the bug
+// this fixes — AsyncImage still wins once real art lands, this is fallback-only.
+private let explainerStylePlaceholders: [String: [Color]] = [
+    "pixel-art": [Color(red: 0.976, green: 0.451, blue: 0.086), Color(red: 0.996, green: 0.729, blue: 0.153)],
+    "claymation": [Color(red: 0.867, green: 0.435, blue: 0.404), Color(red: 0.937, green: 0.663, blue: 0.443)],
+    "flat-vector": [Color(red: 0.204, green: 0.596, blue: 0.859), Color(red: 0.298, green: 0.796, blue: 0.643)],
+    "doodle-chalkboard": [Color(red: 0.169, green: 0.180, blue: 0.204), Color(red: 0.412, green: 0.427, blue: 0.451)],
+    "3d-cartoon": [Color(red: 0.945, green: 0.353, blue: 0.588), Color(red: 0.702, green: 0.427, blue: 0.937)],
+    "mixed-media": [Color(red: 0.545, green: 0.427, blue: 0.839), Color(red: 0.357, green: 0.561, blue: 0.851)],
+]
 
 struct ExplainerFormatSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -60,9 +75,10 @@ struct ExplainerFormatSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     headerSection
-                    styleGridSection
                     promptSection
-                    choicesRow
+                    styleGridSection
+                    aspectRatioSection
+                    optionsSection
                     musicRow
                 }
                 .padding(.horizontal, 18)
@@ -174,12 +190,12 @@ struct ExplainerFormatSheet: View {
     private var styleGridSection: some View {
         if !format.styleGrid.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                sectionLabel("Style")
+                sectionCaption("Style")
 
                 if format.styleGrid.count > 6 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHGrid(
-                            rows: [GridItem(.fixed(126), spacing: 10), GridItem(.fixed(126), spacing: 10)],
+                            rows: [GridItem(.fixed(76), spacing: 10), GridItem(.fixed(76), spacing: 10)],
                             spacing: 10
                         ) {
                             ForEach(format.styleGrid) { style in
@@ -213,28 +229,45 @@ struct ExplainerFormatSheet: View {
                 selectedStyleId = style.id
             }
         } label: {
-            VStack(spacing: 6) {
+            ZStack(alignment: .bottom) {
                 Color.clear
-                    .frame(height: 96)
                     .overlay {
-                        formatImage(
-                            rawURL: style.thumbUrl,
-                            fallbackIcon: "paintpalette.fill"
-                        )
-                        .allowsHitTesting(false)
+                        styleTileArt(style)
+                            .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? explainerAccent : theme.surfaceBorder, lineWidth: isSelected ? 2.5 : 1)
-                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.78)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+                .clipShape(RoundedRectangle(cornerRadius: 13))
 
                 Text(style.label)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 6)
             }
-            .frame(width: width)
+            .frame(width: width, height: 76)
+            .overlay(
+                RoundedRectangle(cornerRadius: 13)
+                    .stroke(isSelected ? explainerSelectedTeal : theme.surfaceBorder, lineWidth: isSelected ? 2.5 : 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                        .background(explainerSelectedTeal, in: Circle())
+                        .padding(5)
+                }
+            }
         }
         .buttonStyle(PressableButtonStyle())
         .accessibilityLabel(style.label)
@@ -243,28 +276,23 @@ struct ExplainerFormatSheet: View {
 
     // MARK: - Prompt and sources
 
+    /// One fused bordered card: TextField on top, attach/link chips inside the same card's bottom
+    /// padding. Previously a separate heading + detached-field + detached-chips arrangement —
+    /// the mockup shows a single container.
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("What should it explain?")
-
+        VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .trailing) {
                 TextField(
                     "",
                     text: $promptText,
-                    prompt: Text("Describe a topic, angle, or key facts…")
+                    prompt: Text("What should it explain?")
                         .foregroundStyle(theme.textTertiary),
                     axis: .vertical
                 )
                 .font(.body)
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1...4)
-                .padding(12)
-                .padding(.trailing, enhanceAvailable ? 42 : 0)
-                .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(theme.surfaceBorder, lineWidth: 1)
-                )
+                .padding(.trailing, enhanceAvailable ? 36 : 0)
 
                 if enhanceAvailable {
                     Button(action: improvePrompt) {
@@ -276,6 +304,20 @@ struct ExplainerFormatSheet: View {
                     .buttonStyle(PressableButtonStyle())
                     .accessibilityLabel("Improve prompt")
                 }
+            }
+
+            if showsSourceURL {
+                TextField("https://example.com/article", text: $sourceUrlText)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .font(.subheadline)
+                    .foregroundStyle(theme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityLabel("Source link")
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -306,22 +348,13 @@ struct ExplainerFormatSheet: View {
                     }
                 }
             }
-
-            if showsSourceURL {
-                TextField("https://example.com/article", text: $sourceUrlText)
-                .keyboardType(.URL)
-                .textContentType(.URL)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.subheadline)
-                .foregroundStyle(theme.textPrimary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
-                .accessibilityLabel("Source link")
-            }
         }
+        .padding(14)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(theme.surfaceBorder, lineWidth: 1)
+        )
     }
 
     private func chipButton(
@@ -336,7 +369,7 @@ struct ExplainerFormatSheet: View {
                 .foregroundStyle(isDisabled ? theme.textTertiary : theme.textPrimary)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
-                .background(theme.surface, in: Capsule())
+                .background(theme.surfaceStrong, in: Capsule())
                 .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
@@ -375,7 +408,7 @@ struct ExplainerFormatSheet: View {
             .padding(.leading, 8)
             .padding(.trailing, 10)
             .frame(minHeight: 44)
-            .background(theme.surface, in: Capsule())
+            .background(theme.surfaceStrong, in: Capsule())
             .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
@@ -383,18 +416,74 @@ struct ExplainerFormatSheet: View {
         .accessibilityLabel("Remove \(item.fileName)")
     }
 
-    // MARK: - Voice, duration, aspect
+    // MARK: - Aspect ratio
 
-    private var choicesRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            voiceControl
-                .frame(maxWidth: .infinity)
+    /// Its own full-width labeled pill row (was previously a cramped mini-cell squeezed into the
+    /// voice/duration row). Renders whatever `format.aspectRatios` ships — currently 9:16/16:9.
+    private var aspectRatioSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionCaption("Aspect Ratio")
+            HStack(spacing: 8) {
+                ForEach(format.aspectRatios, id: \.self) { ratio in
+                    aspectPill(ratio)
+                }
+            }
+        }
+    }
 
-            durationControl
-                .frame(width: 100)
+    private func aspectPill(_ ratio: String) -> some View {
+        let isSelected = selectedAspectRatio == ratio
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                selectedAspectRatio = ratio
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: aspectIcon(for: ratio))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(ratio)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(isSelected ? .white : theme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 12).fill(explainerAccent)
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(theme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+                }
+            }
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel("Aspect ratio, \(ratio) \(aspectOrientation(for: ratio))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
 
-            aspectControl
-                .frame(width: 96)
+    // MARK: - Voice, duration options
+
+    /// 2-up row: duration wheel LEFT (wider ~1.15:1), voice chevron field RIGHT.
+    private var optionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionCaption("Options")
+            GeometryReader { geometry in
+                let spacing: CGFloat = 10
+                let totalRatio: CGFloat = 1.15 + 1.0
+                let availableWidth = geometry.size.width - spacing
+                let durationWidth = availableWidth * (1.15 / totalRatio)
+                let voiceWidth = availableWidth * (1.0 / totalRatio)
+
+                HStack(alignment: .top, spacing: spacing) {
+                    durationControl
+                        .frame(width: durationWidth)
+
+                    voiceControl
+                        .frame(width: voiceWidth)
+                }
+            }
+            .frame(height: 142)
         }
     }
 
@@ -446,47 +535,6 @@ struct ExplainerFormatSheet: View {
         .frame(height: 142)
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-    }
-
-    private var aspectControl: some View {
-        VStack(spacing: 8) {
-            controlLabel("ASPECT")
-                .padding(.top, 10)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(format.aspectRatios, id: \.self) { ratio in
-                        aspectButton(ratio)
-                    }
-                }
-                .padding(.horizontal, 4)
-            }
-
-            Text(selectedAspectRatio)
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(theme.textSecondary)
-                .lineLimit(1)
-                .padding(.bottom, 8)
-        }
-        .frame(height: 142)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-    }
-
-    private func aspectButton(_ ratio: String) -> some View {
-        let isSelected = selectedAspectRatio == ratio
-        return Button {
-            selectedAspectRatio = ratio
-        } label: {
-            Image(systemName: aspectIcon(for: ratio))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(isSelected ? .white : theme.textSecondary)
-                .frame(width: 44, height: 44)
-                .background(isSelected ? explainerAccent : theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(PressableButtonStyle())
-        .accessibilityLabel("Aspect ratio, \(ratio) \(aspectOrientation(for: ratio))")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Music
@@ -580,26 +628,36 @@ struct ExplainerFormatSheet: View {
             Button {
                 Task { await generate() }
             } label: {
-                HStack(spacing: 10) {
-                    if isSubmitting {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                ZStack {
+                    // Centered label — layered under the right-aligned credits so it reads as the
+                    // bar's primary CTA rather than a left-aligned row item.
+                    Group {
+                        if isSubmitting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Text("Generate")
+                                .font(.headline.weight(.bold))
+                        }
                     }
-                    Text("Generate")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 8))
-                        Text("\(selectedTierCredits)")
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                            .animation(.snappy, value: selectedTierCredits)
+                    .frame(maxWidth: .infinity)
+
+                    HStack {
+                        Spacer()
+                        HStack(spacing: 3) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 8))
+                            Text("\(selectedTierCredits)")
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                                .animation(.snappy, value: selectedTierCredits)
+                        }
                     }
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
-                .frame(maxWidth: .infinity, minHeight: 50)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background {
                     if isValid && !isSubmitting {
                         Capsule().fill(LinearGradient.brandPrimary)
@@ -748,10 +806,13 @@ struct ExplainerFormatSheet: View {
 
     // MARK: - Helpers
 
-    private func sectionLabel(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(theme.textPrimary)
+    /// Small uppercase tracked caption used for the STYLE / ASPECT RATIO / OPTIONS section
+    /// headers (mockup treatment — dim, not a full-weight heading).
+    private func sectionCaption(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 11.5, weight: .bold))
+            .tracking(0.8)
+            .foregroundStyle(theme.textTertiary)
     }
 
     private func controlLabel(_ title: String) -> some View {
@@ -825,10 +886,12 @@ struct ExplainerFormatSheet: View {
         // Unreachable while enhanceAvailable is false. The optional sibling feature owns the API.
     }
 
+    /// Style tile art: real thumb art via AsyncImage when available, otherwise a per-style
+    /// distinct placeholder gradient (`explainerStylePlaceholders`) — never a single repeated
+    /// color across all six tiles.
     @ViewBuilder
-    private func formatImage(rawURL: String?, fallbackIcon: String) -> some View {
-        if let rawURL,
-           let url = URL(string: rawURL),
+    private func styleTileArt(_ style: FormatStyle) -> some View {
+        if let url = URL(string: style.thumbUrl),
            let scheme = url.scheme?.lowercased(),
            scheme == "https" || scheme == "http" {
             AsyncImage(url: url) { phase in
@@ -836,25 +899,18 @@ struct ExplainerFormatSheet: View {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 default:
-                    formatImageFallback(icon: fallbackIcon)
+                    stylePlaceholder(for: style.id)
                 }
             }
         } else {
-            formatImageFallback(icon: fallbackIcon)
+            stylePlaceholder(for: style.id)
         }
     }
 
-    private func formatImageFallback(icon: String) -> some View {
-        LinearGradient(
-            colors: [explainerAccent.opacity(0.8), Color(red: 0.357, green: 0.561, blue: 0.851).opacity(0.75)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay {
-            Image(systemName: icon)
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.88))
-        }
+    private func stylePlaceholder(for styleId: String) -> some View {
+        let colors = explainerStylePlaceholders[styleId]
+            ?? [explainerAccent.opacity(0.8), Color(red: 0.357, green: 0.561, blue: 0.851).opacity(0.75)]
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private func addPhotoSelections(_ selections: [PhotosPickerItem]) async {
