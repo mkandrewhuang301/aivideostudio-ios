@@ -7,11 +7,16 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
+import AVFoundation
 
 private let explainerAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
 // Selected-state accent for the style grid (mockup's teal, distinct from the purple brand accent
 // used for the fallback tile gradients and the aspect-ratio pill fill).
 private let explainerSelectedTeal = Color(red: 0.369, green: 0.918, blue: 0.831)
+
+// Round 2 change 4: style tiles grown from round 1's 76pt so the grid reads as the sheet's
+// visual centerpiece under the prompt, per Andrew's "should be a bit larger" feedback.
+private let explainerStyleTileHeight: CGFloat = 106
 
 // Distinct placeholder gradient per style id, used only until real per-style thumb art
 // (`formats/style-thumbs/{id}.jpg`) exists server-side. Six identical purple tiles was the bug
@@ -24,6 +29,100 @@ private let explainerStylePlaceholders: [String: [Color]] = [
     "3d-cartoon": [Color(red: 0.945, green: 0.353, blue: 0.588), Color(red: 0.702, green: 0.427, blue: 0.937)],
     "mixed-media": [Color(red: 0.545, green: 0.427, blue: 0.839), Color(red: 0.357, green: 0.561, blue: 0.851)],
 ]
+
+/// Full-bleed cover art above the title (round 2, change 6) — mirrors `PresetInputSheet`'s
+/// `coverSection` / `PresetLoopBackground`'s standalone (non-pooled) loop idiom, generalized
+/// off `Format.tile` instead of a `Preset`. Reuses the same shared, generic helpers those use
+/// (`ThumbnailCache`, `LoopFileCache`, `FillingVideoPlayerView`, `LoopTileState`) — none of them
+/// are `Preset`-specific, so no other file needs to change. Renders `tile.loopUrl` (looping
+/// example video) when present, `tile.posterUrl` as a still fallback, and a graceful gradient
+/// placeholder — never a blank/broken frame — when neither exists yet (current state: no
+/// example Explainer video has been produced server-side; that's a CONTENT gap, not a code one —
+/// once it lands in R2 behind the registry's `tile.loop_url`, this renders it with zero changes).
+private struct ExplainerCoverArt: View {
+    let format: Format
+
+    @State private var poster: UIImage?
+    @State private var loopState = LoopTileState()
+    // Retains the AVPlayerLooper alongside its player — same requirement as
+    // PresetLoopBackground's standalone path (a looper that isn't retained silently stops).
+    @State private var standaloneLooper: AVPlayerLooper?
+
+    var body: some View {
+        ZStack {
+            if let poster {
+                Image(uiImage: poster)
+                    .resizable()
+                    .scaledToFill()
+            } else if format.tile.loopUrl == nil {
+                // No art at all yet — graceful placeholder, not a blank/broken frame.
+                coverPlaceholder
+            } else {
+                Color.white.opacity(0.06)
+            }
+            if let player = loopState.player {
+                // Hard cut, no crossfade — matches PresetLoopBackground's convention.
+                FillingVideoPlayerView(player: player, videoGravity: .resizeAspectFill)
+                    .opacity(loopState.isReady ? 1 : 0)
+            }
+        }
+        .onAppear { loadPoster() }
+        .task {
+            guard loopState.player == nil,
+                  let urlString = format.tile.loopUrl,
+                  let url = URL(string: urlString) else { return }
+            guard let localURL = try? await LoopFileCache.shared.ensureCached(presetId: format.formatId, remoteURL: url) else { return }
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            let item = AVPlayerItem(url: localURL)
+            standaloneLooper = AVPlayerLooper(player: player, templateItem: item)
+            player.play()
+            loopState.attach(player)
+        }
+        .onDisappear {
+            loopState.player?.pause()
+            standaloneLooper = nil
+            loopState.detach()
+        }
+    }
+
+    private func loadPoster() {
+        guard poster == nil,
+              let urlString = format.tile.posterUrl,
+              let url = URL(string: urlString) else { return }
+        // Versioned + latest-fallback cache keys, same scheme as PresetLoopBackground.loadPoster
+        // — a re-ingested poster (new filename) busts the cache for free.
+        let versionedKey = format.formatId + "-poster-" + url.lastPathComponent
+        let latestKey = format.formatId + "-poster-latest"
+        Task {
+            if let cached = await ThumbnailCache.shared.image(for: versionedKey) {
+                poster = cached
+                return
+            }
+            if let stale = await ThumbnailCache.shared.image(for: latestKey) {
+                poster = stale
+            }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return }
+            ThumbnailCache.shared[versionedKey] = image
+            ThumbnailCache.shared[latestKey] = image
+            poster = image
+        }
+    }
+
+    private var coverPlaceholder: some View {
+        LinearGradient(
+            colors: [explainerAccent.opacity(0.85), Color(red: 0.357, green: 0.561, blue: 0.851).opacity(0.8)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: "play.rectangle.fill")
+                .font(.system(size: 34, weight: .regular))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+}
 
 struct ExplainerFormatSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -73,24 +172,28 @@ struct ExplainerFormatSheet: View {
             theme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    headerSection
-                    promptSection
-                    styleGridSection
-                    aspectRatioSection
-                    optionsSection
-                    musicRow
+                VStack(alignment: .leading, spacing: 0) {
+                    coverSection
+
+                    VStack(alignment: .leading, spacing: 26) {
+                        headerSection
+                        promptSection
+                        styleGridSection
+                        aspectRatioSection
+                        optionsSection
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 150)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
-                .padding(.bottom, 150)
             }
+            .ignoresSafeArea(edges: .top)
 
             HStack {
                 Spacer()
                 closeButton
             }
-            .padding(.top, 14)
+            .padding(.top, 8)
             .padding(.trailing, 18)
 
             VStack(spacing: 0) {
@@ -150,16 +253,20 @@ struct ExplainerFormatSheet: View {
         }
     }
 
+    // MARK: - Cover (change 6 — full-bleed poster+loop above the title, mirrors
+    // PresetInputSheet.coverSection; ~42% height, hard-clipped edge, no bottom gradient fade).
+
+    private var coverSection: some View {
+        ExplainerCoverArt(format: format)
+            .allowsHitTesting(false)
+            .frame(height: UIScreen.main.bounds.height * 0.42)
+            .clipped()
+    }
+
     // MARK: - Header
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Capsule()
-                .fill(theme.textTertiary.opacity(0.55))
-                .frame(width: 36, height: 5)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 8)
-
             Text(format.title)
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(theme.textPrimary)
@@ -174,11 +281,17 @@ struct ExplainerFormatSheet: View {
 
     private var closeButton: some View {
         Button { dismiss() } label: {
+            // Sits on top of the cover art now (change 6) — same treatment as
+            // PresetInputSheet.closeButton: a translucent black circle reads on any art/gradient
+            // underneath, unlike a flat theme.surfaceStrong fill which could wash out against it.
             Image(systemName: "xmark")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(theme.textSecondary)
-                .frame(width: 44, height: 44)
-                .background(theme.surfaceStrong.opacity(0.9), in: Circle())
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(.black.opacity(0.35), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                .frame(width: 46, height: 46)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
         .accessibilityLabel("Close")
@@ -195,11 +308,14 @@ struct ExplainerFormatSheet: View {
                 if format.styleGrid.count > 6 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHGrid(
-                            rows: [GridItem(.fixed(76), spacing: 10), GridItem(.fixed(76), spacing: 10)],
+                            rows: [
+                                GridItem(.fixed(explainerStyleTileHeight), spacing: 10),
+                                GridItem(.fixed(explainerStyleTileHeight), spacing: 10),
+                            ],
                             spacing: 10
                         ) {
                             ForEach(format.styleGrid) { style in
-                                styleCell(style, width: 132)
+                                styleCell(style, width: 148)
                             }
                         }
                         .padding(.horizontal, 2)
@@ -246,14 +362,14 @@ struct ExplainerFormatSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 13))
 
                 Text(style.label)
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 6)
+                    .padding(.horizontal, 7)
+                    .padding(.bottom, 8)
             }
-            .frame(width: width, height: 76)
+            .frame(width: width, height: explainerStyleTileHeight)
             .overlay(
                 RoundedRectangle(cornerRadius: 13)
                     .stroke(isSelected ? explainerSelectedTeal : theme.surfaceBorder, lineWidth: isSelected ? 2.5 : 1)
@@ -261,11 +377,11 @@ struct ExplainerFormatSheet: View {
             .overlay(alignment: .topTrailing) {
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 18, height: 18)
+                        .frame(width: 20, height: 20)
                         .background(explainerSelectedTeal, in: Circle())
-                        .padding(5)
+                        .padding(6)
                 }
             }
         }
@@ -291,7 +407,8 @@ struct ExplainerFormatSheet: View {
                 )
                 .font(.body)
                 .foregroundStyle(theme.textPrimary)
-                .lineLimit(1...4)
+                .lineLimit(3...6)
+                .frame(minHeight: 100, alignment: .topLeading)
                 .padding(.trailing, enhanceAvailable ? 36 : 0)
 
                 if enhanceAvailable {
@@ -357,6 +474,10 @@ struct ExplainerFormatSheet: View {
         )
     }
 
+    /// Round 2 change 2: shrunk from a 44pt-tall boxed control toward a quiet secondary
+    /// affordance — smaller font/glyph, tight vertical padding instead of a forced tap-target
+    /// minHeight, and a dimmer textSecondary tone so it reads as "under the text", not a button
+    /// competing with the prompt itself.
     private func chipButton(
         title: String,
         systemImage: String,
@@ -364,13 +485,17 @@ struct ExplainerFormatSheet: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isDisabled ? theme.textTertiary : theme.textPrimary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .background(theme.surfaceStrong, in: Capsule())
-                .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(isDisabled ? theme.textTertiary : theme.textSecondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(theme.surfaceStrong, in: Capsule())
+            .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
         }
         .buttonStyle(PressableButtonStyle())
         .disabled(isDisabled)
@@ -380,7 +505,7 @@ struct ExplainerFormatSheet: View {
         Button {
             attachedItems.removeAll { $0.id == item.id }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Group {
                     if let thumbnail = item.thumbnail {
                         Image(uiImage: thumbnail)
@@ -388,26 +513,26 @@ struct ExplainerFormatSheet: View {
                             .scaledToFill()
                     } else {
                         Image(systemName: "doc.richtext.fill")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(explainerAccent)
                     }
                 }
-                .frame(width: 24, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(width: 20, height: 20)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
 
                 Text(item.fileName)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(theme.textPrimary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
                     .lineLimit(1)
-                    .frame(maxWidth: 96)
+                    .frame(maxWidth: 90)
 
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(theme.textSecondary)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(theme.textTertiary)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 10)
-            .frame(minHeight: 44)
+            .padding(.leading, 7)
+            .padding(.trailing, 9)
+            .padding(.vertical, 5.5)
             .background(theme.surfaceStrong, in: Capsule())
             .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
         }
@@ -462,105 +587,115 @@ struct ExplainerFormatSheet: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Voice, duration options
+    // MARK: - Options (round 2, change 1 — compact main-page pill row)
 
-    /// 2-up row: duration wheel LEFT (wider ~1.15:1), voice chevron field RIGHT.
+    /// Replaces round 1's boxed duration wheel + voice chevron cell + separate full-width music
+    /// row with the SAME compact-pill idiom `GenerationOptionsPanel` uses for the main composer
+    /// (its `menuPill`/`pillLabel`): a small uppercase caption above a capsule showing the
+    /// current value, tapping it either opens a `Menu` (Duration — a handful of discrete tiers,
+    /// mirrors that file's Duration menuPill exactly) or the existing List sub-sheet (Voice/
+    /// Music — longer, server-driven option lists, unchanged sub-sheets, just a pill trigger
+    /// instead of a full-width row). No standalone "OPTIONS" caption — each pill carries its own
+    /// label, matching the main page's rhythm. `ViewThatFits` keeps all three on one row when
+    /// they fit and wraps to a second row under Dynamic Type growth — never back to boxed cells.
     private var optionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionCaption("Options")
-            GeometryReader { geometry in
-                let spacing: CGFloat = 10
-                let totalRatio: CGFloat = 1.15 + 1.0
-                let availableWidth = geometry.size.width - spacing
-                let durationWidth = availableWidth * (1.15 / totalRatio)
-                let voiceWidth = availableWidth * (1.0 / totalRatio)
-
-                HStack(alignment: .top, spacing: spacing) {
-                    durationControl
-                        .frame(width: durationWidth)
-
-                    voiceControl
-                        .frame(width: voiceWidth)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                durationPill
+                voicePill
+                musicPill
             }
-            .frame(height: 142)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    durationPill
+                    voicePill
+                }
+                musicPill
+            }
         }
     }
 
-    private var voiceControl: some View {
-        Button { showsVoicePicker = true } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                controlLabel("VOICE")
-                Spacer(minLength: 12)
-                HStack(spacing: 4) {
-                    Text(selectedVoiceLabel)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.textPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 2)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.textTertiary)
+    private var durationPill: some View {
+        VStack(spacing: 4) {
+            pillCaption("Duration")
+            Menu {
+                Section("Duration") {
+                    Picker("Duration", selection: $selectedDuration) {
+                        ForEach(format.durationTiers, id: \.seconds) { tier in
+                            Text("\(tier.seconds)s").tag(tier.seconds)
+                        }
+                    }
                 }
-                Spacer(minLength: 12)
+            } label: {
+                pillLabel(icon: "clock", value: "\(selectedDuration)s")
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 142, alignment: .leading)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
+            .menuOrder(.fixed)
+            .buttonStyle(.plain)
         }
-        .buttonStyle(PressableButtonStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Duration")
+        .accessibilityValue("\(selectedDuration) seconds")
+        .accessibilityAdjustableAction(adjustDuration)
+    }
+
+    private var voicePill: some View {
+        VStack(spacing: 4) {
+            pillCaption("Voice")
+            Button { showsVoicePicker = true } label: {
+                pillLabel(icon: "waveform", value: selectedVoiceLabel)
+            }
+            .buttonStyle(.plain)
+        }
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Voice, \(selectedVoiceLabel)")
         .accessibilityHint("Opens voice choices")
     }
 
-    private var durationControl: some View {
-        VStack(spacing: 0) {
-            controlLabel("DURATION")
-                .padding(.top, 10)
-
-            Picker("Duration", selection: $selectedDuration) {
-                ForEach(format.durationTiers, id: \.seconds) { tier in
-                    Text("\(tier.seconds)s").tag(tier.seconds)
-                }
+    private var musicPill: some View {
+        VStack(spacing: 4) {
+            pillCaption("Music")
+            Button { showsMusicPicker = true } label: {
+                pillLabel(icon: "music.note", value: musicPillValue(selectedMusic))
             }
-            .pickerStyle(.wheel)
-            .labelsHidden()
-            .frame(height: 110)
-            .clipped()
-            .accessibilityLabel("Duration")
-            .accessibilityValue("\(selectedDuration) seconds")
-            .accessibilityAdjustableAction(adjustDuration)
+            .buttonStyle(.plain)
         }
-        .frame(height: 142)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-    }
-
-    // MARK: - Music
-
-    private var musicRow: some View {
-        Button { showsMusicPicker = true } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    controlLabel("MUSIC")
-                    Text(musicDisplayName(selectedMusic))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.textPrimary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.textTertiary)
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 64)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-        }
-        .buttonStyle(PressableButtonStyle())
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Music, \(musicDisplayName(selectedMusic))")
         .accessibilityHint("Opens music choices")
+    }
+
+    /// Small uppercase pill caption — same size/weight/kerning as
+    /// `GenerationOptionsPanel.menuPill`'s label, so these pills read as the same control family
+    /// as the main composer's.
+    private func pillCaption(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(theme.textTertiary)
+            .kerning(0.4)
+    }
+
+    /// Compact capsule value display — mirrors `GenerationOptionsPanel.pillLabel` exactly
+    /// (icon + value + chevron, same padding/background/stroke), just without that panel's
+    /// active/inactive accent tinting (no pill here has an "active toggle" state to signal).
+    private func pillLabel(icon: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+                .frame(width: 15, alignment: .center)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(theme.textTertiary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(theme.surface)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
     }
 
     private var voicePickerSheet: some View {
@@ -644,9 +779,12 @@ struct ExplainerFormatSheet: View {
 
                     HStack {
                         Spacer()
-                        HStack(spacing: 3) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 8))
+                        HStack(spacing: 4) {
+                            // Round 2 change 5: same sparkles credits glyph PresetInputSheet's
+                            // generateBar uses everywhere else in the app, replacing round 1's
+                            // plain circle dot.
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .bold))
                             Text("\(selectedTierCredits)")
                                 .font(.subheadline.weight(.semibold))
                                 .monospacedDigit()
@@ -806,19 +944,13 @@ struct ExplainerFormatSheet: View {
 
     // MARK: - Helpers
 
-    /// Small uppercase tracked caption used for the STYLE / ASPECT RATIO / OPTIONS section
-    /// headers (mockup treatment — dim, not a full-weight heading).
+    /// Small uppercase tracked caption used for the STYLE / ASPECT RATIO section headers
+    /// (mockup treatment — dim, not a full-weight heading). Options pills carry their own
+    /// per-pill caption instead (`pillCaption` below), matching the main page's rhythm.
     private func sectionCaption(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 11.5, weight: .bold))
             .tracking(0.8)
-            .foregroundStyle(theme.textTertiary)
-    }
-
-    private func controlLabel(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.7)
             .foregroundStyle(theme.textTertiary)
     }
 
@@ -844,6 +976,17 @@ struct ExplainerFormatSheet: View {
     private func musicDisplayName(_ mood: String) -> String {
         switch mood {
         case "auto": return "Auto (from topic)"
+        case "none": return "None"
+        default: return mood.replacingOccurrences(of: "-", with: " ").capitalized
+        }
+    }
+
+    /// Compact pill-display variant of `musicDisplayName` — "Auto"/"None"/mood name without the
+    /// parenthetical explanation, which doesn't fit a capsule pill (the full description still
+    /// shows in the music sub-sheet's list rows via `musicDisplayName` above).
+    private func musicPillValue(_ mood: String) -> String {
+        switch mood {
+        case "auto": return "Auto"
         case "none": return "None"
         default: return mood.replacingOccurrences(of: "-", with: " ").capitalized
         }
