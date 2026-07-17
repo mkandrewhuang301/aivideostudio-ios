@@ -254,12 +254,15 @@ struct ExplainerFormatSheet: View {
     }
 
     // MARK: - Cover (change 6 — full-bleed poster+loop above the title, mirrors
-    // PresetInputSheet.coverSection; ~42% height, hard-clipped edge, no bottom gradient fade).
+    // PresetInputSheet.coverSection; hard-clipped edge, no bottom gradient fade).
+    // Round 3 correction: constrained to 16:9 (was an oversized ~42%-of-screen-height band) —
+    // full available width, height = width * 9/16, same fill/clip treatment.
 
     private var coverSection: some View {
-        ExplainerCoverArt(format: format)
+        let width = UIScreen.main.bounds.width
+        return ExplainerCoverArt(format: format)
             .allowsHitTesting(false)
-            .frame(height: UIScreen.main.bounds.height * 0.42)
+            .frame(width: width, height: width * 9 / 16)
             .clipped()
     }
 
@@ -587,17 +590,14 @@ struct ExplainerFormatSheet: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Options (round 2, change 1 — compact main-page pill row)
+    // MARK: - Options (round 3 correction — enlarged field-card pill row, fills the full width)
 
-    /// Replaces round 1's boxed duration wheel + voice chevron cell + separate full-width music
-    /// row with the SAME compact-pill idiom `GenerationOptionsPanel` uses for the main composer
-    /// (its `menuPill`/`pillLabel`): a small uppercase caption above a capsule showing the
-    /// current value, tapping it either opens a `Menu` (Duration — a handful of discrete tiers,
-    /// mirrors that file's Duration menuPill exactly) or the existing List sub-sheet (Voice/
-    /// Music — longer, server-driven option lists, unchanged sub-sheets, just a pill trigger
-    /// instead of a full-width row). No standalone "OPTIONS" caption — each pill carries its own
-    /// label, matching the main page's rhythm. `ViewThatFits` keeps all three on one row when
-    /// they fit and wraps to a second row under Dynamic Type growth — never back to boxed cells.
+    /// Round 2's compact capsule pills left a large empty gap in the row (Andrew's "a ton of
+    /// empty space" note). Round 3 keeps the same pill IDIOM — current value, tap opens a `Menu`
+    /// (Duration) or the existing List sub-sheet (Voice/Music), live credits still update off
+    /// `selectedDuration` — but the three pills now share the row as equal flexible-width field
+    /// cards (`fieldPill`, `.frame(maxWidth: .infinity)` each) instead of hugging capsules.
+    /// `ViewThatFits` still wraps to a second row under Dynamic Type growth.
     private var optionsSection: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
@@ -616,22 +616,20 @@ struct ExplainerFormatSheet: View {
     }
 
     private var durationPill: some View {
-        VStack(spacing: 4) {
-            pillCaption("Duration")
-            Menu {
-                Section("Duration") {
-                    Picker("Duration", selection: $selectedDuration) {
-                        ForEach(format.durationTiers, id: \.seconds) { tier in
-                            Text("\(tier.seconds)s").tag(tier.seconds)
-                        }
+        Menu {
+            Section("Duration") {
+                Picker("Duration", selection: $selectedDuration) {
+                    ForEach(format.durationTiers, id: \.seconds) { tier in
+                        Text("\(tier.seconds)s").tag(tier.seconds)
                     }
                 }
-            } label: {
-                pillLabel(icon: "clock", value: "\(selectedDuration)s")
             }
-            .menuOrder(.fixed)
-            .buttonStyle(.plain)
+        } label: {
+            fieldPill(caption: "Duration", icon: "clock", value: "\(selectedDuration)s")
         }
+        .menuOrder(.fixed)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Duration")
         .accessibilityValue("\(selectedDuration) seconds")
@@ -639,63 +637,58 @@ struct ExplainerFormatSheet: View {
     }
 
     private var voicePill: some View {
-        VStack(spacing: 4) {
-            pillCaption("Voice")
-            Button { showsVoicePicker = true } label: {
-                pillLabel(icon: "waveform", value: selectedVoiceLabel)
-            }
-            .buttonStyle(.plain)
+        Button { showsVoicePicker = true } label: {
+            fieldPill(caption: "Voice", icon: "waveform", value: selectedVoiceLabel)
         }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Voice, \(selectedVoiceLabel)")
         .accessibilityHint("Opens voice choices")
     }
 
     private var musicPill: some View {
-        VStack(spacing: 4) {
-            pillCaption("Music")
-            Button { showsMusicPicker = true } label: {
-                pillLabel(icon: "music.note", value: musicPillValue(selectedMusic))
-            }
-            .buttonStyle(.plain)
+        Button { showsMusicPicker = true } label: {
+            fieldPill(caption: "Music", icon: "music.note", value: musicPillValue(selectedMusic))
         }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Music, \(musicDisplayName(selectedMusic))")
         .accessibilityHint("Opens music choices")
     }
 
-    /// Small uppercase pill caption — same size/weight/kerning as
-    /// `GenerationOptionsPanel.menuPill`'s label, so these pills read as the same control family
-    /// as the main composer's.
-    private func pillCaption(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(theme.textTertiary)
-            .kerning(0.4)
-    }
-
-    /// Compact capsule value display — mirrors `GenerationOptionsPanel.pillLabel` exactly
-    /// (icon + value + chevron, same padding/background/stroke), just without that panel's
-    /// active/inactive accent tinting (no pill here has an "active toggle" state to signal).
-    private func pillLabel(icon: String, value: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(theme.textSecondary)
-                .frame(width: 15, alignment: .center)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.textPrimary)
-                .lineLimit(1)
+    /// Round 3's enlarged pill: a compact field-card, not a text capsule — small uppercase
+    /// caption stacked above the value (icon + value), chevron trailing, ~50-54pt tall, filling
+    /// whatever flexible width its parent `.frame(maxWidth: .infinity)` gives it.
+    private func fieldPill(caption: String, icon: String, value: String) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(caption.uppercased())
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .kerning(0.4)
+                    .foregroundStyle(theme.textTertiary)
+                HStack(spacing: 5) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.textSecondary)
+                    Text(value)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            Spacer(minLength: 2)
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(theme.textTertiary)
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 50, maxHeight: 54)
         .background(theme.surface)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(theme.surfaceBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
     }
 
     private var voicePickerSheet: some View {
@@ -946,7 +939,7 @@ struct ExplainerFormatSheet: View {
 
     /// Small uppercase tracked caption used for the STYLE / ASPECT RATIO section headers
     /// (mockup treatment — dim, not a full-weight heading). Options pills carry their own
-    /// per-pill caption instead (`pillCaption` below), matching the main page's rhythm.
+    /// per-pill caption instead (inside `fieldPill` above), matching the main page's rhythm.
     private func sectionCaption(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 11.5, weight: .bold))
