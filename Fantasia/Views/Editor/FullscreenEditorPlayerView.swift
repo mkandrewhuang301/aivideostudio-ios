@@ -49,6 +49,10 @@ struct FullscreenEditorPlayerView: View {
     let usesComposedVideoOutput: Bool
     let videoOutputRenderer: EditorVideoOutputRenderer
     let onMinimize: () -> Void
+    /// Item 5 (Andrew review, 2026-07-17): threaded to this view's own TextOverlayCanvasView
+    /// mount below — see that mount's `.allowsHitTesting(false)` comment for why this is inert
+    /// today (kept for API consistency, not because it's currently reachable).
+    var onError: (String) -> Void = { _ in }
 
     @State private var isScrubbing = false
 
@@ -67,7 +71,11 @@ struct FullscreenEditorPlayerView: View {
                     }
                         .ignoresSafeArea()
                         .overlay {
-                            TextOverlayCanvasView(state: state, showsControls: false)
+                            // Item 5: preview-only surface — `.allowsHitTesting(false)` means none
+                            // of TextOverlayCanvasView's gestures (move/resize/rotate/edit) can
+                            // actually fire here, so `onError` is inert; passed through anyway for
+                            // API consistency should that ever change.
+                            TextOverlayCanvasView(state: state, showsControls: false, onError: onError)
                                 .allowsHitTesting(false)
                         }
                         .overlay {

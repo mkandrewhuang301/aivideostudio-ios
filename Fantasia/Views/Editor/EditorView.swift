@@ -173,7 +173,14 @@ struct EditorView: View {
                     player: player,
                     usesComposedVideoOutput: usesComposedVideoOutput,
                     videoOutputRenderer: videoOutputRenderer,
-                    onMinimize: { showFullscreenPlayer = false }
+                    onMinimize: { showFullscreenPlayer = false },
+                    // Item 5: FullscreenEditorPlayerView's own TextOverlayCanvasView mount already
+                    // has `.allowsHitTesting(false)` (it's a preview-only surface — no move/resize/
+                    // rotate/edit can actually fire there), so this is inert today, kept only for
+                    // API consistency in case that ever changes. If it ever DID fire, note
+                    // EditorView's barToastOverlay renders BEHIND this fullScreenCover while
+                    // presented, so the toast wouldn't be visible until minimized back.
+                    onError: { showBarToast($0) }
                 )
             }
             .sheet(isPresented: $showCaptionStyleSheet) {
@@ -709,7 +716,10 @@ struct EditorView: View {
                 // rotation handle ALWAYS extends above a selected box, and corner buttons clip
                 // too near the edges; text controls may draw over the letterbox bars, exactly like
                 // CapCut. This was the actual root cause of "rotation dot invisible."
-                TextOverlayCanvasView(state: state)
+                // Item 5 (Andrew review, 2026-07-17): wired to the same showBarToast surface every
+                // other track row's onError already uses — TextOverlayCanvasView's move/resize/
+                // rotate/edit/delete/duplicate failures were previously silent (print-only).
+                TextOverlayCanvasView(state: state, onError: { showBarToast($0) })
                     .frame(width: size.width, height: size.height)
             }
             .overlay {

@@ -27,6 +27,14 @@ struct TextOverlayCanvasView: View {
     /// renders plain text on video regardless of `state.selection`, no selectionFrame/corner
     /// buttons/rotation handle. Defaults to `true` (the inline editor's existing behavior).
     var showsControls: Bool = true
+    /// Item 5 (Andrew review, 2026-07-17): every persist* function below used to only `print()` on
+    /// failure — a totally silent failure. The box already visually "reverts" on its own (these
+    /// functions call the network request FIRST and only write the new value into
+    /// `state.project.textOverlays` on SUCCESS via syncProjectFromManager(); nothing is mutated
+    /// optimistically beforehand), but with no toast the user has no idea an edit was dropped.
+    /// Wired to EditorView's existing showBarToast-style surface — same convention
+    /// TextOverlayTrackRow/AudioTrackRow/CaptionTrackRow's `onError:` params already use.
+    var onError: (String) -> Void = { _ in }
 
     var body: some View {
         GeometryReader { geo in
@@ -89,37 +97,49 @@ struct TextOverlayCanvasView: View {
     // only wiring in TextOverlayItemView below — so these record directly, no debounce needed
     // (unlike the timeline pills' continuous edge-handle retime).
 
+    // Item 5: re-clamped HERE too (belt-and-suspenders) even though TextOverlayItemView's
+    // moveDragGesture/resizeDragGesture already clamp before calling onMove/onResize — this is the
+    // single funnel every call site (gesture end, and any future caller) goes through, so the
+    // invariant holds regardless of the caller. Investigation finding (see item 5's commit
+    // message): these clamps were ALREADY correct at the gesture layer, so a 400 from out-of-range
+    // coordinates was not actually reproducible here — the real bug was the silent print-only
+    // catch below, now wired to `onError`.
     private func persistMove(id: String, xNorm: Double, yNorm: Double) async {
+        let clampedXNorm = min(1, max(0, xNorm))
+        let clampedYNorm = min(1, max(0, yNorm))
         let before = state.project.textOverlays.first(where: { $0.id == id })
         do {
-            try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm)
+            try await projectManager.updateTextOverlay(textId: id, xNorm: clampedXNorm, yNorm: clampedYNorm)
             syncProjectFromManager()
             if let before {
                 state.history.record(UndoableAction(
                     label: "Move text",
                     undo: { try await projectManager.updateTextOverlay(textId: id, xNorm: before.xNorm, yNorm: before.yNorm) },
-                    redo: { try await projectManager.updateTextOverlay(textId: id, xNorm: xNorm, yNorm: yNorm) }
+                    redo: { try await projectManager.updateTextOverlay(textId: id, xNorm: clampedXNorm, yNorm: clampedYNorm) }
                 ))
             }
         } catch {
             print("[TextOverlayCanvasView] move error: \(error)")
+            onError("Couldn't save change")
         }
     }
 
     private func persistResize(id: String, scale: Double) async {
+        let clampedScale = min(3, max(0.5, scale))
         let beforeScale = state.project.textOverlays.first(where: { $0.id == id })?.widthNorm
         do {
-            try await projectManager.updateTextOverlay(textId: id, widthNorm: scale)
+            try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale)
             syncProjectFromManager()
             if let beforeScale {
                 state.history.record(UndoableAction(
                     label: "Resize text",
                     undo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: beforeScale) },
-                    redo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: scale) }
+                    redo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale) }
                 ))
             }
         } catch {
             print("[TextOverlayCanvasView] resize error: \(error)")
+            onError("Couldn't save change")
         }
     }
 
@@ -137,6 +157,7 @@ struct TextOverlayCanvasView: View {
             }
         } catch {
             print("[TextOverlayCanvasView] rotate error: \(error)")
+            onError("Couldn't save change")
         }
     }
 
@@ -156,6 +177,7 @@ struct TextOverlayCanvasView: View {
             }
         } catch {
             print("[TextOverlayCanvasView] edit error: \(error)")
+            onError("Couldn't save change")
         }
     }
 
@@ -180,6 +202,7 @@ struct TextOverlayCanvasView: View {
             ))
         } catch {
             print("[TextOverlayCanvasView] delete error: \(error)")
+            onError("Couldn't delete text")
         }
     }
 
@@ -213,6 +236,7 @@ struct TextOverlayCanvasView: View {
             }
         } catch {
             print("[TextOverlayCanvasView] duplicate error: \(error)")
+            onError("Couldn't duplicate text")
         }
     }
 
