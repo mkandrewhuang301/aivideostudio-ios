@@ -172,7 +172,31 @@ struct ClipPillView: View {
             guard shouldAcceptTap() else { return }
             onSelect()
         }
-        .highPriorityGesture(reorderGesture)
+        // Item 4 (Andrew review, 2026-07-17) — ROOT CAUSE of "selected clip freezes horizontal
+        // swiping": `.highPriorityGesture` doesn't just win ties against this SAME view's other
+        // recognizers (tap vs. drag) — per Apple's own docs it gives a gesture "precedence over
+        // OTHER gestures in the hierarchy," which blocks TimelineTrackView's ancestor scrub/tracks
+        // DragGesture from EVER getting a chance to recognize a touch that started on a pill, for
+        // the WHOLE touch session, even after this LongPress.sequenced(before: Drag) ultimately
+        // FAILS (a quick swipe blows past the long-press's movement tolerance well before the
+        // 0.5s threshold). A failed highPriorityGesture does not hand the touch back mid-session —
+        // the ancestor gesture never started tracking it in the first place, so the swipe just
+        // dies. This reproduces on EVERY clip (selected or not), not only a selected one — the
+        // 22pt edge handles below are the part that's actually selected-gated, and are NOT part of
+        // this bug (they intentionally win with minimumDistance:0 the moment a touch starts on
+        // them; that's correct trim behavior, left untouched).
+        //
+        // Fix: `.simultaneousGesture` instead of `.highPriorityGesture` lets the ancestor's
+        // scrubGesture/tracksGesture (TimelineTrackView.swift) watch the SAME touch concurrently
+        // rather than being shut out. This is safe specifically because those two ancestor
+        // gestures ALREADY guard `reorderingClipId == nil` at the top of their `onChanged` (added
+        // for exactly this scenario, but never effective before since the pill's
+        // `.highPriorityGesture` prevented them from running at all) — so a quick swipe scrubs
+        // normally, and the instant a genuine 0.5s hold promotes this clip into reorder mode
+        // (`onReorderLift` sets `reorderingClipId`), the ancestor gestures' own guard makes their
+        // `onChanged` a no-op for the rest of that touch, so reordering and scrubbing can never
+        // fire concurrently from the same drag.
+        .simultaneousGesture(reorderGesture)
         .overlay(alignment: .leading) {
             if isSelected && !isReordering { handle.highPriorityGesture(leftHandleGesture) }
         }
