@@ -120,6 +120,16 @@ struct CaptionTrackRow: View {
             editingCueId = requestedId
             state.editRequestedCaptionId = nil
         }
+        // Contextual bar's caption "Delete All" action signals here rather than owning its own
+        // confirmation — reuses the SAME `showDeleteAllConfirm` dialog + `deleteAllCaptions()`
+        // this row's own long-press affordance already triggers (D-13). Mirrors the Edit signal
+        // handler immediately above.
+        .onChange(of: state.deleteAllCaptionsRequested) { _, requested in
+            guard requested else { return }
+            state.deleteAllCaptionsRequested = false
+            guard !state.project.captionCues.isEmpty else { return }
+            showDeleteAllConfirm = true
+        }
     }
 
     // MARK: - Mutations

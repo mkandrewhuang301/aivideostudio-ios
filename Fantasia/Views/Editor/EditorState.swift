@@ -64,6 +64,13 @@ final class EditorState {
     var editRequestedTextId: String?
     var editRequestedCaptionId: String?
 
+    /// Same transient-signal pattern as `editRequestedCaptionId` above, for the contextual bottom
+    /// bar's caption "Delete All" action: EditorView flips this to `true`, CaptionTrackRow's
+    /// `onChange` observes it and presents the SAME `showDeleteAllConfirm` dialog its own
+    /// long-press affordance already shows (D-13) — no new deletion logic, just a second trigger
+    /// path into the existing confirmation + `deleteAllCaptions()` call. Not persisted state.
+    var deleteAllCaptionsRequested = false
+
     /// Plan 13-21 F5: the timeline's shared px-per-second zoom level — moved here from
     /// TimelineTrackView's local constant so the pinch gesture (TimelineTrackView) and every pill/
     /// row/ruler consumer read the SAME live value. Clamped to [8, 240] by the pinch gesture

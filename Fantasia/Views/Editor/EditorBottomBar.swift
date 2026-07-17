@@ -33,6 +33,7 @@ struct EditorBottomBar: View {
     let onEditText: () -> Void
     let onDuplicateText: () -> Void
     let onEditCaption: () -> Void
+    let onDeleteAllCaptions: () -> Void
 
     private let canvasBackground = Color(red: 0.039, green: 0.039, blue: 0.051) // #0A0A0D
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)               // #8C59FF
@@ -130,10 +131,15 @@ struct EditorBottomBar: View {
     }
 
     // No Split on captions, per user decision — a caption cue's word timing doesn't split.
+    // "Delete" removes just the selected cue (same projectManager.deleteCaptionCue(cueId:) call
+    // as the default per-cue path); "Delete All" surfaces the existing D-13 bulk action + its
+    // confirmation dialog (CaptionTrackRow) as a second entry point, same as CaptionStyleSheet's
+    // "Delete All Captions" row — no new deletion logic anywhere.
     private var captionBar: some View {
         HStack(spacing: 0) {
             ctxTool(icon: "pencil", label: "Edit", action: onEditCaption)
             ctxTool(icon: "trash", label: "Delete", color: destructive, action: onDeleteSelected)
+            ctxTool(icon: "trash.fill", label: "Delete All", color: destructive, action: onDeleteAllCaptions)
             ctxTool(icon: "checkmark", label: "Done", action: onDone)
         }
     }

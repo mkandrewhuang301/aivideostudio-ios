@@ -235,7 +235,8 @@ struct EditorView: View {
             onDeleteSelected: deleteSelected,
             onEditText: requestEditSelectedText,
             onDuplicateText: { Task { await duplicateSelectedText() } },
-            onEditCaption: requestEditSelectedCaption
+            onEditCaption: requestEditSelectedCaption,
+            onDeleteAllCaptions: requestDeleteAllCaptions
         )
     }
 
@@ -1531,6 +1532,14 @@ struct EditorView: View {
     /// the same inline edit mode its own pill's edit toggle triggers.
     private func requestEditSelectedCaption() {
         if case .caption(let id) = state.selection { state.editRequestedCaptionId = id }
+    }
+
+    /// Caption "Delete All" — signals CaptionTrackRow (via EditorState.deleteAllCaptionsRequested)
+    /// to present the SAME bulk-delete confirmation its own long-press affordance already shows,
+    /// which calls the SAME projectManager.deleteAllCaptions() (D-13) — no new deletion logic here.
+    private func requestDeleteAllCaptions() {
+        guard case .caption = state.selection else { return }
+        state.deleteAllCaptionsRequested = true
     }
 
     /// Text "Duplicate" — same call TextOverlayCanvasView's ⧉ corner button already makes.
