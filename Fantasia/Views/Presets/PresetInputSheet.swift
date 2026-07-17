@@ -166,7 +166,9 @@ struct PresetInputSheet: View {
             // Warm the backend as soon as the sheet opens — overlaps a cold Railway boot with the
             // user reading the sheet/picking a style, so the first slot upload isn't racing a
             // sleeping instance (same pattern as CreditStoreView.swift's pingHealth on open).
-            await APIClient.shared.pingHealth()
+            async let health: Void = APIClient.shared.pingHealth()
+            await hydratePrefilledVideoMetadata()
+            await health
         }
         .task {
             // So the "Add media" sheet's recent-generations strip has real data the FIRST time a
@@ -1131,7 +1133,7 @@ struct PresetInputSheet: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(presetAccent)
-                    Text("\(displayCost)")
+                    Text(isFrameMeteredCost ? "est. \(displayCost)" : "\(displayCost)")
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(theme.textPrimary)
                         .contentTransition(.numericText())
@@ -1208,7 +1210,15 @@ struct PresetInputSheet: View {
                 return Int(ceil(cappedSeconds * ratesManager.dreamactorRate))
             }
             return Int(ceil(cappedSeconds * creditsPerSec))
+        case .per30Frames(let creditsPerUnit):
+            guard let frameCount = videoSlotFrameCount else { return 0 }
+            return Int(ceil(Double(frameCount) / 30.0)) * creditsPerUnit
         }
+    }
+
+    private var isFrameMeteredCost: Bool {
+        if case .per30Frames? = preset.cost { return true }
+        return false
     }
 
     /// The real (capped) picked-video duration to actually SEND to the server for per-second
@@ -1232,11 +1242,38 @@ struct PresetInputSheet: View {
         return nil
     }
 
+    private var videoSlotFrameCount: Int? {
+        guard let slots = preset.inputSchema?.slots else { return nil }
+        for (index, slot) in slots.enumerated() where slot.kind == "video" {
+            if index < slotInputs.count, let frameCount = slotInputs[index]?.frameCount {
+                return frameCount
+            }
+        }
+        return nil
+    }
+
     /// The registry's per-second cap (Motion Transfer's 30s driving-video cap, D-16) — generic
     /// over any future per-second preset that declares `max_seconds`, not hardcoded to 30.
     private var capSecondsForActiveSlot: Double? {
         guard case .perSecond(_, let maxSeconds)? = preset.cost, let maxSeconds else { return nil }
         return Double(maxSeconds)
+    }
+
+    /// Remix supplies an existing upload URL rather than local bytes. Probe its metadata when
+    /// the sheet opens so duration- and frame-metered costs never sit at zero for a prefilled
+    /// video. The backend still re-signs and re-probes independently before charging.
+    private func hydratePrefilledVideoMetadata() async {
+        guard let slots = preset.inputSchema?.slots else { return }
+        for (index, slot) in slots.enumerated() where slot.kind == "video" {
+            guard index < slotInputs.count,
+                  let input = slotInputs[index],
+                  (input.durationSeconds == nil || input.frameCount == nil),
+                  let urlString = input.url,
+                  let url = URL(string: urlString),
+                  let metadata = await PresetMediaPrep.shared.probeVideoMetadata(url) else { continue }
+            slotInputs[index]?.durationSeconds = metadata.durationSeconds
+            slotInputs[index]?.frameCount = metadata.frameCount
+        }
     }
 
     // MARK: - Validation
@@ -1369,7 +1406,8 @@ struct PresetInputSheet: View {
             url: response.url,
             thumbnail: prepared.thumbnail,
             isUploading: false,
-            durationSeconds: capSeconds ?? billedDuration
+            durationSeconds: capSeconds ?? billedDuration,
+            frameCount: prepared.frameCount
         )
     }
 
@@ -1570,6 +1608,7 @@ struct PresetSlotInput {
     var thumbnail: UIImage?
     var isUploading: Bool = false
     var durationSeconds: Double?   // video slots only — real AVAsset duration (D-18)
+    var frameCount: Int? = nil     // frame-metered tools only; backend re-probes authoritatively
 }
 
 private struct PendingVideoTrim {
@@ -1595,6 +1634,22 @@ private actor PresetMediaPrep {
         let durationSeconds: Double
     }
 
+    struct VideoMetadata {
+        let durationSeconds: Double
+        let frameCount: Int?
+    }
+
+    func probeVideoMetadata(_ url: URL) async -> VideoMetadata? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration).seconds,
+              duration.isFinite,
+              duration > 0 else { return nil }
+        return VideoMetadata(
+            durationSeconds: duration,
+            frameCount: await Self.estimatedFrameCount(for: url)
+        )
+    }
+
     func writeAndProbeDuration(_ data: Data) async throws -> WrittenVideo {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).tmp")
         try data.write(to: url)
@@ -1605,6 +1660,7 @@ private actor PresetMediaPrep {
     struct PreparedVideo {
         let data: Data
         let thumbnail: UIImage?
+        let frameCount: Int?
     }
 
     struct PreparedImage {
@@ -1642,7 +1698,22 @@ private actor PresetMediaPrep {
         workingURL = (try? await Self.transcodeToH264IfNeeded(url: workingURL)) ?? workingURL
         let finalData = (try? Data(contentsOf: workingURL)) ?? fallbackData
         let thumbnail = Self.extractThumbnail(from: workingURL)
-        return PreparedVideo(data: finalData, thumbnail: thumbnail)
+        let frameCount = await Self.estimatedFrameCount(for: workingURL)
+        return PreparedVideo(data: finalData, thumbnail: thumbnail, frameCount: frameCount)
+    }
+
+    /// Client-side estimate for pre-submit display only. The backend decodes every frame with
+    /// ffprobe before charging, so a variable-frame-rate rounding difference can never affect
+    /// the authoritative deduction.
+    private static func estimatedFrameCount(for url: URL) async -> Int? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let frameRate = try? await track.load(.nominalFrameRate),
+              frameRate > 0,
+              let duration = try? await asset.load(.duration).seconds,
+              duration.isFinite,
+              duration > 0 else { return nil }
+        return max(1, Int(ceil(duration * Double(frameRate) - 0.001)))
     }
 
     private static func extractThumbnail(from url: URL) -> UIImage? {

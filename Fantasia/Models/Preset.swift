@@ -177,16 +177,18 @@ struct PresetStyle: Codable, Equatable {
     }
 }
 
-// Discriminated union: {type:'flat', credits} | {type:'per_second', credits_per_sec, max_seconds?}
+// Discriminated union for static, duration-metered, and frame-metered provider pricing.
 enum PresetCost: Codable, Equatable {
     case flat(credits: Int)
     case perSecond(creditsPerSec: Double, maxSeconds: Int?)
+    case per30Frames(creditsPerUnit: Int)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case credits
         case creditsPerSec = "credits_per_sec"
         case maxSeconds = "max_seconds"
+        case creditsPerUnit = "credits_per_unit"
     }
 
     init(from decoder: Decoder) throws {
@@ -200,6 +202,9 @@ enum PresetCost: Codable, Equatable {
             let creditsPerSec = try container.decode(Double.self, forKey: .creditsPerSec)
             let maxSeconds = try container.decodeIfPresent(Int.self, forKey: .maxSeconds)
             self = .perSecond(creditsPerSec: creditsPerSec, maxSeconds: maxSeconds)
+        case "per_30_frames":
+            let creditsPerUnit = try container.decode(Int.self, forKey: .creditsPerUnit)
+            self = .per30Frames(creditsPerUnit: creditsPerUnit)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -219,11 +224,13 @@ enum PresetCost: Codable, Equatable {
             try container.encode("per_second", forKey: .type)
             try container.encode(creditsPerSec, forKey: .creditsPerSec)
             try container.encodeIfPresent(maxSeconds, forKey: .maxSeconds)
+        case .per30Frames(let creditsPerUnit):
+            try container.encode("per_30_frames", forKey: .type)
+            try container.encode(creditsPerUnit, forKey: .creditsPerUnit)
         }
     }
 
-    /// Flat display credits for `.flat` presets. Returns nil for `.perSecond` — callers must
-    /// compute from the picked media's real duration (e.g. Motion Transfer, D-18).
+    /// Flat display credits for `.flat` presets. Metered callers compute from picked media.
     var flatCredits: Int? {
         if case .flat(let credits) = self { return credits }
         return nil

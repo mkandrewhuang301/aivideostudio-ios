@@ -417,6 +417,9 @@ struct GenerationCardView: View {
                 Color.clear
                     .overlay {
                         ZStack {
+                            if item.usesTransparencyBackdrop {
+                                TransparencyBackdrop()
+                            }
                             Image(uiImage: thumb)
                                 .resizable().scaledToFill()
                             Image(systemName: "play.circle.fill")

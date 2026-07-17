@@ -42,9 +42,14 @@ struct LibraryThumbnailView: View {
                         }
                     } else {
                         if let thumb = thumbnail {
-                            Image(uiImage: thumb)
-                                .resizable()
-                                .scaledToFill()
+                            ZStack {
+                                if item.usesTransparencyBackdrop {
+                                    TransparencyBackdrop(cellSize: 10)
+                                }
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .scaledToFill()
+                            }
                         } else {
                             theme.surfaceStrong
                             Image(systemName: "film")

@@ -187,6 +187,10 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     /// forks Remix to reopen PresetInputSheet instead of the composer (D-11/T-09.1-03).
     var isPreset: Bool { params.presetId != nil }
 
+    /// Pixelcut's ProRes 4444 output contains real alpha. Feed/library thumbnails place this
+    /// preset over a neutral checkerboard so transparent regions remain legible in either theme.
+    var usesTransparencyBackdrop: Bool { params.presetId == "remove-background-video" }
+
     /// The presigned R2 URL for the completed media (video or image).
     /// Backend returns image URLs under the `video_url` key to avoid a breaking API change.
     var completedMediaUrl: String? { videoUrl }
