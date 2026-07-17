@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "characters": [
+    {
+      "character_id": "nova",
+      "name": "Nova",
+      "category": "popular",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/nova/card-v1.jpg",
+      "bio": "A fearless adventurer who turns every moment into a cinematic story.",
+      "voice_label": "Kore — warm, grounded",
+      "sort_order": 1
+    },
+    {
+      "character_id": "milo",
+      "name": "Milo",
+      "category": "popular",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/milo/card-v1.jpg",
+      "bio": "A quick-witted creator who always finds the funny side of the scene.",
+      "voice_label": "Puck — bright, playful",
+      "sort_order": 2
+    },
+    {
+      "character_id": "sable",
+      "name": "Sable",
+      "category": "popular",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/sable/card-v1.jpg",
+      "bio": "A poised storyteller with a taste for mystery and dramatic reveals.",
+      "voice_label": "Aoede — clear, poised",
+      "sort_order": 3
+    },
+    {
+      "character_id": "aiko",
+      "name": "Aiko",
+      "category": "anime",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/aiko/card-v1.jpg",
+      "bio": "A determined city dreamer chasing impossible goals with an open heart.",
+      "voice_label": "Kore — warm, calm",
+      "sort_order": 1
+    },
+    {
+      "character_id": "ren",
+      "name": "Ren",
+      "category": "anime",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/ren/card-v1.jpg",
+      "bio": "A cool rival whose quiet confidence hides a fiercely loyal side.",
+      "voice_label": "Charon — steady, deep",
+      "sort_order": 2
+    },
+    {
+      "character_id": "emi",
+      "name": "Emi",
+      "category": "anime",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/emi/card-v1.jpg",
+      "bio": "A high-energy optimist who can turn any setback into a new adventure.",
+      "voice_label": "Leda — bright, expressive",
+      "sort_order": 3
+    },
+    {
+      "character_id": "byte",
+      "name": "Byte",
+      "category": "3d_generated",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/byte/card-v1.jpg",
+      "bio": "A curious little robot learning the wonderfully strange habits of humans.",
+      "voice_label": "Puck — lively, curious",
+      "sort_order": 1
+    },
+    {
+      "character_id": "moss",
+      "name": "Moss",
+      "category": "3d_generated",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/moss/card-v1.jpg",
+      "bio": "A gentle forest guardian with ancient wisdom and an enormous soft spot.",
+      "voice_label": "Fenrir — deep, kind",
+      "sort_order": 2
+    },
+    {
+      "character_id": "zuri",
+      "name": "Zuri",
+      "category": "3d_generated",
+      "status": "soon",
+      "art_url": "https://assets.fantasia.example/characters/zuri/card-v1.jpg",
+      "bio": "A bold space explorer who treats the unknown like an invitation.",
+      "voice_label": "Aoede — confident, clear",
+      "sort_order": 3
+    }
+  ]
+}

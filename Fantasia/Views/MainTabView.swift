@@ -59,7 +59,7 @@ struct MainTabView: View {
                     NavigationStack { GenerateView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(2)
-                    CastCheckpointView()
+                    CastView()
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(3)
@@ -248,6 +248,7 @@ struct MainTabView: View {
                             x: slotWidth * CGFloat(boundary),
                             y: tabBarHeight / 2
                         )
+                        .allowsHitTesting(false)
                 }
 
                 VStack {
@@ -308,32 +309,13 @@ struct MainTabView: View {
     }
 }
 
-/// Temporary destination used only for the tab-bar visual checkpoint. The full server-driven
-/// Cast page replaces this after the navigation treatment is approved.
-private struct CastCheckpointView: View {
-    @Environment(ThemeManager.self) private var theme
-
-    var body: some View {
-        ZStack {
-            theme.background.ignoresSafeArea()
-            VStack(spacing: 10) {
-                Image(systemName: "person.2")
-                    .font(.system(size: 34, weight: .light))
-                Text("Cast")
-                    .font(.title3.weight(.semibold))
-                Text("Characters are coming soon")
-                    .font(.subheadline)
-            }
-            .foregroundStyle(theme.textTertiary)
-        }
-    }
-}
-
 #Preview {
     MainTabView()
         .environment(CreditManager())
         .environment(AuthManager())
         .environment(GenerationManager())
         .environment(MediaLibraryManager())
+        .environment(ProjectManager())
+        .environment(CharacterRegistryManager())
         .environment(ThemeManager())
 }

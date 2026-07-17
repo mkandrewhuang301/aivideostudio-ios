@@ -16,6 +16,7 @@ struct FantasiaApp: App {
     @State private var mediaLibraryManager = MediaLibraryManager()
     @State private var projectManager = ProjectManager()
     @State private var formatRegistryManager = FormatRegistryManager()
+    @State private var characterRegistryManager = CharacterRegistryManager()
     @State private var ratesManager = RatesManager()
     @State private var offeringsManager = OfferingsManager()
     @State private var themeManager = ThemeManager()
@@ -50,6 +51,7 @@ struct FantasiaApp: App {
                 .environment(mediaLibraryManager)
                 .environment(projectManager)
                 .environment(formatRegistryManager)
+                .environment(characterRegistryManager)
                 .environment(ratesManager)
                 .environment(offeringsManager)
                 .environment(themeManager)
@@ -59,6 +61,7 @@ struct FantasiaApp: App {
                     // IMPORTANT: FirebaseApp.configure() MUST run before any Auth.auth() call.
                     Task { await ratesManager.load() }  // public endpoint — fire in parallel with auth setup
                     Task { await formatRegistryManager.loadIfNeeded() } // public registry — same launch posture
+                    Task { await characterRegistryManager.loadIfNeeded() } // public Cast registry
                     startKeepWarmLoop()  // belt-and-suspenders: scenePhase's .active onChange isn't guaranteed to fire on cold launch
                     FirebaseApp.configure()
                     GIDSignIn.sharedInstance.configuration = GIDConfiguration(
@@ -116,6 +119,7 @@ struct FantasiaApp: App {
                     if phase == .active {
                         Task { await ratesManager.loadIfNeeded() } // no-op unless stale (>1h)
                         Task { await formatRegistryManager.loadIfNeeded() } // no-op unless stale (>1h)
+                        Task { await characterRegistryManager.loadIfNeeded() } // no-op unless stale (>1h)
                         Task { await offeringsManager.refreshIfNeeded(ensuring: OfferingsManager.topUpProductIds) } // no-op unless stale
                         generationManager.resumePollingIfNeeded() // no-op unless a job is active
                         startKeepWarmLoop()
