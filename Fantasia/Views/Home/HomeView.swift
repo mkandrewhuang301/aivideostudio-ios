@@ -1,17 +1,15 @@
 // HomeView.swift
 // Fantasia
 // Registry-driven Home (D-01 replace): one continuous scroll rendering PresetRegistryManager
-// rows in the section order — Edit Studio hero, Shows & Vlogs (moved up 2026-07-13, first row
-// below hero), Video Effects, Photo Effects (split by output media type, D-02 revision
-// 2026-07-06), Avatar Center (full-width feature card). Every card is a poster-first autoplaying
-// loop (D-08); SOON tiles/pills are registry-driven from `status` alone (D-04) — nothing here is
-// hardcoded per-preset.
+// rows in the section order — Edit Studio hero, recent presets, Formats, Shows & Vlogs, Video
+// Effects, then Photo Effects. Registry status remains the sole source for SOON treatment.
 
 import SwiftUI
 
 struct HomeView: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(FormatRegistryManager.self) private var formatsRegistry
+    @Environment(GenerationManager.self) private var generationManager
     @State private var registry = PresetRegistryManager()
     @State private var presentedFormat: Format?
     // Phase 13, Plan 09 (D-06): the Studio hub is the ONLY entry point into Edit Studio, opened
@@ -51,10 +49,6 @@ struct HomeView: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private var avatarCenterPreset: Preset? {
-        registry.presets.first { $0.section == "avatar_center" }
-    }
-
     private var showsPresets: [Preset] {
         registry.presets
             .filter { $0.section == "shows_vlogs" }
@@ -63,8 +57,27 @@ struct HomeView: View {
 
     private var formatsToShow: [Format] {
         formatsRegistry.formats
-            .filter { $0.isLive && $0.section == "formats" }
+            .filter { $0.section == "formats" }
             .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// Most recent distinct preset runs from the existing app-wide generation snapshot. Freeform
+    /// rows and registry misses are skipped; no second backend feed or local preference is needed.
+    private var recentPresets: [Preset] {
+        let presetsById = Dictionary(uniqueKeysWithValues: registry.presets.map { ($0.presetId, $0) })
+        var seen = Set<String>()
+        var result: [Preset] = []
+
+        for generation in generationManager.generations {
+            guard let presetId = generation.params.presetId,
+                  seen.insert(presetId).inserted,
+                  let preset = presetsById[presetId],
+                  !preset.isSoon else { continue }
+            result.append(preset)
+            if result.count == 6 { break }
+        }
+
+        return result.count >= 2 ? result : []
     }
 
     var body: some View {
@@ -77,13 +90,14 @@ struct HomeView: View {
                         heroCard(heroPreset)
                     }
 
+                    if !recentPresets.isEmpty {
+                        sectionHeader("Jump back in")
+                        jumpBackInRow
+                    }
+
                     if !formatsToShow.isEmpty {
                         sectionHeader("Formats")
-                        VStack(spacing: 10) {
-                            ForEach(formatsToShow) { format in
-                                formatRow(format)
-                            }
-                        }
+                        formatsRow
                     }
 
                     if !showsPresets.isEmpty {
@@ -101,10 +115,6 @@ struct HomeView: View {
                         effectsGrid(photoEffectsPresets)
                     }
 
-                    if let avatarCenterPreset {
-                        sectionHeader("Avatar Center")
-                        avatarCenterRow(avatarCenterPreset)
-                    }
                 }
                 .padding(.bottom, 110)
             }
@@ -154,10 +164,11 @@ struct HomeView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(theme.textPrimary)
             Spacer()
-            Text("See all")
+            Text("See all ›")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.textTertiary)
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
         .padding(.top, 20)
         .padding(.bottom, 8)
@@ -365,62 +376,149 @@ struct HomeView: View {
         .padding(.horizontal, 12)
     }
 
-    // MARK: - Formats (server-driven full-width rows below the Edit Studio hero)
+    // MARK: - Jump back in (small, familiar recent-preset shelf)
 
-    private func formatRow(_ format: Format) -> some View {
+    private var jumpBackInRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(recentPresets) { preset in
+                    Button {
+                        onSelectPreset(preset)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            recentPresetArtwork(preset)
+                                .frame(width: 76, height: 76)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(theme.surfaceBorder, lineWidth: 1)
+                                )
+
+                            Text(preset.title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(theme.textSecondary)
+                                .lineLimit(1)
+                                .frame(width: 76, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .accessibilityLabel("Use \(preset.title) again")
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    @ViewBuilder
+    private func recentPresetArtwork(_ preset: Preset) -> some View {
+        if let url = preset.tile.posterURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    recentPresetFallback
+                }
+            }
+        } else {
+            recentPresetFallback
+        }
+    }
+
+    private var recentPresetFallback: some View {
+        LinearGradient(
+            colors: [theme.surfaceStrong, accent.opacity(0.5)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+    }
+
+    // MARK: - Formats (server-driven marquee cards)
+
+    private var formatsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 12) {
+                ForEach(formatsToShow) { format in
+                    formatCard(format)
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    private func formatCard(_ format: Format) -> some View {
         Button {
+            guard format.isLive else { return }
             presentedFormat = format
         } label: {
-            HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
                 Color.clear
-                    .frame(width: 84, height: 84)
+                    .frame(width: 172, height: 124)
                     .overlay {
                         formatArtwork(format)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .overlay(alignment: .topLeading) {
+                        formatBadge(format)
+                            .padding(10)
+                    }
+                    .saturation(format.isLive ? 1 : 0.58)
+                    .brightness(format.isLive ? 0 : -0.1)
                     .clipped()
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
-                        Text(format.title)
-                            .font(.system(size: 17, weight: .heavy))
-                            .foregroundStyle(theme.textPrimary)
-                            .lineLimit(1)
-
-                        if let badge = format.badge, !badge.isEmpty {
-                            Text(badge)
-                                .font(.system(size: 8.5, weight: .heavy))
-                                .tracking(0.7)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(explainerAccentGradient, in: RoundedRectangle(cornerRadius: 5))
-                        }
-                    }
+                    Text(format.title)
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
 
                     if let subtitle = format.subtitle {
                         Text(subtitle)
-                            .font(.system(size: 12))
+                            .font(.system(size: 10.5, weight: .regular))
                             .foregroundStyle(theme.textSecondary)
-                            .lineLimit(2)
+                            .lineLimit(1)
                     }
                 }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(theme.textTertiary)
+                .frame(width: 148, height: 58, alignment: .leading)
+                .padding(.horizontal, 12)
             }
-            .padding(16)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
+            .frame(width: 172)
+            .background(theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+            .overlay(
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(theme.surfaceBorder, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 15))
         }
         .buttonStyle(PressableButtonStyle())
-        .accessibilityLabel("\(format.title), \(format.subtitle ?? "Format")")
-        .accessibilityHint("Opens format options")
+        .allowsHitTesting(format.isLive)
+        .accessibilityLabel(format.isLive ? format.title : "\(format.title), coming soon")
+        .accessibilityHint(format.isLive ? "Opens format options" : "")
+    }
+
+    @ViewBuilder
+    private func formatBadge(_ format: Format) -> some View {
+        if !format.isLive {
+            formatBadgeText("SOON", background: AnyShapeStyle(Color.black.opacity(0.42)))
+        } else if let badge = format.badge, !badge.isEmpty {
+            formatBadgeText(badge, background: AnyShapeStyle(explainerAccentGradient))
+        }
+    }
+
+    private func formatBadgeText(_ text: String, background: AnyShapeStyle) -> some View {
+        Text(text)
+            .font(.system(size: 8.5, weight: .heavy))
+            .tracking(0.7)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(background, in: RoundedRectangle(cornerRadius: 6))
     }
 
     @ViewBuilder
@@ -434,21 +532,47 @@ struct HomeView: View {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 default:
-                    formatArtworkFallback
+                    formatArtworkFallback(format)
                 }
             }
         } else {
-            formatArtworkFallback
+            formatArtworkFallback(format)
         }
     }
 
-    private var formatArtworkFallback: some View {
-        explainerAccentGradient
+    private func formatArtworkFallback(_ format: Format) -> some View {
+        LinearGradient(
+            colors: formatPalette(format),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
             .overlay {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 25, weight: .semibold))
+                Image(systemName: formatSymbol(format))
+                    .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
             }
+    }
+
+    private func formatPalette(_ format: Format) -> [Color] {
+        switch format.formatId {
+        case "daily-verse":
+            return [Color(red: 0.95, green: 0.58, blue: 0.28), Color(red: 0.62, green: 0.29, blue: 0.45)]
+        case "spanish-lessons":
+            return [Color(red: 0.16, green: 0.68, blue: 0.63), Color(red: 0.18, green: 0.39, blue: 0.72)]
+        case "history-reimagined":
+            return [Color(red: 0.77, green: 0.32, blue: 0.36), Color(red: 0.38, green: 0.24, blue: 0.57)]
+        default:
+            return [accent, Color(red: 0.357, green: 0.561, blue: 0.851)]
+        }
+    }
+
+    private func formatSymbol(_ format: Format) -> String {
+        switch format.formatId {
+        case "daily-verse": "book.closed.fill"
+        case "spanish-lessons": "character.book.closed.fill"
+        case "history-reimagined": "building.columns.fill"
+        default: "sparkles"
+        }
     }
 
     private var explainerAccentGradient: LinearGradient {
@@ -457,54 +581,6 @@ struct HomeView: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-    }
-
-    // MARK: - Avatar Center (App Store feature-card idiom — text header, ONE full-width row card)
-
-    private func avatarCenterRow(_ preset: Preset) -> some View {
-        HStack(spacing: 16) {
-            Color.clear
-                .frame(width: 84, height: 84)
-                .overlay {
-                    PresetLoopBackground(preset: preset)
-                        .allowsHitTesting(false)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .clipped()
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(preset.title)
-                    .font(.system(size: 17, weight: .heavy))
-                    .foregroundStyle(theme.textPrimary)
-                if let subtitle = preset.subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            if preset.isSoon {
-                Text("SOON")
-                    .font(.system(size: 8.5, weight: .heavy))
-                    .tracking(0.7)
-                    .foregroundStyle(theme.textSecondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 6))
-            } else {
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(theme.textTertiary)
-            }
-        }
-        .padding(16)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
-        .padding(.horizontal, 12)
-        .contentShape(Rectangle())
-        .onTapGesture { if !preset.isSoon { onSelectPreset(preset) } }
     }
 
     // MARK: - Shows & Vlogs (two half-width cards)

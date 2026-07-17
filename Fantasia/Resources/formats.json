@@ -114,6 +114,33 @@
         "description": "Type a topic — get a narrated, animated explainer video.",
         "preparing_label": "Writing your script…"
       }
+    },
+    {
+      "format_id": "daily-verse",
+      "title": "Daily Verse",
+      "subtitle": "A daily scripture story, brought to life",
+      "section": "formats",
+      "sort_order": 20,
+      "status": "soon",
+      "tile": {}
+    },
+    {
+      "format_id": "spanish-lessons",
+      "title": "Spanish Lessons",
+      "subtitle": "Short visual lessons that make Spanish stick",
+      "section": "formats",
+      "sort_order": 30,
+      "status": "soon",
+      "tile": {}
+    },
+    {
+      "format_id": "history-reimagined",
+      "title": "History Reimagined",
+      "subtitle": "Cinematic stories that put you inside the past",
+      "section": "formats",
+      "sort_order": 40,
+      "status": "soon",
+      "tile": {}
     }
   ]
 }

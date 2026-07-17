@@ -285,8 +285,8 @@
       "preset_id": "avatar-center",
       "title": "Avatar Center",
       "subtitle": "Your AI twin, coming soon",
-      "section": "avatar_center",
-      "sort_order": 1,
+      "section": "video_effects",
+      "sort_order": 99,
       "status": "soon",
       "badge": null,
       "tile": {
