@@ -56,6 +56,14 @@ struct CaptionStyleSheet: View {
     @State private var errorMessage: String?
     @State private var errorClearTask: Task<Void, Never>?
 
+    // Item 2 (Andrew review, 2026-07-17): the bulk "Delete All Captions" action (D-13) already
+    // existed but was hidden behind a 0.5s long-press on the caption track row with no visible
+    // affordance. Surfacing it here too — same confirmation copy, same
+    // `projectManager.deleteAllCaptions()` call CaptionTrackRow already makes, no new deletion
+    // logic. Caption-scoped only; never touches text overlays.
+    @State private var showDeleteAllConfirm = false
+    @State private var isDeletingAll = false
+
     private let studioAccent = Color(red: 0.545, green: 0.427, blue: 0.839)
     private let destructive = Color(red: 1.0, green: 0.329, blue: 0.439)
 
@@ -86,6 +94,8 @@ struct CaptionStyleSheet: View {
                             .font(.system(size: 12))
                             .foregroundStyle(destructive)
                     }
+
+                    deleteAllSection
                 }
                 .padding(16)
             }
@@ -103,6 +113,60 @@ struct CaptionStyleSheet: View {
                     .accessibilityLabel("Close")
                 }
             }
+            .confirmationDialog(
+                "Delete all captions?",
+                isPresented: $showDeleteAllConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete All", role: .destructive) {
+                    Task { await deleteAllCaptions() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes every caption in this project. This cannot be undone.")
+            }
+        }
+    }
+
+    // MARK: - Delete All Captions (item 2 — visible affordance for the existing D-13 action)
+
+    private var deleteAllSection: some View {
+        Button {
+            showDeleteAllConfirm = true
+        } label: {
+            HStack {
+                Image(systemName: "trash")
+                Text(isDeletingAll ? "Deleting…" : "Delete All Captions")
+                Spacer()
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(destructive)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(state.project.captionCues.isEmpty || isDeletingAll)
+        .opacity(state.project.captionCues.isEmpty ? 0.4 : 1)
+        .padding(.top, 4)
+    }
+
+    /// Verbatim reuse of CaptionTrackRow's bulk-delete call (`projectManager.deleteAllCaptions()`)
+    /// — no new deletion logic, just a second, visible entry point to the same action. Stays open
+    /// on the (now empty) style sheet rather than dismissing, mirroring the track row's behavior
+    /// of staying put after the bulk delete.
+    private func deleteAllCaptions() async {
+        isDeletingAll = true
+        defer { isDeletingAll = false }
+        do {
+            try await projectManager.deleteAllCaptions()
+            if let refreshed = projectManager.loadedProject {
+                state.project = refreshed
+            }
+            if case .caption = state.selection { state.select(.none) }
+        } catch {
+            print("[CaptionStyleSheet] deleteAllCaptions error: \(error)")
+            showError("Couldn't delete captions.")
         }
     }
 
