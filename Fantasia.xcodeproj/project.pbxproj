@@ -85,6 +85,7 @@
 		9E8F4D64E56BB941F57A2634 /* BrandGradient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988EBFB034876308CEF701E2 /* BrandGradient.swift */; };
 		9EADCAA67965C05E1F7EB3E5 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE46B720B299E8E732C4EA9 /* PushNotificationManager.swift */; };
 		A095F5D76111A4BB10B021A7 /* KeyboardWarmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32FA7D103105D0F66A50D38C /* KeyboardWarmer.swift */; };
+		A0C53BEBC2DFA86ED5AEEFA1 /* HappyHorseModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 006BD2265CFB3B00103E7FF2 /* HappyHorseModelTests.swift */; };
 		AA5B5DFFE899799050F6619F /* OnboardingFeatureSlideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */; };
 		AA997FEA83188DA811282EF9 /* FormatRegistryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5492835B60A51F96550FE47D /* FormatRegistryManager.swift */; };
 		AABF3AA3BAB73CEDC39DF5FA /* OnboardingFeaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */; };
@@ -141,6 +142,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		006BD2265CFB3B00103E7FF2 /* HappyHorseModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HappyHorseModelTests.swift; sourceTree = "<group>"; };
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		045559253B09A54FC9E2075E /* EditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorState.swift; sourceTree = "<group>"; };
 		0781CBA7E723CB78D90C3CB4 /* TextOverlayTrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextOverlayTrackRow.swift; sourceTree = "<group>"; };
@@ -283,6 +285,7 @@
 			isa = PBXGroup;
 			children = (
 				756271C8903F0DC5851E3229 /* EditorInteractionTests.swift */,
+				006BD2265CFB3B00103E7FF2 /* HappyHorseModelTests.swift */,
 				D9EA405C4A05709CFA7DC6FB /* MaskEditorExportTests.swift */,
 				D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */,
 				1578571BE41B939851F8B963 /* PresetCostTests.swift */,
@@ -846,6 +849,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C5C43BFBB1AE0B74228039F /* EditorInteractionTests.swift in Sources */,
+				A0C53BEBC2DFA86ED5AEEFA1 /* HappyHorseModelTests.swift in Sources */,
 				525A1D8220417B6625990607 /* MaskEditorExportTests.swift in Sources */,
 				1562160C4DBB10894DE25FB1 /* OnboardingQuestionBankTests.swift in Sources */,
 				55DFCCA39C3178D5D5C8B98F /* PresetCostTests.swift in Sources */,

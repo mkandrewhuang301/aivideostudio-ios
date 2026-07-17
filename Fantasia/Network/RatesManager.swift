@@ -42,6 +42,10 @@ final class RatesManager {
             "nonVideoIn": ["480p": 8.0,  "720p": 18.0, "1080p": 45.0, "4k": 100.0],
             "videoIn":    ["480p": 10.0, "720p": 22.0, "1080p": 55.0, "4k": 125.0],
         ],
+        "alibaba/happyhorse-1.1": [
+            "nonVideoIn": ["720p": 14.0, "1080p": 18.0],
+            "videoIn":    ["720p": 14.0, "1080p": 18.0],
+        ],
     ]
 
     // Fallback image costs — matches IMAGE_MODEL_COSTS on backend

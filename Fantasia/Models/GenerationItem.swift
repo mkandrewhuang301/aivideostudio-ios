@@ -109,7 +109,7 @@ struct GenerationParams: Codable, Equatable {
 // Primary model — one generation row from GET /api/generations or GET /api/generations/:id
 struct GenerationItem: Codable, Identifiable, Equatable {
     let id: String
-    let model: String            // "bytedance/seedance-2.0-fast" | "bytedance/seedance-2.0-mini"
+    let model: String            // server model slug; includes Seedance, Grok, Kling, and HappyHorse
     let status: GenerationStatus
     let mediaType: MediaType     // .video | .image; defaults to .video when field absent in JSON
     let prompt: String?

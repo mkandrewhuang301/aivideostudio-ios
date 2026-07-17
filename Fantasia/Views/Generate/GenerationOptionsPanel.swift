@@ -15,13 +15,22 @@ struct ModelOption {
     let tagline: String
     let badge: String?   // credit cost badge, e.g. "5 credits" — image models only
     let requiresImage: Bool   // true = image-to-video only, no text-only mode (e.g. Grok Imagine)
+    let forcedAudio: Bool     // true = provider always generates audio; pill is locked "Always On"
 
-    init(id: String, name: String, tagline: String, badge: String? = nil, requiresImage: Bool = false) {
+    init(
+        id: String,
+        name: String,
+        tagline: String,
+        badge: String? = nil,
+        requiresImage: Bool = false,
+        forcedAudio: Bool = false
+    ) {
         self.id = id
         self.name = name
         self.tagline = tagline
         self.badge = badge
         self.requiresImage = requiresImage
+        self.forcedAudio = forcedAudio
     }
 }
 
@@ -52,10 +61,15 @@ enum ModelCatalog {
                     tagline: "Best output quality, ideal for final renders"),
         ModelOption(id: "xai/grok-imagine-video-1.5",  name: "Grok Imagine 1.5",
                     tagline: "More creative freedom, fewer restrictions — image-to-video with synced audio",
-                    requiresImage: true),
+                    requiresImage: true,
+                    forcedAudio: true),
         ModelOption(id: "fal-ai/kling-video/v3/standard/image-to-video", name: "Kling 3.0 Standard",
                     tagline: "Cinematic image-to-video with optional native audio",
                     requiresImage: true),
+        ModelOption(id: "alibaba/happyhorse-1.1", name: "HappyHorse 1.1",
+                    tagline: "Premium video with native audio and multilingual lip-sync",
+                    requiresImage: false,
+                    forcedAudio: true),
     ]
     static let image: [ModelOption] = [
         ModelOption(id: "openai/gpt-image-2-high",   name: "GPT Image 2 · High",
@@ -101,6 +115,15 @@ struct GenerationOptionsPanel: View {
 
     private var activeModels: [ModelOption] {
         selectedMode == "AI Image" ? ModelCatalog.image : ModelCatalog.video
+    }
+
+    private var supportedVideoResolutions: [String] {
+        switch selectedModel {
+        case "bytedance/seedance-2.0": return ["480p", "720p", "1080p", "4k"]
+        case "fal-ai/kling-video/v3/standard/image-to-video": return ["720p"]
+        case "alibaba/happyhorse-1.1": return ["720p", "1080p"]
+        default: return ["480p", "720p"]
+        }
     }
 
     var body: some View {
@@ -149,25 +172,21 @@ struct GenerationOptionsPanel: View {
                 } else {
                     menuPill("Resolution", icon: "sparkles", value: selectedResolution) {
                         Picker("Resolution", selection: $selectedResolution) {
-                            if selectedModel == "fal-ai/kling-video/v3/standard/image-to-video" {
-                                Text("Standard").tag("720p")
-                            } else {
-                                Text("480p").tag("480p")
-                                Text("720p").tag("720p")
-                            }
-                            if selectedModel == "bytedance/seedance-2.0" {
-                                Text("1080p").tag("1080p")
-                                Text("4K").tag("4k")
+                            ForEach(supportedVideoResolutions, id: \.self) { resolution in
+                                Text(
+                                    selectedModel == "fal-ai/kling-video/v3/standard/image-to-video"
+                                        ? "Standard"
+                                        : (resolution == "4k" ? "4K" : resolution)
+                                )
+                                .tag(resolution)
                             }
                         }
                     }
                     .onChange(of: selectedModel) { _, newModel in
-                        let supported = [
-                            "bytedance/seedance-2.0": ["480p", "720p", "1080p", "4k"],
-                            "fal-ai/kling-video/v3/standard/image-to-video": ["720p"],
-                        ]
-                        let validForModel = supported[newModel] ?? ["480p", "720p"]
-                        if !validForModel.contains(selectedResolution) { selectedResolution = "720p" }
+                        if !supportedVideoResolutions.contains(selectedResolution) { selectedResolution = "720p" }
+                        if ModelCatalog.video.first(where: { $0.id == newModel })?.forcedAudio == true {
+                            audioEnabled = true
+                        }
                     }
 
                     // Kling's start image defines framing; its Standard i2v schema has no aspect input.
@@ -184,9 +203,9 @@ struct GenerationOptionsPanel: View {
                     }
                 }
 
-                // Audio — video only. Grok Imagine has no audio toggle (always synchronized/on).
+                // Audio — video only. Provider-fixed models expose a locked "Always On" pill.
                 if selectedMode != "AI Image" {
-                    let audioIsFixed = selectedModel == "xai/grok-imagine-video-1.5"
+                    let audioIsFixed = ModelCatalog.video.first { $0.id == selectedModel }?.forcedAudio ?? false
                     VStack(spacing: 4) {
                         Text("AUDIO")
                             .font(.system(size: 9.5, weight: .semibold))
