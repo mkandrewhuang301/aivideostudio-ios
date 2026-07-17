@@ -318,7 +318,12 @@ struct FullScreenVideoPlayerView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: controlsVisible)
         }
-        .background(TransparentFullScreenBackground())
+        // Keep the presentation host opaque. Clearing the fullScreenCover's UIKit backing lets
+        // the rotated GenerationDetailSheet underneath bleed through for a frame while this view
+        // relays out after an orientation change (its parameter label/value rows appear as the
+        // tiny vertical "Audio" blocks below the video). The player already draws its own
+        // drag-progress background above, so an opaque host is the safe fallback outside it.
+        .background(theme.background.ignoresSafeArea())
         .onAppear {
             viewModel = URLLoopingPlayerViewModel(url: videoUrl, generationId: generationId)
             FantasiaAppDelegate.orientationLock = .allButUpsideDown
@@ -445,7 +450,13 @@ struct FullScreenVideoPlayerView: View {
 
     private var closeButton: some View {
         Button {
-            performDismiss(exitOffset: dragOffset)
+            // The X is not a completed pan gesture, so it has no exit translation to animate.
+            // Passing the zero dragOffset through performDismiss used to fade the background for
+            // 0.45s while the video stayed frozen in place, then start the cover dismissal. Let
+            // fullScreenCover begin its native downward dismissal immediately instead.
+            hideTask?.cancel()
+            viewModel?.player.pause()
+            dismiss()
         } label: {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 28))

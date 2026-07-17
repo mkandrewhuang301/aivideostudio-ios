@@ -93,6 +93,34 @@ struct TextOverlayTrackRow: View {
         max(1, (effectiveRows(for: overlays).values.max() ?? 0) + 1)
     }
 
+    struct RetimeBounds: Equatable {
+        let minimumStart: Double
+        let maximumEnd: Double?
+    }
+
+    /// The closest preceding/following overlays in the SAME effective row. These are the hard
+    /// limits for edge-handle expansion; overlays in other rows never constrain one another.
+    static func retimeBounds(
+        for overlay: TextOverlay,
+        among overlays: [TextOverlay],
+        rowsById: [String: Int]? = nil
+    ) -> RetimeBounds {
+        let rows = rowsById ?? effectiveRows(for: overlays)
+        let row = rows[overlay.id] ?? 0
+        let peers = overlays.filter { $0.id != overlay.id && (rows[$0.id] ?? 0) == row }
+
+        let minimumStart = peers
+            .filter { $0.endSeconds <= overlay.startSeconds }
+            .map(\.endSeconds)
+            .max() ?? 0
+        let maximumEnd = peers
+            .filter { $0.startSeconds >= overlay.endSeconds }
+            .map(\.startSeconds)
+            .min()
+
+        return RetimeBounds(minimumStart: minimumStart, maximumEnd: maximumEnd)
+    }
+
     var body: some View {
         let rowsById = Self.effectiveRows(for: state.project.textOverlays)
         let baseRowCount = Self.rowCount(for: state.project.textOverlays)
@@ -106,11 +134,18 @@ struct TextOverlayTrackRow: View {
                     .frame(height: rowHeight, alignment: .leading)
             } else {
                 ForEach(state.project.textOverlays) { overlay in
+                    let retimeBounds = Self.retimeBounds(
+                        for: overlay,
+                        among: state.project.textOverlays,
+                        rowsById: rowsById
+                    )
                     TextOverlayPillView(
                         overlay: overlay,
                         pxPerSecond: pxPerSecond,
                         isSelected: state.selection == .text(overlay.id),
                         isZooming: state.isZooming,
+                        minimumStartSeconds: retimeBounds.minimumStart,
+                        maximumEndSeconds: retimeBounds.maximumEnd,
                         shouldAcceptTap: shouldAcceptPillTap,
                         onSelect: {
                             // F10 (Plan 13-21): animated snap to this pill's own window before selecting.

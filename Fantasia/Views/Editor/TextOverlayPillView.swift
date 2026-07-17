@@ -24,6 +24,10 @@ struct TextOverlayPillView: View {
     let pxPerSecond: Double
     let isSelected: Bool
     let isZooming: Bool
+    /// Nearest same-row neighbor bounds, resolved by TextOverlayTrackRow. Touching a neighbor's
+    /// endpoint is allowed; crossing it is not.
+    var minimumStartSeconds: Double = 0
+    var maximumEndSeconds: Double? = nil
     var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
     /// Fires once, on edge-handle drag release, with the final (startSeconds, endSeconds) — the
@@ -208,7 +212,7 @@ struct TextOverlayPillView: View {
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 var newStart = (leftDragStartTime ?? overlay.startSeconds) + deltaSeconds
                 let endBound = previewEnd ?? overlay.endSeconds
-                newStart = max(0, min(newStart, endBound - 0.3))
+                newStart = max(minimumStartSeconds, min(newStart, endBound - 0.3))
                 previewStart = newStart
             }
             .onEnded { _ in
@@ -232,7 +236,10 @@ struct TextOverlayPillView: View {
                 if rightDragStartTime == nil { rightDragStartTime = overlay.endSeconds }
                 let deltaSeconds = Double(value.translation.width) / pxPerSecond
                 let startBound = previewStart ?? overlay.startSeconds
-                let newEnd = max(startBound + 0.3, (rightDragStartTime ?? overlay.endSeconds) + deltaSeconds)
+                var newEnd = max(startBound + 0.3, (rightDragStartTime ?? overlay.endSeconds) + deltaSeconds)
+                if let maximumEndSeconds {
+                    newEnd = min(newEnd, maximumEndSeconds)
+                }
                 previewEnd = newEnd
             }
             .onEnded { _ in

@@ -243,10 +243,10 @@ struct GenerationDetailSheet: View {
                             .frame(maxWidth: .infinity)
 
                             // Download (image or video) — primary CTA
-                            if let urlString = item.isImage ? item.completedMediaUrl : item.videoUrl {
+                            if (item.isImage ? item.completedMediaUrl : item.videoUrl) != nil {
                                 Button {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    Task { await saveToPhotos(urlString: urlString) }
+                                    Task { await saveToPhotos() }
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: isSaving ? "clock" : "arrow.down.to.line")
@@ -271,10 +271,10 @@ struct GenerationDetailSheet: View {
                             }
 
                             // Share — secondary
-                            if let urlString = item.completedMediaUrl {
+                            if item.completedMediaUrl != nil {
                                 Button {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    Task { await prepareAndShare(urlString: urlString) }
+                                    Task { await prepareAndShare() }
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: isPreparingShare ? "clock" : "square.and.arrow.up")
@@ -634,24 +634,29 @@ struct GenerationDetailSheet: View {
         }
     }
 
-    private func saveToPhotos(urlString: String) async {
-        guard let mediaUrl = URL(string: urlString) else { return }
+    private func saveToPhotos() async {
         isSaving = true
         defer { isSaving = false }
         do {
-            let (tmpUrl, _) = try await URLSession.shared.download(from: mediaUrl)
-            let ext = item.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
+            let (freshItem, mediaUrl) = try await refreshedCompletedMedia()
+            let sourceURL: URL
+            if freshItem.isImage {
+                sourceURL = try await validatedDownload(from: mediaUrl)
+            } else {
+                sourceURL = try await VideoCache.shared.ensureCached(id: freshItem.id, remoteURL: mediaUrl)
+            }
+            let ext = freshItem.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
             let destUrl = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(item.id).\(ext)")
+                .appendingPathComponent("\(freshItem.id).\(ext)")
             try? FileManager.default.removeItem(at: destUrl)
-            try FileManager.default.moveItem(at: tmpUrl, to: destUrl)
+            try FileManager.default.copyItem(at: sourceURL, to: destUrl)
             let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
             guard status == .authorized || status == .limited else {
                 saveError = "Photo library access denied. Allow access in Settings."
                 return
             }
             try await PHPhotoLibrary.shared().performChanges {
-                if self.item.isImage {
+                if freshItem.isImage {
                     PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: destUrl)
                 } else {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destUrl)
@@ -668,37 +673,60 @@ struct GenerationDetailSheet: View {
         }
     }
 
-    private func prepareAndShare(urlString: String) async {
-        guard !isPreparingShare, let mediaUrl = URL(string: urlString) else { return }
+    private func prepareAndShare() async {
+        guard !isPreparingShare else { return }
         isPreparingShare = true
         defer { isPreparingShare = false }
-        let ext = item.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
-        let destUrl = FileManager.default.temporaryDirectory
-            .appendingPathComponent("fantasia-\(item.isImage ? "image" : "video").\(ext)")
         do {
+            let (freshItem, mediaUrl) = try await refreshedCompletedMedia()
+            let ext = freshItem.isImage ? (mediaUrl.pathExtension.isEmpty ? "jpg" : mediaUrl.pathExtension) : "mp4"
+            let destUrl = FileManager.default.temporaryDirectory
+                .appendingPathComponent("fantasia-\(freshItem.isImage ? "image" : "video").\(ext)")
             try? FileManager.default.removeItem(at: destUrl)
-            if item.isImage {
+            if freshItem.isImage {
                 // No image cache today — download straight from the presigned URL, then move
                 // (not copy) the disposable temp download into the share path.
-                let (tmpUrl, _) = try await URLSession.shared.download(from: mediaUrl)
+                let tmpUrl = try await validatedDownload(from: mediaUrl)
                 try FileManager.default.moveItem(at: tmpUrl, to: destUrl)
             } else {
                 // VideoCache is usually already warm (player/thumbnail generation prefetch it) —
                 // this avoids re-downloading the whole video just to share it, and only hits the
                 // network on a genuine cache miss. Copy (not move) since the cache still owns it.
-                let cachedUrl = try await VideoCache.shared.ensureCached(id: item.id, remoteURL: mediaUrl)
+                let cachedUrl = try await VideoCache.shared.ensureCached(id: freshItem.id, remoteURL: mediaUrl)
                 try FileManager.default.copyItem(at: cachedUrl, to: destUrl)
             }
             // Presented natively via UIKit (not a SwiftUI .sheet) — see presentActivityViewController
             // for why: SwiftUI's sheet sizing either forces full-height or collapses the app-icon
             // grid to "More" under .presentationDetents([.medium]).
             presentActivityViewController(items: [
-                ShareableMedia(url: destUrl, isVideo: !item.isImage, thumbnail: thumbnail ?? cachedImage)
+                ShareableMedia(url: destUrl, isVideo: !freshItem.isImage, thumbnail: thumbnail ?? cachedImage)
             ])
         } catch {
             print("[GenerationDetailSheet] share prepare error: \(error)")
             shareError = "Could not prepare \(item.isImage ? "image" : "video") for sharing: \(error.localizedDescription)"
         }
+    }
+
+    /// Presigned media URLs expire. Resolve this exact generation immediately before an action
+    /// instead of trusting the immutable sheet item or a disk snapshot captured hours earlier.
+    private func refreshedCompletedMedia() async throws -> (GenerationItem, URL) {
+        let fresh = try await APIClient.shared.fetchGeneration(id: item.id)
+        guard fresh.status == .completed,
+              let urlString = fresh.completedMediaUrl,
+              let url = URL(string: urlString)
+        else { throw URLError(.resourceUnavailable) }
+        return (fresh, url)
+    }
+
+    private func validatedDownload(from url: URL) async throws -> URL {
+        let (temporaryURL, response) = try await URLSession.shared.download(from: url)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode)
+        else {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw URLError(.badServerResponse)
+        }
+        return temporaryURL
     }
 
     private func generateThumbnail(from url: URL) async {

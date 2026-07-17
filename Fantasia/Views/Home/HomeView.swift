@@ -17,10 +17,10 @@ struct HomeView: View {
     // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
     // routing.
     @State private var showStudioHub = false
-    // Own instance, read-only here — the hero card's stacked-project preview needs the user's
-    // project list before the Studio hub is ever opened (sketch 003 winner B). Same cache-first
-    // hydrate+load pattern as StudioHubView's own instance; the two don't need to share state.
-    @State private var heroProjectManager = ProjectManager()
+    // App-scoped so Home's project preview and Studio render the same cache-first state. Creating
+    // separate stores here and in Studio made both screens paint empty before their `.task`
+    // hydration ran, producing the visible red/purple placeholder flash on every entry.
+    @Environment(ProjectManager.self) private var heroProjectManager
 
     var onNavigateToGenerate: () -> Void
     /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
@@ -94,7 +94,6 @@ struct HomeView: View {
         }
         .task { await registry.loadIfNeeded() }
         .task {
-            heroProjectManager.hydrateFromSnapshot()
             await heroProjectManager.loadProjects()
         }
         // D-06: the Studio hub, opened exclusively from the hero card below.
@@ -150,7 +149,7 @@ struct HomeView: View {
         let projects = heroProjectManager.projects
 
         return Color.clear
-            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+            .aspectRatio(isEditStudio ? 16.0 / 9.0 : 16.0 / 10.0, contentMode: .fit)
             .overlay {
                 if isEditStudio {
                     heroProjectStack(projects: projects)
@@ -277,7 +276,10 @@ struct HomeView: View {
             .overlay {
                 ZStack {
                     if let project, let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                        LetterboxThumbnailView(url: url) {
+                        LetterboxThumbnailView(
+                            url: url,
+                            cacheKey: "project-cover-\(project.id)-\(url.lastPathComponent)"
+                        ) {
                             gradient
                         }
                     } else {

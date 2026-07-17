@@ -15,6 +15,7 @@ struct ContentView: View {
     @Environment(CreditManager.self) private var creditManager
     @Environment(GenerationManager.self) private var generationManager
     @Environment(MediaLibraryManager.self) private var mediaLibraryManager
+    @Environment(ProjectManager.self) private var projectManager
     @Environment(ThemeManager.self) private var theme
     @State private var minSplashElapsed = false
     // Issue 6: a cold/sleeping Railway backend can make the first GET /api/me take many
@@ -65,6 +66,7 @@ struct ContentView: View {
                 if let uid = old?.uid {
                     generationManager.clearSnapshot(uid: uid)
                     mediaLibraryManager.clearSnapshot(uid: uid)
+                    projectManager.clearSnapshot(uid: uid)
                 }
                 Task { try? await Purchases.shared.logOut() }
             } else if old == nil && new != nil {
@@ -74,6 +76,7 @@ struct ContentView: View {
                 creditManager.hydrateFromCache()
                 generationManager.hydrateFromSnapshot()
                 mediaLibraryManager.hydrateFromSnapshot()
+                projectManager.hydrateFromSnapshot()
 
                 // Issue 6: cap the State 1b splash wait — a cold Railway instance shouldn't
                 // freeze the whole app on the first /api/me round trip.

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		02BBAB59549272FFA33C31CD /* CoverPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */; };
 		037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */; };
+		E0D100000000000000000001 /* EditorVideoOutputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0D100000000000000000002 /* EditorVideoOutputView.swift */; };
 		5231273AD9E106A3FC9A121B /* ClipFileCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F92D90952AA1BFB3E813858 /* ClipFileCache.swift */; };
 		D13000000000000000000001 /* ScrubFrameLadder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13000000000000000000002 /* ScrubFrameLadder.swift */; };
 		D4A2806D8D4E4D2CA1E0F101 /* LetterboxCropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B2806D8D4E4D2CA1E0F102 /* LetterboxCropper.swift */; };
@@ -51,6 +52,7 @@
 		49D6A39D8DAD04C18910877C /* FullScreenVideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F47731F0C32B093108B94427 /* FullScreenVideoPlayerView.swift */; };
 		4C378660EC485D05594F9CA1 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7EF91ED015C15B87CF59 /* LibraryView.swift */; };
 		525A1D8220417B6625990607 /* MaskEditorExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9EA405C4A05709CFA7DC6FB /* MaskEditorExportTests.swift */; };
+		E0D200000000000000000001 /* EditorInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0D200000000000000000002 /* EditorInteractionTests.swift */; };
 		5287E07A3D4BFD682217D431 /* CaptionStyleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1FB67BBB633D6485F16FC2A /* CaptionStyleSheet.swift */; };
 		56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD7E4FAC5CC8CB747642E0C /* AuthManager.swift */; };
 		58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5077D8688B1538D3C4D849 /* OnboardingView.swift */; };
@@ -208,6 +210,7 @@
 		AED772695D33DDDDE4EC8D2F /* Fantasia.storekit */ = {isa = PBXFileReference; path = Fantasia.storekit; sourceTree = "<group>"; };
 		AFB7654B0746207F617ED9A4 /* presets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = presets.json; sourceTree = "<group>"; };
 		B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCompositionBuilder.swift; sourceTree = "<group>"; };
+		E0D100000000000000000002 /* EditorVideoOutputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorVideoOutputView.swift; sourceTree = "<group>"; };
 		4F92D90952AA1BFB3E813858 /* ClipFileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipFileCache.swift; sourceTree = "<group>"; };
 		D13000000000000000000002 /* ScrubFrameLadder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrubFrameLadder.swift; sourceTree = "<group>"; };
 		D4B2806D8D4E4D2CA1E0F102 /* LetterboxCropper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterboxCropper.swift; sourceTree = "<group>"; };
@@ -230,6 +233,7 @@
 		D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingQuestionBankTests.swift; sourceTree = "<group>"; };
 		D20DDB7630607116A21D7693 /* MediaPrepService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPrepService.swift; sourceTree = "<group>"; };
 		D9EA405C4A05709CFA7DC6FB /* MaskEditorExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskEditorExportTests.swift; sourceTree = "<group>"; };
+		E0D200000000000000000002 /* EditorInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorInteractionTests.swift; sourceTree = "<group>"; };
 		DAAF5AE88C2CC29C4354E28C /* AudioPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPillView.swift; sourceTree = "<group>"; };
 		DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddAudioSheet.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
@@ -266,6 +270,7 @@
 		0015766FADFC83922CFFE754 /* FantasiaTests */ = {
 			isa = PBXGroup;
 			children = (
+				E0D200000000000000000002 /* EditorInteractionTests.swift */,
 				D9EA405C4A05709CFA7DC6FB /* MaskEditorExportTests.swift */,
 				D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */,
 			);
@@ -567,6 +572,7 @@
 				A4B51D2515F117382711CF3A /* EdgeAutoScroll.swift */,
 				C4B4F501364C0B7DF4678081 /* EditorBottomBar.swift */,
 				B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */,
+				E0D100000000000000000002 /* EditorVideoOutputView.swift */,
 				EEA1EAE8480B4A8A377C4028 /* EditorHistory.swift */,
 				045559253B09A54FC9E2075E /* EditorState.swift */,
 				A99DB73E4892B5ED65BA6190 /* EditorView.swift */,
@@ -730,6 +736,7 @@
 				1AEAC0945F74B830EAE275CA /* EditProject.swift in Sources */,
 				2FC9392815EA53B33F919960 /* EditorBottomBar.swift in Sources */,
 				037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */,
+				E0D100000000000000000001 /* EditorVideoOutputView.swift in Sources */,
 				99D1C25C5D0681A1D3A2F203 /* EditorHistory.swift in Sources */,
 				590205AB74ECD04778D8CDB9 /* EditorState.swift in Sources */,
 				E46F576F83D1D84CE86717DC /* EditorView.swift in Sources */,
@@ -807,6 +814,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E0D200000000000000000001 /* EditorInteractionTests.swift in Sources */,
 				525A1D8220417B6625990607 /* MaskEditorExportTests.swift in Sources */,
 				1562160C4DBB10894DE25FB1 /* OnboardingQuestionBankTests.swift in Sources */,
 			);

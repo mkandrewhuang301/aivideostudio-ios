@@ -2,10 +2,9 @@
 // Fantasia
 // Phase 13, Plan 09: the Studio project hub (D-06) — entered exclusively via the Home "Edit
 // Studio" hero card. 2-column grid: "+" tile first, then the user's saved projects newest-first.
-// Owns its own ProjectManager instance (mirrors HomeView's locally-scoped
-// `@State private var registry = PresetRegistryManager()`) and passes it down to whatever this
-// hub navigates into (media picker / editor), so every Edit Studio screen in this presentation
-// shares one observable store.
+// Uses the app-scoped ProjectManager shared with Home, the media picker, and the editor. That
+// lets the last persisted project snapshot paint before this screen's first frame and prevents a
+// second loading cycle when entering Studio from Home.
 //
 // NOT forced dark (13-UI-SPEC.md) — this is a browsing surface, follows ThemeManager like every
 // other grid screen. The Editor itself (Plan 11+) is the forced-dark canvas, not this hub.
@@ -15,7 +14,7 @@ import SwiftUI
 struct StudioHubView: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(\.dismiss) private var dismiss
-    @State private var projectManager = ProjectManager()
+    @Environment(ProjectManager.self) private var projectManager
 
     // "+" tile → media picker (D-08), wired to the real MediaPickerSheet (Plan 10).
     @State private var showMediaPicker = false
@@ -51,7 +50,6 @@ struct StudioHubView: View {
             }
         }
         .task {
-            projectManager.hydrateFromSnapshot()
             await projectManager.loadProjects()
         }
         .sheet(isPresented: $showMediaPicker) {

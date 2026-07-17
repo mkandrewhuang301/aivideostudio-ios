@@ -271,6 +271,7 @@ struct PresetInputSheet: View {
         // ceiling/background above the hairline (2026-07-14, user-reported "lot of space between
         // top of head and top of card") while keeping a ~3% margin above the hairline (source
         // hair starts ~13% down) so hair still stays in frame; no zoom (full source width shown).
+        // Polaroid Hug keeps focalTop at zero so the white top edge of its 3:4 card is visible.
         //
         // No bottom gradient: the user wants a HARD LINE between the cover image and the
         // header/background below it (2026-07-08 "blur between the image and the effect, I want
@@ -282,7 +283,12 @@ struct PresetInputSheet: View {
         // dismissing this sheet released+paused the tile's player too, freezing it (2026-07-08,
         // see PresetLoopBackground's usesPool doc comment). Standalone playback here can't
         // disrupt Home no matter when it mounts/dismisses.
-        PresetLoopBackground(preset: preset, zoom: 1.0, focalTop: 0.1, usesPool: false)
+        PresetLoopBackground(
+            preset: preset,
+            zoom: 1.0,
+            focalTop: preset.id == "polaroid" ? 0.0 : 0.1,
+            usesPool: false
+        )
             .allowsHitTesting(false)
             .frame(height: UIScreen.main.bounds.height * 0.42)
             .clipped()

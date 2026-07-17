@@ -60,8 +60,8 @@ struct ClipPillView: View {
     /// same touch moved, while leaving this pill gesture-free for plain-drag scrub fall-through.
     var shouldAcceptTap: () -> Bool = { true }
     let onSelect: () -> Void
-    /// Fires live, on every edge-handle drag change, with the clip's updated (trimStart, trimEnd)
-    /// in seconds — the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
+    /// Fires once on edge-handle release with the clip's final (trimStart, trimEnd) in seconds —
+    /// the caller PATCHes `trim_start_seconds`/`trim_end_seconds`.
     let onTrimChange: (Double, Double) -> Void
     /// 13-22 i12: fires once the long-press succeeds (before any drag movement) — the caller
     /// enters reorder mode, selects this clip, and gives the medium haptic.
@@ -101,16 +101,27 @@ struct ClipPillView: View {
         previewTrimEnd ?? (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds)
     }
     private var duration: Double { max(0, trimEnd - trimStart) }
-    private var width: Double { max(duration * pxPerSecond, 30) }
+    /// Timeline geometry stays proportional all the way down to the 0.2s trim minimum. The old
+    /// 30pt floor made the handle visually freeze while its time kept changing. The independent
+    /// 22pt handle overlays remain the continuous-drag touch targets.
+    private var width: Double { Self.timelineWidth(duration: duration, pxPerSecond: pxPerSecond) }
     private var effectiveWidth: Double { isReordering ? reorderSlotWidth : width }
-    // 13-22 i4: this pill sits in a plain leading-anchored HStack (clipRow) — growing/shrinking
-    // its OWN `.frame(width:)` only ever moves the TRAILING edge (HStack repositions subsequent
-    // siblings, but this pill's own leading edge is fixed by the cumulative width of EARLIER
-    // siblings). A left-handle drag needs the LEADING edge to visually track the finger instead —
-    // this local `.offset` compensates by exactly the trimStart delta, which also happens to keep
-    // the trailing edge visually fixed (matches every trim-handle UX convention). Zero during a
-    // right-handle drag, and irrelevant while reordering (handles are hidden then).
-    private var trimHandleOffsetX: CGFloat { CGFloat(trimStart - clip.trimStartSeconds) * pxPerSecond }
+    private var committedDuration: Double {
+        max(0, (clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds) - clip.trimStartSeconds)
+    }
+    private var committedWidth: Double {
+        Self.timelineWidth(duration: committedDuration, pxPerSecond: pxPerSecond)
+    }
+    /// A left-edge preview must not simultaneously shrink its HStack slot: doing both moved the
+    /// next clip underneath the selected pill. Keep the committed slot stable and align the live
+    /// inner pill to its trailing edge until the single magnetic ripple on release.
+    private var layoutWidth: Double {
+        leftDragStartTrim != nil && !isReordering ? committedWidth : effectiveWidth
+    }
+
+    static func timelineWidth(duration: Double, pxPerSecond: Double) -> Double {
+        max(duration * pxPerSecond, 1)
+    }
 
     /// 13-24 K2: layout zoom for the SOURCE strip (frozen mid-pinch).
     private var layoutPxPerSecond: Double { isZooming ? committedPxPerSecond : pxPerSecond }
@@ -168,11 +179,12 @@ struct ClipPillView: View {
         .overlay(alignment: .trailing) {
             if isSelected && !isReordering { handle.highPriorityGesture(rightHandleGesture) }
         }
-        // F2 (Plan 13-21): offset is now the LAST modifier — after the selection stroke and every
-        // handle overlay — so the entire assembly (pill body + handles) translates together.
-        // 13-22 i12: while reordering, trimHandleOffsetX is always 0 (handles hidden, preview
-        // vars never populated) — only the dragged clip's own `dragOffsetX` applies here.
-        .offset(x: isBeingDragged ? dragOffsetX : trimHandleOffsetX)
+        .offset(x: isBeingDragged ? dragOffsetX : 0)
+        .frame(
+            width: layoutWidth,
+            height: 58,
+            alignment: leftDragStartTrim != nil && !isReordering ? .trailing : .leading
+        )
         .animation(.spring(duration: 0.25), value: isReordering)
         .task(id: "\(clip.id)-\(clip.url ?? "")-\(sourceCellCount)-\(zoomBucket)") {
             guard clip.mediaType != "image" else { return }
@@ -222,7 +234,7 @@ struct ClipPillView: View {
             // changes the window width. No stretch. Mid-pinch: layout uses committedPx; live
             // width scales the windowed strip so frames don't resample until pinch ends.
             let layoutPx = layoutPxPerSecond
-            let layoutWindowWidth = max(duration * layoutPx, 30)
+            let layoutWindowWidth = Self.timelineWidth(duration: duration, pxPerSecond: layoutPx)
             let zoomScale = isZooming && committedPxPerSecond > 0
                 ? pxPerSecond / committedPxPerSecond
                 : 1.0

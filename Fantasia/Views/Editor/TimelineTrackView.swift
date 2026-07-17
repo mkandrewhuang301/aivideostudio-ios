@@ -951,12 +951,9 @@ struct TimelineTrackView: View {
         }
     }
 
-    // F8: trim-handle drags fire `onTrimChange` CONTINUOUSLY (every `.onChanged`, not just on
-    // release) — recording an UndoableAction on every call would flood the history with dozens of
-    // near-duplicate entries per gesture. Debounced instead: the FIRST change of a drag captures
-    // the clip's pre-drag (start,end) as "before"; each subsequent change resets a short timer;
-    // once the timer fires (drag has settled), ONE record is committed spanning "before" →
-    // whatever the LATEST values were.
+    // F8: the pill previews locally and calls `onTrimChange` once on release. Keep the debounce
+    // because two completed trims can still happen in quick succession and should coalesce into
+    // one undo step, matching text/audio retiming behavior.
     @State private var trimBeforeByClip: [String: (start: Double, end: Double)] = [:]
     @State private var trimDebounceTasks: [String: Task<Void, Never>] = [:]
 

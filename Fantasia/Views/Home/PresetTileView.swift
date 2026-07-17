@@ -45,11 +45,12 @@ struct PresetLoopBackground: View {
     // PoolEntry.looper.
     @State private var standaloneLooper: AVPlayerLooper?
 
-    // All registry loop assets are ingested at native portrait 9:16 (uploadPresetArt.ts's
-    // transcodeLoop only ever downscales within a portrait bounding box, preserving source AR) —
-    // hardcoding avoids a poster/video decode round-trip just to learn an AR we control at
-    // ingestion time.
-    private let sourceAspectRatio: CGFloat = 9.0 / 16.0
+    // Most registry loop assets are native portrait 9:16. Polaroid Hug intentionally keeps its
+    // complete 3:4 instant-film card (poster and loop) so its white paper border can stay visible
+    // instead of being cropped away by a false 9:16 source frame.
+    private var sourceAspectRatio: CGFloat {
+        preset.id == "polaroid" ? 3.0 / 4.0 : 9.0 / 16.0
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -194,13 +195,19 @@ struct PresetTileView: View {
         Color.clear
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .overlay {
-                // Head-focused portrait crop: zoom 1.65 into the source, top edge at 12.5% of
+                // Most presets use a head-focused portrait crop: zoom 1.65 into the source, top edge at 12.5% of
                 // source height → shows ~hair(14%)-through-chin(58%), trimming ceiling above the
                 // hair and torso below. This is the SAME visible framing the old
                 // `.scaleEffect(1.65, anchor: .top)` produced, but rendered at full source
                 // resolution instead of magnifying a tile-sized bitmap (which was the blur — see
-                // PresetLoopBackground body). Do NOT reintroduce scaleEffect here.
-                PresetLoopBackground(preset: preset, zoom: 1.65, focalTop: 0.125)
+                // PresetLoopBackground body). Polaroid Hug is the exception: its 3:4 card gets
+                // only a 1.04 crop so the white instant-film border remains visible. Do NOT
+                // reintroduce scaleEffect here.
+                PresetLoopBackground(
+                    preset: preset,
+                    zoom: preset.id == "polaroid" ? 1.04 : 1.65,
+                    focalTop: preset.id == "polaroid" ? 0.02 : 0.125
+                )
                     .allowsHitTesting(false)
             }
             .overlay(alignment: .bottom) { titleScrim }

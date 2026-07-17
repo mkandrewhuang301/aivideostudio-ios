@@ -46,6 +46,8 @@ struct FullscreenEditorPlayerView: View {
     /// the (should-never-happen) case fullscreen opens before EditorView.rebuildPlayer() has ever
     /// finished once.
     let player: AVPlayer?
+    let usesComposedVideoOutput: Bool
+    let videoOutputRenderer: EditorVideoOutputRenderer
     let onMinimize: () -> Void
 
     @State private var isScrubbing = false
@@ -56,7 +58,13 @@ struct FullscreenEditorPlayerView: View {
                 Color.black.ignoresSafeArea()
 
                 if let player {
-                    FillingVideoPlayerView(player: player, videoGravity: .resizeAspect)
+                    Group {
+                        if usesComposedVideoOutput {
+                            EditorVideoOutputView(renderer: videoOutputRenderer)
+                        } else {
+                            FillingVideoPlayerView(player: player, videoGravity: .resizeAspect)
+                        }
+                    }
                         .ignoresSafeArea()
                         .overlay {
                             TextOverlayCanvasView(state: state, showsControls: false)

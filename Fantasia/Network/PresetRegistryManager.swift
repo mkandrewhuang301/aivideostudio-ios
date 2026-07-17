@@ -23,6 +23,8 @@ final class PresetRegistryManager {
         if let snapshot = ListSnapshotStore.load([Preset].self, name: Self.snapshotName, uid: Self.snapshotKey),
            !snapshot.items.isEmpty {
             presets = snapshot.items
+            lastLoadDate = snapshot.fetchedAt
+            isLoaded = true
         }
     }
 

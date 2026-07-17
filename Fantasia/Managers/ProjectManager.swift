@@ -26,6 +26,8 @@ final class ProjectManager {
     var nextCursor: String?
     private(set) var hasLoadedOnce = false
     private var lastLoadDate: Date?
+    private var activeClipMutationCount = 0
+    var isMutatingClips: Bool { activeClipMutationCount > 0 }
 
     private var isStale: Bool {
         lastLoadDate.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
@@ -39,6 +41,7 @@ final class ProjectManager {
               !snapshot.items.isEmpty else { return }
         projects = snapshot.items
         hasLoadedOnce = true
+        lastLoadDate = snapshot.fetchedAt
     }
 
     /// Clears in-memory state and the persisted snapshot for a signed-out user, so their
@@ -240,6 +243,8 @@ final class ProjectManager {
         if let index = projects.firstIndex(where: { $0.id == id }) {
             projects[index].thumbnailUrl = thumbnailUrl
         }
+        if let loadedProject { persistEditProjectSnapshot(loadedProject) }
+        persistSnapshot()
     }
 
     /// Plan 13-24 K6: upload a client-composited cover JPEG (multipart K-B1 branch).
@@ -250,6 +255,8 @@ final class ProjectManager {
         if let index = projects.firstIndex(where: { $0.id == id }) {
             projects[index].thumbnailUrl = thumbnailUrl
         }
+        if let loadedProject { persistEditProjectSnapshot(loadedProject) }
+        persistSnapshot()
     }
 
     // MARK: - Clip mutations (SC2) — reconcile via a full re-fetch afterward (mutation responses
@@ -269,6 +276,8 @@ final class ProjectManager {
 
     func updateClip(clipId: String, sortOrder: Int? = nil, trimStart: Double? = nil, trimEnd: Double? = nil) async throws {
         guard let id = loadedProject?.id else { return }
+        activeClipMutationCount += 1
+        defer { activeClipMutationCount = max(0, activeClipMutationCount - 1) }
         _ = try await APIClient.shared.updateClip(
             projectId: id, clipId: clipId, sortOrder: sortOrder, trimStart: trimStart, trimEnd: trimEnd
         )
@@ -533,6 +542,11 @@ final class ProjectManager {
 
     func autoGenerateCaptions(clipId: String) async throws {
         guard let id = loadedProject?.id else { return }
+        // A reorder PATCH resequences every clip server-side. Wait for that authoritative refresh
+        // so a fast reorder → Captions tap cannot ask the backend to offset against the old order.
+        while isMutatingClips {
+            try await Task.sleep(for: .milliseconds(25))
+        }
         let cues = try await APIClient.shared.autoGenerateCaptions(projectId: id, clipId: clipId)
         loadedProject?.captionCues.append(contentsOf: cues)
     }

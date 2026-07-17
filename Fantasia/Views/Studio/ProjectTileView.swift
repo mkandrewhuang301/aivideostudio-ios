@@ -119,7 +119,10 @@ struct ProjectTileView: View {
                 ZStack {
                     theme.surfaceStrong
                     if let urlString = project.thumbnailUrl, let url = URL(string: urlString) {
-                        LetterboxThumbnailView(url: url) {
+                        LetterboxThumbnailView(
+                            url: url,
+                            cacheKey: "project-cover-\(project.id)-\(url.lastPathComponent)"
+                        ) {
                             theme.surfaceStrong
                         }
                     } else {

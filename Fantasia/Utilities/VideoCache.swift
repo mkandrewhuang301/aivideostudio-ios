@@ -22,6 +22,19 @@ actor VideoCache {
         diskURL.appendingPathComponent(id + ".mp4")
     }
 
+    static func isValidPayload(at url: URL) -> Bool {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size >= 1_024,
+              let handle = try? FileHandle(forReadingFrom: url)
+        else { return false }
+        defer { try? handle.close() }
+        guard let prefix = try? handle.read(upToCount: 32) else { return false }
+        return !prefix.starts(with: Data("<?xml".utf8))
+            && !prefix.starts(with: Data("<Error".utf8))
+            && !prefix.starts(with: Data("<!DOCTYPE html".utf8))
+            && !prefix.starts(with: Data("{".utf8))
+    }
+
     init() {
         try? FileManager.default.createDirectory(at: Self.diskURL, withIntermediateDirectories: true)
     }
@@ -29,7 +42,12 @@ actor VideoCache {
     /// Local file URL if this generation's video is already fully downloaded.
     nonisolated func cachedURL(for id: String) -> URL? {
         let file = Self.fileURL(for: id)
-        return FileManager.default.fileExists(atPath: file.path) ? file : nil
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        guard Self.isValidPayload(at: file) else {
+            try? FileManager.default.removeItem(at: file)
+            return nil
+        }
+        return file
     }
 
     /// Downloads to disk if not already cached; concurrent calls for the same id share one download.
@@ -40,7 +58,14 @@ actor VideoCache {
 
         let dest = Self.fileURL(for: id)
         let task = Task<URL, Error> {
-            let (tmpURL, _) = try await URLSession.shared.download(from: remoteURL)
+            let (tmpURL, response) = try await URLSession.shared.download(from: remoteURL)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  Self.isValidPayload(at: tmpURL)
+            else {
+                try? FileManager.default.removeItem(at: tmpURL)
+                throw URLError(.badServerResponse)
+            }
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: tmpURL, to: dest)
             return dest

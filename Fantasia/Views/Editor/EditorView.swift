@@ -17,9 +17,9 @@
 // Plan 17: wires the Export button (top bar) to the real backend export pipeline (plan 07's
 // POST /:id/export via ProjectManager.exportProject(id:), plan 08). Dispatch is a brief
 // disabled-spinner window only (D-12 — export never locks the project); the returned
-// generation_id is handed to the EXISTING GenerationManager poll loop (no new polling code) so
-// completion/failure follow the app-wide APNs push + Generate feed pattern (D-07) — zero new
-// completion UI here. Exact copy strings per 13-UI-SPEC.md's Export Flow section.
+// generation_id is registered immediately with the EXISTING GenerationManager poll loop. The
+// editor keeps that exact id attached to an export-status sheet, which becomes the normal result
+// surface with Share and Save to Photos when processing completes.
 
 import SwiftUI
 import AVFoundation
@@ -36,7 +36,11 @@ struct EditorView: View {
     @State private var playerItemStatusObservation: NSKeyValueObservation?
     @State private var playerItemFailureObservation: NSObjectProtocol?
     @State private var playerRebuildGeneration: UInt = 0
+    @State private var playerVideoOutput: AVPlayerItemVideoOutput?
+    @State private var usesComposedVideoOutput = false
     @State private var previewSurfaceReady = false
+    @State private var videoOutputRenderer = EditorVideoOutputRenderer()
+    @State private var videoOutputReadinessObserver = EditorVideoOutputReadinessObserver()
     @State private var scrubSeekInFlight = false
     @State private var pendingScrubTarget: Double?
     @State private var slowScrubMode = false
@@ -55,6 +59,8 @@ struct EditorView: View {
     @State private var exportToastMessage: String?
     @State private var exportToastTask: Task<Void, Never>?
     @State private var exportFailedError: String?
+    @State private var trackedExportGenerationId: String?
+    @State private var showExportStatus = false
 
     // Plan 16: fullscreen preview player (SC6) + Caption Style sheet (Delta 4).
     @State private var showFullscreenPlayer = false
@@ -162,10 +168,21 @@ struct EditorView: View {
             // observer regardless of which surface is visible, so there is nothing to pause or
             // reconcile on open/minimize anymore (see FullscreenEditorPlayerView's file header).
             .fullScreenCover(isPresented: $showFullscreenPlayer) {
-                FullscreenEditorPlayerView(state: state, player: player, onMinimize: { showFullscreenPlayer = false })
+                FullscreenEditorPlayerView(
+                    state: state,
+                    player: player,
+                    usesComposedVideoOutput: usesComposedVideoOutput,
+                    videoOutputRenderer: videoOutputRenderer,
+                    onMinimize: { showFullscreenPlayer = false }
+                )
             }
             .sheet(isPresented: $showCaptionStyleSheet) {
                 CaptionStyleSheet(state: state)
+            }
+            .sheet(isPresented: $showExportStatus) {
+                if let generationId = trackedExportGenerationId {
+                    EditorExportStatusSheet(generationId: generationId, isPresented: $showExportStatus)
+                }
             }
             .overlay(alignment: .bottom) { exportToastOverlay }
             .alert("Export failed", isPresented: Binding(
@@ -533,9 +550,12 @@ struct EditorView: View {
         isExporting = true
         Task {
             do {
-                _ = try await projectManager.exportProject(id: state.project.id)
+                let generationId = try await projectManager.exportProject(id: state.project.id)
+                generationManager.registerPendingExport(id: generationId, aspectRatio: state.aspectRatio)
+                trackedExportGenerationId = generationId
                 isExporting = false
-                showExportToast("Exporting your video — we'll notify you when it's ready.")
+                showExportStatus = true
+                showExportToast("Export started — share or save it here when it’s ready.")
                 generationManager.startPolling(forceRefresh: true)
             } catch {
                 print("[EditorView] exportProject error: \(error)")
@@ -611,22 +631,37 @@ struct EditorView: View {
 
             ZStack {
                 if let player {
-                    FillingVideoPlayerView(
-                        player: player,
-                        videoGravity: .resizeAspect,
-                        onReadyForDisplay: {
-                            guard self.player === player else { return }
-                            previewSurfaceReady = true
-                        }
-                    )
+                    if usesComposedVideoOutput {
+                        EditorVideoOutputView(renderer: videoOutputRenderer)
+                    } else {
+                        FillingVideoPlayerView(
+                            player: player,
+                            videoGravity: .resizeAspect,
+                            onReadyForDisplay: {
+                                guard self.player === player else { return }
+                                previewSurfaceReady = true
+                            }
+                        )
+                    }
                 } else {
                     Color.black
                 }
                 if !previewSurfaceReady {
                     Color.black
-                    Image(systemName: "film")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.white.opacity(0.3))
+                    if let urlString = state.project.thumbnailUrl, let url = URL(string: urlString) {
+                        LetterboxThumbnailView(
+                            url: url,
+                            cacheKey: "project-cover-\(state.project.id)-\(url.lastPathComponent)"
+                        ) {
+                            Color.black
+                        }
+                        .opacity(0.78)
+                    }
+                    if player == nil {
+                        ProgressView()
+                            .tint(.white)
+                            .accessibilityLabel("Loading project preview")
+                    }
                 }
                 // i5.3 (Plan 13-20): the composition only carries VIDEO frames (see
                 // buildComposition's KNOWN LIMITATION doc comment below) — when the playhead sits
@@ -638,7 +673,7 @@ struct EditorView: View {
                         if let image = phase.image {
                             image.resizable().scaledToFit()
                         } else {
-                            Color.black
+                            Color.clear
                         }
                     }
                 }
@@ -873,7 +908,6 @@ struct EditorView: View {
     private func rebuildPlayer() async {
         playerRebuildGeneration &+= 1
         let rebuildGeneration = playerRebuildGeneration
-        tearDownPlayerObserverOnly()
         await refreshOriginalAspectFraction()
         guard rebuildGeneration == playerRebuildGeneration else { return }
         guard let (composition, videoComposition, ranges, isDegraded) = await EditorCompositionBuilder.build(
@@ -906,12 +940,24 @@ struct EditorView: View {
         // pillarboxed/letterboxed instead of stretched to the first clip's shape. Fullscreen
         // shares this same item (13-22 i6.1), so it inherits the treatment automatically.
         item.videoComposition = videoComposition
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        item.add(output)
         let avPlayer = AVPlayer(playerItem: item)
         // The editor composition is assembled entirely from validated local cache files. Waiting
         // to minimize network stalls can leave composition-backed playback parked indefinitely.
         avPlayer.automaticallyWaitsToMinimizeStalling = false
+        // Keep the existing surface alive while cache/composition work is in flight. The old
+        // player and new player swap in one main-actor transaction, so a trim commit never
+        // flashes through the nil-player placeholder.
+        tearDownPlayerObserverOnly()
+        videoOutputReadinessObserver.reset()
         previewSurfaceReady = false
         player = avPlayer
+        playerVideoOutput = output
+        usesComposedVideoOutput = false
+        videoOutputRenderer.configure(player: avPlayer, output: output)
         observePlayerItemStatus(item, on: avPlayer)
         observePlayerItemFailure(item, on: avPlayer)
 
@@ -1003,13 +1049,10 @@ struct EditorView: View {
         }
     }
 
-    /// A video-composition processor can fail after the item has already reached `.readyToPlay`.
-    /// In that case `item.status` stays ready, so the status KVO above never reports the failure and
-    /// AVPlayerLayer remains silently black. Keep the per-clip aspect-fit composition as the primary
-    /// path, but retry once with the same assembled asset and no custom video composition. The plain
-    /// composition may stretch a later mixed-aspect segment, but it restores visible, seekable
-    /// playback instead of leaving the entire editor unusable. A fallback item has nil
-    /// `videoComposition`, which also makes this intrinsically one-shot.
+    /// AVPlayerLayer can fail to PRESENT a live mixed-format AVVideoComposition after the item is
+    /// already ready, while AVPlayerItemVideoOutput still produces its correctly transformed
+    /// frames. Switch surfaces in-place; never drop the videoComposition, because doing so
+    /// stretches later portrait/landscape segments into the first clip's geometry.
     private func observePlayerItemFailure(_ item: AVPlayerItem, on observedPlayer: AVPlayer) {
         playerItemFailureObservation = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
@@ -1027,27 +1070,30 @@ struct EditorView: View {
                     + "itemError=\(String(describing: item.error)) "
                     + "hasVideoComposition=\(item.videoComposition != nil)"
                 )
-                guard item.videoComposition != nil else { return }
-                installPlainCompositionFallback(replacing: item, on: observedPlayer)
+                guard item.videoComposition != nil,
+                      let playerVideoOutput,
+                      !usesComposedVideoOutput
+                else { return }
+                previewSurfaceReady = false
+                usesComposedVideoOutput = true
+                videoOutputReadinessObserver.observe(playerVideoOutput) {
+                    guard player === observedPlayer,
+                          self.playerVideoOutput === playerVideoOutput
+                    else { return }
+                    previewSurfaceReady = true
+                }
+                videoOutputRenderer.configure(player: observedPlayer, output: playerVideoOutput)
+                playerVideoOutput.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+                let target = CMTime(seconds: state.currentTime, preferredTimescale: 600)
+                observedPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    Task { @MainActor in
+                        guard player === observedPlayer else { return }
+                        if state.isPlaying { observedPlayer.play() }
+                    }
+                }
+                print("[EditorView] activated composed-frame playback fallback")
             }
         }
-    }
-
-    private func installPlainCompositionFallback(replacing failedItem: AVPlayerItem, on observedPlayer: AVPlayer) {
-        guard player === observedPlayer, observedPlayer.currentItem === failedItem else { return }
-
-        playerItemStatusObservation = nil
-        if let playerItemFailureObservation {
-            NotificationCenter.default.removeObserver(playerItemFailureObservation)
-            self.playerItemFailureObservation = nil
-        }
-
-        let fallbackItem = AVPlayerItem(asset: failedItem.asset)
-        observedPlayer.replaceCurrentItem(with: fallbackItem)
-        observePlayerItemStatus(fallbackItem, on: observedPlayer)
-        observePlayerItemFailure(fallbackItem, on: observedPlayer)
-        // The status observer's ready path performs the single exact seek and resumes when needed.
-        print("[EditorView] installed plain-composition playback fallback")
     }
 
     private func tearDownPlayerObserverOnly() {
@@ -1062,7 +1108,11 @@ struct EditorView: View {
         timeObserverToken = nil
         player?.pause()
         player = nil
+        playerVideoOutput = nil
+        usesComposedVideoOutput = false
         previewSurfaceReady = false
+        videoOutputReadinessObserver.reset()
+        videoOutputRenderer.reset()
     }
 
     private func tearDownPlayer() {
@@ -1155,6 +1205,10 @@ struct EditorView: View {
     /// existing Caption Style sheet.
     private func handleCaptionsAction() {
         guard hasCaptionableMedia else { return }
+        guard !projectManager.isMutatingClips else {
+            showBarToast("Finishing clip reorder…")
+            return
+        }
         if state.project.captionCues.isEmpty {
             autoGenerateCaptionsFromPlayhead()
         } else {
@@ -1523,5 +1577,112 @@ struct EditorView: View {
             guard !Task.isCancelled else { return }
             barToastMessage = nil
         }
+    }
+}
+
+/// The normal preview uses `AVPlayerLayer.isReadyForDisplay`. Compositor recovery renders from
+/// `AVPlayerItemVideoOutput`, whose matching readiness contract is its pull delegate's media-data
+/// callback. Retain this observer independently of the untracked renderer implementation.
+@MainActor
+private final class EditorVideoOutputReadinessObserver: NSObject, AVPlayerItemOutputPullDelegate {
+    private weak var output: AVPlayerItemVideoOutput?
+    private var onMediaDataReady: (() -> Void)?
+    private let delegateQueue = DispatchQueue(label: "com.fantasia.editor-video-output-readiness")
+
+    func observe(_ output: AVPlayerItemVideoOutput, onMediaDataReady: @escaping () -> Void) {
+        reset()
+        self.output = output
+        self.onMediaDataReady = onMediaDataReady
+        output.setDelegate(self, queue: delegateQueue)
+        output.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+    }
+
+    nonisolated func outputMediaDataWillChange(_ sender: AVPlayerItemOutput) {
+        Task { @MainActor [weak self] in
+            guard let self, sender === self.output else { return }
+            let callback = self.onMediaDataReady
+            self.onMediaDataReady = nil
+            callback?()
+        }
+    }
+
+    func reset() {
+        output?.setDelegate(nil, queue: nil)
+        output = nil
+        onMediaDataReady = nil
+    }
+}
+
+/// Keeps one Edit Studio export attached to its real generation id. Once the existing generation
+/// poller marks that exact row complete, this swaps directly into the app's established result
+/// surface, which already provides native Share and Save to Photos actions.
+private struct EditorExportStatusSheet: View {
+    let generationId: String
+    @Binding var isPresented: Bool
+    @Environment(GenerationManager.self) private var generationManager
+
+    private var generation: GenerationItem? {
+        generationManager.generations.first { $0.id == generationId }
+    }
+
+    var body: some View {
+        Group {
+            if let generation, generation.status == .completed {
+                GenerationDetailSheet(item: generation, isPresented: $isPresented)
+            } else if let generation,
+                      generation.status == .failed || generation.status == .quarantined || generation.status == .refunded {
+                statusContent(
+                    icon: "exclamationmark.triangle",
+                    title: "Export couldn’t finish",
+                    message: generation.failureMessage ?? "Your project is unchanged. Close this and try exporting again."
+                )
+            } else {
+                statusContent(
+                    icon: nil,
+                    title: "Exporting your video",
+                    message: "You can keep editing or close this sheet. Share and Save to Photos will appear here when it’s ready."
+                )
+            }
+        }
+        .task { generationManager.startPolling(forceRefresh: true) }
+    }
+
+    private func statusContent(icon: String?, title: String, message: String) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Color(red: 0.039, green: 0.039, blue: 0.051).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Spacer()
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 34))
+                        .foregroundStyle(.orange)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                }
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 34)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+
+            Button { isPresented = false } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.10), in: Circle())
+            }
+            .padding(18)
+            .accessibilityLabel("Close export status")
+        }
+        .preferredColorScheme(.dark)
     }
 }

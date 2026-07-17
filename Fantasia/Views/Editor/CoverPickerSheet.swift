@@ -53,6 +53,9 @@ struct CoverPickerSheet: View {
     @State private var totalDuration: Double = 0
 
     @State private var scrubbedTime: Double = 0
+    /// Last frame whose selection gesture completed. It stays on the previous frame while the
+    /// strip is moving, then advances on release. Overlay state is intentionally independent.
+    @State private var committedCoverTime: Double = 0
     @State private var previewResult: CoverPreviewResult?
     @State private var stripFrames: [UIImage?] = []
     @State private var stripCellCount = 0
@@ -86,6 +89,7 @@ struct CoverPickerSheet: View {
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)               // #8C59FF
     private let stripCellWidth: CGFloat = 46
     private let stripCellHeight: CGFloat = 64
+    private let stripMarkerHeight: CGFloat = 12
 
     private var ladderFrame: UIImage? {
         guard showsScrubFrame else { return nil }
@@ -256,23 +260,40 @@ struct CoverPickerSheet: View {
             let px = stripPixelsPerSecond(viewportWidth: viewportWidth)
             let count = max(1, Int(ceil(totalDuration * px / stripCellWidth)))
             let stripOffset = viewportWidth / 2 - scrubbedTime * px
+            let committedMarkerX = Self.committedMarkerX(
+                committedTime: committedCoverTime,
+                scrubbedTime: scrubbedTime,
+                pixelsPerSecond: px,
+                viewportWidth: viewportWidth
+            )
 
             ZStack(alignment: .topLeading) {
-                HStack(spacing: 0) {
-                    ForEach(0..<count, id: \.self) { index in
-                        stripCellView(index: index, stripPx: px)
-                            .frame(width: stripCellWidth, height: stripCellHeight)
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<count, id: \.self) { index in
+                            stripCellView(index: index, stripPx: px)
+                                .frame(width: stripCellWidth, height: stripCellHeight)
+                        }
                     }
-                }
-                .offset(x: stripOffset)
+                    .offset(x: stripOffset)
 
-                Rectangle()
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(width: 1.5, height: stripCellHeight)
+                        .position(x: viewportWidth / 2, y: stripCellHeight / 2)
+                        .allowsHitTesting(false)
+                }
+                .frame(height: stripCellHeight)
+                .offset(y: stripMarkerHeight)
+
+                Circle()
                     .fill(Color.white)
-                    .frame(width: 1.5, height: stripCellHeight + 8)
-                    .position(x: viewportWidth / 2, y: stripCellHeight / 2)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: .black.opacity(0.55), radius: 1.5, y: 1)
+                    .position(x: committedMarkerX, y: 5)
                     .allowsHitTesting(false)
             }
-            .frame(height: stripCellHeight)
+            .frame(height: stripCellHeight + stripMarkerHeight)
             .clipped()
             .contentShape(Rectangle())
             .gesture(stripDragGesture(stripPx: px))
@@ -287,7 +308,10 @@ struct CoverPickerSheet: View {
                 Task { await generateStrip(cellCount: newCount, stripPx: px) }
             }
         }
-        .frame(height: stripCellHeight)
+        .frame(height: stripCellHeight + stripMarkerHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Cover frame selector")
+        .accessibilityValue("Selected at \(TimelineTrackView.formatTime(committedCoverTime))")
     }
 
     private func stripCellView(index: Int, stripPx: CGFloat) -> some View {
@@ -302,6 +326,15 @@ struct CoverPickerSheet: View {
         }
         .frame(width: stripCellWidth, height: stripCellHeight)
         .clipped()
+    }
+
+    static func committedMarkerX(
+        committedTime: Double,
+        scrubbedTime: Double,
+        pixelsPerSecond: CGFloat,
+        viewportWidth: CGFloat
+    ) -> CGFloat {
+        viewportWidth / 2 + CGFloat(committedTime - scrubbedTime) * pixelsPerSecond
     }
 
     private func stripDragGesture(stripPx: CGFloat) -> some Gesture {
@@ -324,6 +357,7 @@ struct CoverPickerSheet: View {
             }
             .onEnded { _ in
                 stripDragStartTime = nil
+                committedCoverTime = scrubbedTime
                 // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
                 // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
                 requestPreview(at: scrubbedTime, quality: .precise)
@@ -372,7 +406,9 @@ struct CoverPickerSheet: View {
             Text(label)
                 .font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(isSelected ? accent : .white)
+        // Cover editing is a utility surface, so selection stays neutral. Purple remains reserved
+        // for the primary Save action instead of making the current "Cover" tab look like a CTA.
+        .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
     }

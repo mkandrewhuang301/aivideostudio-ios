@@ -71,10 +71,34 @@ enum EditorCompositionBuilder {
         guard !sorted.isEmpty else { return nil }
 
         let composition = AVMutableComposition()
-        let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
         let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
 
         let renderSize = await resolveRenderSize(aspectRatio: aspectRatio, sortedClips: sorted)
+
+        // Resolve independent clip downloads concurrently before assembling the ordered
+        // composition. The old await-inside-for-loop made a cold three-clip project pay the sum
+        // of all download times even though the files have no dependency on one another.
+        let videoRequests: [(id: String, remoteURL: URL)] = sorted.compactMap { clip in
+            guard clip.mediaType == "video",
+                  let urlString = clip.url,
+                  let remoteURL = URL(string: urlString)
+            else { return nil }
+            return (clip.id, remoteURL)
+        }
+        let localVideoURLs = await withTaskGroup(of: (String, URL).self, returning: [String: URL].self) { group in
+            for request in videoRequests {
+                group.addTask {
+                    let localURL = await ClipFileCache.shared.localURL(
+                        clipId: request.id,
+                        remoteURL: request.remoteURL
+                    )
+                    return (request.id, localURL)
+                }
+            }
+            var resolved: [String: URL] = [:]
+            for await (id, url) in group { resolved[id] = url }
+            return resolved
+        }
 
         var cursor = CMTime.zero
         var ranges: [ClipRange] = []
@@ -95,23 +119,31 @@ enum EditorCompositionBuilder {
 
             let instruction = AVMutableVideoCompositionInstruction()
 
-            if clip.mediaType == "video", let urlString = clip.url, let url = URL(string: urlString) {
+            if clip.mediaType == "video", let localURL = localVideoURLs[clip.id] {
                 // Plan 13-26 M1 Fix B: resolve through the local disk cache first — after a
                 // clip's first download, every subsequent editor open (even with a fresh
                 // presigned URL string) loads the SAME local file instantly instead of
                 // re-streaming the full video from R2 again.
-                let localURL = await ClipFileCache.shared.localURL(clipId: clip.id, remoteURL: url)
                 let asset = AVURLAsset(url: localURL)
                 let trimStart = CMTime(seconds: clip.trimStartSeconds, preferredTimescale: 600)
                 let timeRange = CMTimeRange(start: trimStart, duration: durationTime)
                 do {
                     if let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first {
-                        try videoTrack?.insertTimeRange(timeRange, of: assetVideoTrack, at: cursor)
+                        // Keep unlike source formats on separate composition tracks. A single
+                        // mutable track that switches from portrait to landscape format
+                        // descriptions can make AVPlayerLayer's live compositor fail (-19230),
+                        // even though offline frame generation succeeds. Only one of these tracks
+                        // is active in any instruction window, so playback remains back-to-back.
+                        let segmentTrack = composition.addMutableTrack(
+                            withMediaType: .video,
+                            preferredTrackID: kCMPersistentTrackID_Invalid
+                        )
+                        try segmentTrack?.insertTimeRange(timeRange, of: assetVideoTrack, at: cursor)
                         hasVideoSegment = true
-                        if let videoTrack {
+                        if let segmentTrack {
                             // The layer instruction references the COMPOSITION's video track (the
                             // track the player actually renders), not the source asset's.
-                            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+                            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: segmentTrack)
                             let transform = await aspectFitTransform(for: assetVideoTrack, into: renderSize)
                             layer.setTransform(transform, at: cursor)
                             instruction.layerInstructions = [layer]

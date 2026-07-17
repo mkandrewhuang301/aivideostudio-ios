@@ -356,6 +356,35 @@ final class GenerationManager {
         )
     }
 
+    /// Edit Studio exports are normal generation rows, but they do not originate from the
+    /// Generate composer and therefore have no optimistic card to promote. Register the real id
+    /// returned by POST /projects/:id/export immediately so polling cannot stop during a brief
+    /// read-replica lag before the row first appears in GET /generations.
+    func registerPendingExport(id: String, aspectRatio: String) {
+        guard !generations.contains(where: { $0.id == id }) else { return }
+        generations.insert(
+            GenerationItem(
+                localPlaceholderId: id,
+                model: "edit-studio-compose",
+                mediaType: .video,
+                prompt: nil,
+                params: GenerationParams(
+                    resolution: nil,
+                    duration: nil,
+                    aspectRatio: aspectRatio,
+                    audioEnabled: true,
+                    hasReference: false,
+                    width: nil,
+                    height: nil
+                ),
+                costCredits: 0,
+                referenceUrls: nil,
+                createdAt: Date()
+            ),
+            at: 0
+        )
+    }
+
     private var hasActiveJobs: Bool {
         generations.contains { $0.status == .pending || $0.status == .processing }
     }

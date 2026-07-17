@@ -177,7 +177,11 @@ private final class ProcessedCoverImageLoader {
         cache.countLimit = 100
     }
 
-    func image(for url: URL) async -> UIImage? {
+    func image(for url: URL, cacheKey: String? = nil) async -> UIImage? {
+        if let cacheKey, let cached = await ThumbnailCache.shared.image(for: cacheKey) {
+            cache.setObject(cached, forKey: url.absoluteString as NSString)
+            return cached
+        }
         let key = url.absoluteString as NSString
         if let cached = cache.object(forKey: key) { return cached }
         if let existing = inFlight[url.absoluteString] { return await existing.value }
@@ -192,7 +196,10 @@ private final class ProcessedCoverImageLoader {
         inFlight[url.absoluteString] = task
         let processed = await task.value
         inFlight[url.absoluteString] = nil
-        if let processed { cache.setObject(processed, forKey: key) }
+        if let processed {
+            cache.setObject(processed, forKey: key)
+            if let cacheKey { ThumbnailCache.shared[cacheKey] = processed }
+        }
         return processed
     }
 }
@@ -201,13 +208,16 @@ private final class ProcessedCoverImageLoader {
 /// retain their existing fixed-shell + scaledToFill + clipped layout around this view.
 struct LetterboxThumbnailView<Placeholder: View>: View {
     let url: URL
+    let cacheKey: String?
     let placeholder: Placeholder
 
     @State private var image: UIImage?
 
-    init(url: URL, @ViewBuilder placeholder: () -> Placeholder) {
+    init(url: URL, cacheKey: String? = nil, @ViewBuilder placeholder: () -> Placeholder) {
         self.url = url
+        self.cacheKey = cacheKey
         self.placeholder = placeholder()
+        _image = State(initialValue: cacheKey.flatMap { ThumbnailCache.shared[$0] })
     }
 
     var body: some View {
@@ -221,8 +231,7 @@ struct LetterboxThumbnailView<Placeholder: View>: View {
             }
         }
         .task(id: url) {
-            image = nil
-            let loaded = await ProcessedCoverImageLoader.shared.image(for: url)
+            let loaded = await ProcessedCoverImageLoader.shared.image(for: url, cacheKey: cacheKey)
             guard !Task.isCancelled else { return }
             image = loaded
         }
