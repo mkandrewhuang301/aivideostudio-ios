@@ -7,6 +7,7 @@
 // ScrollFriendlyContextMenu → onRequestDelete wiring LibraryThumbnailView already uses for D-04.
 
 import SwiftUI
+import Photos
 
 /// Always the first grid cell (D-06). Fixed portrait shape, gray `theme.surface` fill, dotted
 /// accent-purple border, centered "+" glyph — no label, no thumbnail.
@@ -47,6 +48,7 @@ struct ProjectTileView: View {
     let project: ProjectSummary
     var onTap: () -> Void
     var onRequestDelete: () -> Void = {}
+    var onRetryExport: () -> Void = {}
 
     @Environment(ThemeManager.self) private var theme
     @State private var isMediaPreviewActive = false
@@ -108,6 +110,15 @@ struct ProjectTileView: View {
                     previewCornerRadius: 16
                 )
             }
+            .overlay(alignment: .topLeading) {
+                exportStatusBadge
+                    .padding(8)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topTrailing) {
+                exportActions
+                    .padding(8)
+            }
     }
 
     @ViewBuilder
@@ -133,5 +144,171 @@ struct ProjectTileView: View {
                 }
             }
             .clipped()
+    }
+
+    private var exportStatusBadge: some View {
+        HStack(spacing: 5) {
+            if project.lastExport?.status == .pending || project.lastExport?.status == .processing {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(.white)
+            }
+            Text(exportStatusText)
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.black.opacity(0.62), in: Capsule())
+    }
+
+    @ViewBuilder
+    private var exportActions: some View {
+        if let export = project.lastExport, export.status == .completed {
+            StudioExportActionButtons(generationId: export.generationId)
+        } else if let export = project.lastExport,
+                  export.status == .failed || export.status == .quarantined || export.status == .refunded {
+            Button(action: onRetryExport) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(.black.opacity(0.62), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retry export")
+        }
+    }
+
+    private var exportStatusText: String {
+        guard let status = project.lastExport?.status else { return "Draft" }
+        switch status {
+        case .pending, .processing:
+            return "Rendering…"
+        case .completed:
+            return "Exported"
+        case .failed, .quarantined, .refunded:
+            return "Export failed"
+        case .deleted:
+            return "Draft"
+        }
+    }
+}
+
+/// Native terminal actions for Studio exports. The generation is refreshed by id immediately
+/// before each action so an expired presigned URL is never used.
+struct StudioExportActionButtons: View {
+    let generationId: String
+
+    @State private var isSaving = false
+    @State private var isSharing = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            actionButton(
+                systemImage: isSaving ? "clock" : "arrow.down.to.line",
+                accessibilityLabel: isSaving ? "Saving export" : "Save export to Photos",
+                disabled: isSaving || isSharing
+            ) {
+                Task { await saveToPhotos() }
+            }
+            actionButton(
+                systemImage: isSharing ? "clock" : "square.and.arrow.up",
+                accessibilityLabel: isSharing ? "Preparing export" : "Share export",
+                disabled: isSaving || isSharing
+            ) {
+                Task { await prepareAndShare() }
+            }
+        }
+        .alert("Export action failed", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func actionButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(.black.opacity(0.62), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    @MainActor
+    private func saveToPhotos() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let localURL = try await refreshedLocalVideo()
+            let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            guard status == .authorized || status == .limited else {
+                throw StudioExportActionError.photoAccessDenied
+            }
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: localURL)
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func prepareAndShare() async {
+        guard !isSharing else { return }
+        isSharing = true
+        defer { isSharing = false }
+        do {
+            let cachedURL = try await refreshedLocalVideo()
+            let shareURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("fantasia-studio-export-\(generationId).mp4")
+            try? FileManager.default.removeItem(at: shareURL)
+            try FileManager.default.copyItem(at: cachedURL, to: shareURL)
+            presentActivityViewController(items: [
+                ShareableMedia(url: shareURL, isVideo: true, thumbnail: nil)
+            ])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshedLocalVideo() async throws -> URL {
+        let generation = try await APIClient.shared.fetchGeneration(id: generationId)
+        guard generation.status == .completed,
+              let urlString = generation.completedMediaUrl,
+              let remoteURL = URL(string: urlString) else {
+            throw StudioExportActionError.mediaUnavailable
+        }
+        return try await VideoCache.shared.ensureCached(id: generation.id, remoteURL: remoteURL)
+    }
+}
+
+private enum StudioExportActionError: LocalizedError {
+    case photoAccessDenied
+    case mediaUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .photoAccessDenied:
+            return "Photo library access was denied. Allow access in Settings and try again."
+        case .mediaUnavailable:
+            return "This export is not available yet. Try again in a moment."
+        }
     }
 }

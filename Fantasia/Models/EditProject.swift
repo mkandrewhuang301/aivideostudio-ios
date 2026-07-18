@@ -213,17 +213,56 @@ struct AudioClip: Codable, Identifiable, Equatable {
     }
 }
 
+// Latest render reachable from a Studio project. Its generation row remains authoritative;
+// this lightweight object is supplied by GET /api/projects for hub status and actions.
+struct ProjectExportSummary: Codable, Equatable {
+    let generationId: String
+    var status: GenerationStatus
+    var mediaUrl: String?
+    var completedAt: Date?
+}
+
 // Project hub list row (GET /api/projects) — a lightweight summary, not full editable state.
 struct ProjectSummary: Codable, Identifiable, Equatable {
     let id: String
     var title: String?
     var thumbnailUrl: String?
+    var aspectRatio: String = "original"
+    var lastExport: ProjectExportSummary? = nil
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case id, title
         case thumbnailUrl = "thumbnail_url"
+        case aspectRatio = "aspect_ratio"
+        case lastExport = "export"
         case updatedAt = "updated_at"
+    }
+
+    init(
+        id: String,
+        title: String?,
+        thumbnailUrl: String?,
+        aspectRatio: String = "original",
+        lastExport: ProjectExportSummary? = nil,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.title = title
+        self.thumbnailUrl = thumbnailUrl
+        self.aspectRatio = aspectRatio
+        self.lastExport = lastExport
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        aspectRatio = try container.decodeIfPresent(String.self, forKey: .aspectRatio) ?? "original"
+        lastExport = try container.decodeIfPresent(ProjectExportSummary.self, forKey: .lastExport)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
 
@@ -249,6 +288,7 @@ struct EditProject: Codable, Identifiable, Equatable {
     var title: String?
     var aspectRatio: String
     var thumbnailUrl: String?
+    var lastExport: ProjectExportSummary? = nil
     var captionStyle: CaptionStyle?
     var clips: [ProjectClip]
     var textOverlays: [TextOverlay]
@@ -261,6 +301,7 @@ struct EditProject: Codable, Identifiable, Equatable {
         case id, title
         case aspectRatio = "aspect_ratio"
         case thumbnailUrl = "thumbnail_url"
+        case lastExport = "export"
         case captionStyle = "caption_style"
         case clips
         case textOverlays = "text_overlays"
@@ -276,6 +317,7 @@ struct EditProject: Codable, Identifiable, Equatable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         aspectRatio = try container.decode(String.self, forKey: .aspectRatio)
         thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        lastExport = try container.decodeIfPresent(ProjectExportSummary.self, forKey: .lastExport)
         captionStyle = try container.decodeIfPresent(CaptionStyle.self, forKey: .captionStyle)
         clips = (try? container.decodeIfPresent([ProjectClip].self, forKey: .clips)) ?? []
         textOverlays = (try? container.decodeIfPresent([TextOverlay].self, forKey: .textOverlays)) ?? []

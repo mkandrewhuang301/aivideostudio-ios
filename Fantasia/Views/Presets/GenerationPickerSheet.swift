@@ -40,7 +40,7 @@ struct GenerationPickerSheet: View {
     @State private var isAutoPaginating = false
 
     private var matchingGenerations: [GenerationItem] {
-        generationManager.generations.filter { item in
+        generationManager.feedGenerations.filter { item in
             item.status == .completed
                 && !(item.completedMediaUrl ?? "").isEmpty
                 && (mediaKind == "video" ? !item.isImage : item.isImage)

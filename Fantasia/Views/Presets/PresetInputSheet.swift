@@ -635,7 +635,7 @@ struct PresetInputSheet: View {
     // strip's thumbnails also growing, since fewer, larger thumbnails fit the same strip width.
     private var recentMatchingGenerations: [GenerationItem] {
         guard let kind = activeSlotKind else { return [] }
-        return Array(generationManager.generations.filter { item in
+        return Array(generationManager.feedGenerations.filter { item in
             item.status == .completed
                 && !(item.completedMediaUrl ?? "").isEmpty
                 && (kind == "video" ? !item.isImage : item.isImage)

@@ -175,7 +175,7 @@ struct GenerateView: View {
             result.append(.upload(mostRecentImage))
             usedUploadIds.insert(mostRecentImage.id)
         }
-        if let latestGeneration = generationManager.generations.first(where: {
+        if let latestGeneration = generationManager.feedGenerations.first(where: {
             $0.status == .completed && !($0.completedMediaUrl ?? "").isEmpty
         }) {
             result.append(.generation(latestGeneration))
@@ -257,7 +257,7 @@ struct GenerateView: View {
             VStack(spacing: 0) {
                 topBar
 
-                if generationManager.generations.isEmpty && !generationManager.hasLoadedOnce {
+                if generationManager.feedGenerations.isEmpty && !generationManager.hasLoadedOnce {
                     // Initial history fetch still in flight — show a spinner instead of the
                     // "What will you create?" empty state, which was misleadingly flashing
                     // for returning users while their (non-empty) history was still loading.
@@ -265,7 +265,7 @@ struct GenerateView: View {
                     ProgressView()
                         .tint(.white.opacity(0.6))
                     Spacer()
-                } else if generationManager.generations.isEmpty {
+                } else if generationManager.feedGenerations.isEmpty {
                     Spacer()
                     centerContent
                     Spacer()
@@ -292,7 +292,7 @@ struct GenerateView: View {
                                             }
                                         )
                                 }
-                                ForEach(generationManager.generations.reversed()) { item in
+                                ForEach(generationManager.feedGenerations.reversed()) { item in
                                     SwipeToDeleteRow(
                                         onRequestDelete: { confirmDeleteItem = item },
                                         isHeldOpen: confirmDeleteItem?.id == item.id || deletingItemIds.contains(item.id)
@@ -359,7 +359,7 @@ struct GenerateView: View {
                         // user 2026-07-13, fixed same day). A bare proxy.scrollTo call outside
                         // withAnimation jumps instantly, matching that original silent behavior.
                         .onAppear {
-                            if let id = generationManager.generations.first?.id {
+                            if let id = generationManager.feedGenerations.first?.id {
                                 proxy.scrollTo(id, anchor: .bottom)
                             }
                         }
@@ -378,7 +378,7 @@ struct GenerateView: View {
                         .refreshable {
                             await generationManager.refresh()
                         }
-                        .onChange(of: generationManager.generations.first?.id) { _, _ in
+                        .onChange(of: generationManager.feedGenerations.first?.id) { _, _ in
                             scrollToNewest(proxy: proxy)
                         }
                         // Brackets an active scroll drag with isInteracting so
@@ -647,7 +647,7 @@ struct GenerateView: View {
         }
         .sheet(item: $selectedItem) { item in
             GenerationDetailPagerView(
-                items: generationManager.generations,
+                items: generationManager.feedGenerations,
                 currentId: item.id,
                 isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
             )
@@ -2197,7 +2197,7 @@ struct GenerateView: View {
     }
 
     private func scrollToNewest(proxy: ScrollViewProxy) {
-        guard let id = generationManager.generations.first?.id else { return }
+        guard let id = generationManager.feedGenerations.first?.id else { return }
         withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .bottom) }
     }
 
@@ -2208,7 +2208,7 @@ struct GenerateView: View {
         guard !isLoadingOlderHistory, generationManager.nextCursor != nil else { return }
         isLoadingOlderHistory = true
         defer { isLoadingOlderHistory = false }
-        let anchorID = generationManager.generations.last?.id
+        let anchorID = generationManager.feedGenerations.last?.id
         await generationManager.loadNextPage()
         if let anchorID {
             proxy.scrollTo(anchorID, anchor: .top)

@@ -68,7 +68,7 @@ struct HomeView: View {
         var seen = Set<String>()
         var result: [Preset] = []
 
-        for generation in generationManager.generations {
+        for generation in generationManager.feedGenerations {
             guard let presetId = generation.params.presetId,
                   seen.insert(presetId).inserted,
                   let preset = presetsById[presetId],

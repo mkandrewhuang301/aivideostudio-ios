@@ -20,7 +20,7 @@ struct LibraryView: View {
 
     // Only completed items, newest first
     private var completedGenerations: [GenerationItem] {
-        generationManager.generations
+        generationManager.feedGenerations
             .filter { $0.status == .completed }
             .sorted { $0.createdAt > $1.createdAt }
     }

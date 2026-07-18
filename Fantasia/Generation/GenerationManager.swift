@@ -35,6 +35,11 @@ final class GenerationManager {
     }
     // Published state — read by FeedView and LibraryView
     var generations: [GenerationItem] = []
+    /// User-facing generation feeds exclude Studio compose rows. Those rows remain in
+    /// `generations` so the established poll loop can track their status by id.
+    var feedGenerations: [GenerationItem] {
+        generations.filter { !$0.isStudioCompose }
+    }
     var isLoading: Bool = false
     var nextCursor: String? = nil
     /// True once the first refresh() has completed (success or failure). Lets callers
@@ -218,6 +223,20 @@ final class GenerationManager {
             // fetchGenerations() handles iso8601 date decoding for createdAt/completedAt
             let response = try await APIClient.shared.fetchGenerations()
             mergeLatest(response.items, reconcileDeletions: true)
+
+            // Studio rows are intentionally absent from the list endpoint. Refresh only the
+            // active Studio rows already registered in memory through the unchanged by-id path,
+            // then merge them without list-deletion reconciliation.
+            var studioUpdates: [GenerationItem] = []
+            for tracked in generations where tracked.isStudioCompose
+                && (tracked.status == .pending || tracked.status == .processing) {
+                do {
+                    studioUpdates.append(try await APIClient.shared.fetchGeneration(id: tracked.id))
+                } catch {
+                    print("[GenerationManager] Studio export refresh error for \(tracked.id): \(error)")
+                }
+            }
+            mergeLatest(studioUpdates)
             nextCursor = response.nextCursor
             lastRefreshDate = Date() // only on success — a failed fetch shouldn't count as "fresh"
             persistSnapshot()
@@ -360,12 +379,12 @@ final class GenerationManager {
     /// Generate composer and therefore have no optimistic card to promote. Register the real id
     /// returned by POST /projects/:id/export immediately so polling cannot stop during a brief
     /// read-replica lag before the row first appears in GET /generations.
-    func registerPendingExport(id: String, aspectRatio: String) {
+    func registerPendingExport(id: String, projectId: String, aspectRatio: String) {
         guard !generations.contains(where: { $0.id == id }) else { return }
         generations.insert(
             GenerationItem(
                 localPlaceholderId: id,
-                model: "edit-studio-compose",
+                model: GenerationItem.studioComposeModel,
                 mediaType: .video,
                 prompt: nil,
                 params: GenerationParams(
@@ -375,7 +394,8 @@ final class GenerationManager {
                     audioEnabled: true,
                     hasReference: false,
                     width: nil,
-                    height: nil
+                    height: nil,
+                    exportOfProjectId: projectId
                 ),
                 costCredits: 0,
                 referenceUrls: nil,

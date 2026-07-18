@@ -556,15 +556,19 @@ struct EditorView: View {
     // round-trip to dispatch — NOT for the whole render (D-12: the project was never locked, so
     // Export becomes tappable again immediately after dispatch succeeds). The returned
     // generation_id is fed into the EXISTING GenerationManager poll loop so the export enters the
-    // normal tracked-generations set; completion/failure are handled entirely by the app-wide
-    // APNs push + Generate feed refresh (D-07) — no bespoke export-status polling here.
+    // normal tracked-generations set; the existing poll loop refreshes that Studio row by id and
+    // routes completion/failure back to the owning project — no second polling system here.
     private func performExport() {
         guard !isExporting else { return }
         isExporting = true
         Task {
             do {
                 let generationId = try await projectManager.exportProject(id: state.project.id)
-                generationManager.registerPendingExport(id: generationId, aspectRatio: state.aspectRatio)
+                generationManager.registerPendingExport(
+                    id: generationId,
+                    projectId: state.project.id,
+                    aspectRatio: state.aspectRatio
+                )
                 trackedExportGenerationId = generationId
                 isExporting = false
                 showExportStatus = true
@@ -1639,9 +1643,8 @@ private final class EditorVideoOutputReadinessObserver: NSObject, AVPlayerItemOu
     }
 }
 
-/// Keeps one Edit Studio export attached to its real generation id. Once the existing generation
-/// poller marks that exact row complete, this swaps directly into the app's established result
-/// surface, which already provides native Share and Save to Photos actions.
+/// Keeps one Edit Studio export attached to its real generation id. Studio exports deliberately
+/// use their own terminal Save/Share actions and never enter the generation detail pullover.
 private struct EditorExportStatusSheet: View {
     let generationId: String
     @Binding var isPresented: Bool
@@ -1654,7 +1657,12 @@ private struct EditorExportStatusSheet: View {
     var body: some View {
         Group {
             if let generation, generation.status == .completed {
-                GenerationDetailSheet(item: generation, isPresented: $isPresented)
+                statusContent(
+                    icon: "checkmark.circle.fill",
+                    title: "Export ready",
+                    message: "Save the finished video to Photos or share it.",
+                    showsActions: true
+                )
             } else if let generation,
                       generation.status == .failed || generation.status == .quarantined || generation.status == .refunded {
                 statusContent(
@@ -1673,7 +1681,12 @@ private struct EditorExportStatusSheet: View {
         .task { generationManager.startPolling(forceRefresh: true) }
     }
 
-    private func statusContent(icon: String?, title: String, message: String) -> some View {
+    private func statusContent(
+        icon: String?,
+        title: String,
+        message: String,
+        showsActions: Bool = false
+    ) -> some View {
         ZStack(alignment: .topTrailing) {
             Color(red: 0.039, green: 0.039, blue: 0.051).ignoresSafeArea()
             VStack(spacing: 18) {
@@ -1695,6 +1708,10 @@ private struct EditorExportStatusSheet: View {
                     .foregroundStyle(.white.opacity(0.65))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 34)
+                if showsActions {
+                    StudioExportActionButtons(generationId: generationId)
+                        .padding(.top, 4)
+                }
                 Spacer()
             }
             .frame(maxWidth: .infinity)

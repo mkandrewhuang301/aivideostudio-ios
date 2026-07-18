@@ -145,7 +145,7 @@ struct MediaPickerSheet: View {
     // MARK: - Generations tab
 
     private var eligibleGenerations: [GenerationItem] {
-        generationManager.generations.filter { $0.status == .completed }
+        generationManager.feedGenerations.filter { $0.status == .completed }
     }
 
     @ViewBuilder

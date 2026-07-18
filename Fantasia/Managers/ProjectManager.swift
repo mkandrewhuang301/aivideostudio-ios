@@ -135,7 +135,14 @@ final class ProjectManager {
         loadedProject = full
         persistEditProjectSnapshot(full)
         projects.insert(
-            ProjectSummary(id: full.id, title: full.title, thumbnailUrl: full.thumbnailUrl, updatedAt: full.updatedAt),
+            ProjectSummary(
+                id: full.id,
+                title: full.title,
+                thumbnailUrl: full.thumbnailUrl,
+                aspectRatio: full.aspectRatio,
+                lastExport: full.lastExport,
+                updatedAt: full.updatedAt
+            ),
             at: 0
         )
         persistSnapshot()
@@ -159,7 +166,10 @@ final class ProjectManager {
         loadError = nil
         defer { isLoading = false }
         do {
-            let project = try await APIClient.shared.getProject(id: id)
+            var project = try await APIClient.shared.getProject(id: id)
+            if project.lastExport == nil {
+                project.lastExport = projects.first(where: { $0.id == id })?.lastExport
+            }
             loadedProject = project
             persistEditProjectSnapshot(project)
         } catch {
@@ -175,7 +185,11 @@ final class ProjectManager {
     func refreshLoadedProjectURLs() async {
         guard let id = loadedProject?.id else { return }
         do {
-            let project = try await APIClient.shared.getProject(id: id)
+            var project = try await APIClient.shared.getProject(id: id)
+            if project.lastExport == nil {
+                project.lastExport = loadedProject?.lastExport
+                    ?? projects.first(where: { $0.id == id })?.lastExport
+            }
             loadedProject = project
             persistEditProjectSnapshot(project)
         } catch {
@@ -553,10 +567,55 @@ final class ProjectManager {
 
     // MARK: - Export (D-07/D-10/D-12/SC7)
 
-    /// Returns the new generation_id — the CALLER hands this to the existing GenerationManager
-    /// poll loop (GET /api/generations/:id); no bespoke export-status polling here (RESEARCH
-    /// Don't-Hand-Roll). The project itself is never mutated by exporting (D-12).
+    /// Returns the new generation_id and immediately marks the owning project as rendering.
+    /// GenerationManager keeps using its existing poll loop for the authoritative row status.
     func exportProject(id: String) async throws -> String {
-        try await APIClient.shared.exportProject(id: id)
+        let generationId = try await APIClient.shared.exportProject(id: id)
+        applyStudioExport(
+            ProjectExportSummary(
+                generationId: generationId,
+                status: .processing,
+                mediaUrl: nil,
+                completedAt: nil
+            ),
+            toProjectId: id
+        )
+        return generationId
+    }
+
+    /// Reconciles the by-id generation responses fetched by GenerationManager back into Studio.
+    /// Pending client placeholders are displayed as Rendering so the hub never flashes Draft.
+    func reconcileStudioExports(_ generations: [GenerationItem]) {
+        for generation in generations where generation.isStudioCompose {
+            guard let projectId = generation.params.exportOfProjectId else { continue }
+            let currentGenerationId = projects.first(where: { $0.id == projectId })?.lastExport?.generationId
+                ?? (loadedProject?.id == projectId ? loadedProject?.lastExport?.generationId : nil)
+            guard currentGenerationId == generation.id else { continue }
+            let status: GenerationStatus = generation.status == .pending ? .processing : generation.status
+            applyStudioExport(
+                ProjectExportSummary(
+                    generationId: generation.id,
+                    status: status,
+                    mediaUrl: generation.completedMediaUrl,
+                    completedAt: generation.completedAt
+                ),
+                toProjectId: projectId
+            )
+        }
+    }
+
+    private func applyStudioExport(_ export: ProjectExportSummary, toProjectId projectId: String) {
+        var changed = false
+        if let index = projects.firstIndex(where: { $0.id == projectId }),
+           projects[index].lastExport != export {
+            projects[index].lastExport = export
+            changed = true
+        }
+        if loadedProject?.id == projectId, loadedProject?.lastExport != export {
+            loadedProject?.lastExport = export
+            if let loadedProject { persistEditProjectSnapshot(loadedProject) }
+            changed = true
+        }
+        if changed { persistSnapshot() }
     }
 }

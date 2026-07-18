@@ -15,6 +15,7 @@ struct StudioHubView: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(\.dismiss) private var dismiss
     @Environment(ProjectManager.self) private var projectManager
+    @Environment(GenerationManager.self) private var generationManager
 
     // "+" tile → media picker (D-08), wired to the real MediaPickerSheet (Plan 10).
     @State private var showMediaPicker = false
@@ -34,7 +35,10 @@ struct StudioHubView: View {
             ScrollView {
                 stateContent
             }
-            .refreshable { await projectManager.refreshProjects() }
+            .refreshable {
+                await projectManager.refreshProjects()
+                trackActiveStudioExports()
+            }
         }
         .navigationTitle("Studio")
         .navigationBarTitleDisplayMode(.inline)
@@ -51,6 +55,11 @@ struct StudioHubView: View {
         }
         .task {
             await projectManager.loadProjects()
+            trackActiveStudioExports()
+            projectManager.reconcileStudioExports(generationManager.generations)
+        }
+        .onChange(of: generationManager.generations) { _, generations in
+            projectManager.reconcileStudioExports(generations)
         }
         .sheet(isPresented: $showMediaPicker) {
             MediaPickerSheet { picked in
@@ -141,7 +150,8 @@ struct StudioHubView: View {
                             }
                         }
                     },
-                    onRequestDelete: { projectPendingDelete = project }
+                    onRequestDelete: { projectPendingDelete = project },
+                    onRetryExport: { retryExport(project) }
                 )
             }
         }
@@ -204,6 +214,37 @@ struct StudioHubView: View {
             openedProjectId = created.id
         } catch {
             print("[StudioHubView] createProject error: \(error)")
+        }
+    }
+
+    private func trackActiveStudioExports() {
+        var foundActiveExport = false
+        for project in projectManager.projects {
+            guard let export = project.lastExport,
+                  export.status == .pending || export.status == .processing else { continue }
+            foundActiveExport = true
+            generationManager.registerPendingExport(
+                id: export.generationId,
+                projectId: project.id,
+                aspectRatio: project.aspectRatio
+            )
+        }
+        if foundActiveExport { generationManager.startPolling(forceRefresh: true) }
+    }
+
+    private func retryExport(_ project: ProjectSummary) {
+        Task {
+            do {
+                let generationId = try await projectManager.exportProject(id: project.id)
+                generationManager.registerPendingExport(
+                    id: generationId,
+                    projectId: project.id,
+                    aspectRatio: project.aspectRatio
+                )
+                generationManager.startPolling(forceRefresh: true)
+            } catch {
+                print("[StudioHubView] retry export error: \(error)")
+            }
         }
     }
 

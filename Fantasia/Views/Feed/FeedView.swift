@@ -34,7 +34,7 @@ struct FeedView: View {
             // D-40: Feed tab empty state — none needed; dark background shows when empty
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    ForEach(generationManager.generations) { item in
+                    ForEach(generationManager.feedGenerations) { item in
                         GenerationCardView(
                             item: item,
                             onTapDetail: {

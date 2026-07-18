@@ -58,6 +58,10 @@ struct GenerationParams: Codable, Equatable {
     let tool: String?
     let outputLanguage: String?
     let sourceDurationSeconds: Double?
+    // Present only on free Edit Studio compose rows. It lets the existing generation poller
+    // reconcile an export result back into its owning Studio project without exposing the row
+    // in Create or Library.
+    let exportOfProjectId: String?
 
     enum CodingKeys: String, CodingKey {
         case resolution
@@ -73,6 +77,7 @@ struct GenerationParams: Codable, Equatable {
         case tool
         case outputLanguage = "output_language"
         case sourceDurationSeconds = "source_duration_seconds"
+        case exportOfProjectId = "export_of_project_id"
     }
 
     init(
@@ -88,7 +93,8 @@ struct GenerationParams: Codable, Equatable {
         stageLabel: String? = nil,
         tool: String? = nil,
         outputLanguage: String? = nil,
-        sourceDurationSeconds: Double? = nil
+        sourceDurationSeconds: Double? = nil,
+        exportOfProjectId: String? = nil
     ) {
         self.resolution = resolution
         self.duration = duration
@@ -103,11 +109,14 @@ struct GenerationParams: Codable, Equatable {
         self.tool = tool
         self.outputLanguage = outputLanguage
         self.sourceDurationSeconds = sourceDurationSeconds
+        self.exportOfProjectId = exportOfProjectId
     }
 }
 
 // Primary model — one generation row from GET /api/generations or GET /api/generations/:id
 struct GenerationItem: Codable, Identifiable, Equatable {
+    static let studioComposeModel = "edit-studio-compose"
+
     let id: String
     let model: String            // server model slug; includes Seedance, Grok, Kling, and HappyHorse
     let status: GenerationStatus
@@ -206,6 +215,8 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     var usesTransparencyBackdrop: Bool { params.presetId == "remove-background-video" }
 
     var isVideoTranslation: Bool { params.tool == "video_translation" }
+
+    var isStudioCompose: Bool { model == Self.studioComposeModel }
 
     /// The presigned R2 URL for the completed media (video or image).
     /// Backend returns image URLs under the `video_url` key to avoid a breaking API change.
