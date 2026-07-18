@@ -16,7 +16,7 @@
 		0C5C43BFBB1AE0B74228039F /* EditorInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 756271C8903F0DC5851E3229 /* EditorInteractionTests.swift */; };
 		14C33C25B4E446F40F55E0F3 /* SocialSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB17EB669A20752389935966 /* SocialSignInButton.swift */; };
 		1562160C4DBB10894DE25FB1 /* OnboardingQuestionBankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D4AB707B12A710B0DAD119 /* OnboardingQuestionBankTests.swift */; };
-		1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6313B0A55581090BEA6B4A13 /* PlanCardView.swift */; };
+		94DD986127EDEEE83C3C4D87 /* TierPlanSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036B951D82AB6197358D8C0A /* TierPlanSelectorView.swift */; };
 		17422C8DCDE8B4EAF6E6DADA /* GenerationCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF98D41F7BDC89D993199016 /* GenerationCardView.swift */; };
 		186C9EBBF9076B9A6EC21A7C /* EdgeAutoScroll.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8168EFBB699C6D13749D7F4 /* EdgeAutoScroll.swift */; };
 		18F347EAB3D07C4ACAB89528 /* GenerationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAFBEB1496643221212D8F /* GenerationDetailSheet.swift */; };
@@ -188,7 +188,6 @@
 		5DC467B352929E669F55A9BF /* LibraryThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryThumbnailView.swift; sourceTree = "<group>"; };
 		5DEC07C04992EE08F3FDA3BA /* ProjectManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectManager.swift; sourceTree = "<group>"; };
 		60D880315248963AAE05C9C2 /* CreditManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditManager.swift; sourceTree = "<group>"; };
-		6313B0A55581090BEA6B4A13 /* PlanCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCardView.swift; sourceTree = "<group>"; };
 		63A65D5512DE91F2D2D1BC1B /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		65A0DFC5793A9DA8DEE3335E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		677EDD477B29B62723B6D417 /* DrawerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawerManager.swift; sourceTree = "<group>"; };
@@ -204,6 +203,7 @@
 		756271C8903F0DC5851E3229 /* EditorInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorInteractionTests.swift; sourceTree = "<group>"; };
 		76D50E6F16247DF7BE7CE91E /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		770887FBA49BBE3DAB5B9B30 /* StudioHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioHubView.swift; sourceTree = "<group>"; };
+		036B951D82AB6197358D8C0A /* TierPlanSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TierPlanSelectorView.swift; sourceTree = "<group>"; };
 		79385464051C4A0AD6E66F28 /* PlanCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCatalog.swift; sourceTree = "<group>"; };
 		7A953DCF20CE3F2AE14FE3FD /* ClipFileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipFileCache.swift; sourceTree = "<group>"; };
 		7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFeaturesView.swift; sourceTree = "<group>"; };
@@ -577,8 +577,8 @@
 			children = (
 				918EF20B16E3D634C91E9668 /* ManageSubscriptionView.swift */,
 				8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */,
-				6313B0A55581090BEA6B4A13 /* PlanCardView.swift */,
 				79385464051C4A0AD6E66F28 /* PlanCatalog.swift */,
+				036B951D82AB6197358D8C0A /* TierPlanSelectorView.swift */,
 			);
 			path = Paywall;
 			sourceTree = "<group>";
@@ -837,8 +837,8 @@
 				3258D39B4BF09B8943B0FCA5 /* OnboardingVideoView.swift in Sources */,
 				58904F33D07BE199DD02AF7B /* OnboardingView.swift in Sources */,
 				2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */,
-				1669FF71F190326F73058C97 /* PlanCardView.swift in Sources */,
 				B622ACBB68150822FA0175A8 /* PlanCatalog.swift in Sources */,
+				94DD986127EDEEE83C3C4D87 /* TierPlanSelectorView.swift in Sources */,
 				EF827A848CA3924A8BCF21BC /* Preset.swift in Sources */,
 				5E26753D3D8EDEE23AEC71B9 /* PresetInputSheet.swift in Sources */,
 				F7C96691B1CCB91D591E56E6 /* PresetRegistryManager.swift in Sources */,
