@@ -48,13 +48,13 @@ struct TextOverlayCanvasView: View {
                         startEditing: state.editRequestedTextId == overlay.id,
                         onSelect: { state.select(.text(overlay.id)) },
                         onMove: { xNorm, yNorm in
-                            Task { await persistMove(id: overlay.id, xNorm: xNorm, yNorm: yNorm) }
+                            persistMove(id: overlay.id, xNorm: xNorm, yNorm: yNorm)
                         },
                         onResize: { scale in
-                            Task { await persistResize(id: overlay.id, scale: scale) }
+                            persistResize(id: overlay.id, scale: scale)
                         },
                         onRotate: { rotation in
-                            Task { await persistRotation(id: overlay.id, rotation: rotation) }
+                            persistRotation(id: overlay.id, rotation: rotation)
                         },
                         onEditCommit: { newText in
                             Task { await persistTextEdit(id: overlay.id, text: newText) }
@@ -104,60 +104,97 @@ struct TextOverlayCanvasView: View {
     // message): these clamps were ALREADY correct at the gesture layer, so a 400 from out-of-range
     // coordinates was not actually reproducible here — the real bug was the silent print-only
     // catch below, now wired to `onError`.
-    private func persistMove(id: String, xNorm: Double, yNorm: Double) async {
+    // Item 2 (round 2, Andrew review 2026-07-17): OPTIMISTIC — mirrors TimelineTrackView.
+    // updateClipTrim's exact "13-23 J1" pattern (see that function's doc comment). Root cause of
+    // the "glitches back to the old spot on release" bug: these three used to be `async`, called
+    // via `Task { await persistMove(...) }` from TextOverlayItemView's onMove/onResize/onRotate —
+    // the child's gesture `.onEnded` reset `dragOffset`/`scaleDelta`/`rotationDelta` to zero
+    // SYNCHRONOUSLY in the SAME call frame, but `overlay.xNorm/yNorm/widthNorm/rotation` (which
+    // `basePosition`/`liveScale`/`liveRotation` render from) only changed once the network
+    // round-trip completed and `syncProjectFromManager()` ran — at least one render pass therefore
+    // painted the overlay at `oldBasePosition + zeroedOffset`, i.e. snapped back to the pre-drag
+    // spot, before the real value jumped in once the PATCH resolved. Fix: these are no longer
+    // `async` — each mutates `state.project.textOverlays[idx]` SYNCHRONOUSLY, in the same call
+    // frame TextOverlayItemView's `onEnded` invokes it from, so the corrected model value and the
+    // zeroed local drag/scale/rotation delta land in the SAME transaction/render — no frame can
+    // ever paint at the old position. The network PATCH + its failure-path revert (via the
+    // captured `before` value) + the existing item-5 `onError` toast now run in a Task appended
+    // AFTER the optimistic write, exactly mirroring updateClipTrim's structure.
+
+    private func persistMove(id: String, xNorm: Double, yNorm: Double) {
+        guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
         let clampedXNorm = min(1, max(0, xNorm))
         let clampedYNorm = min(1, max(0, yNorm))
-        let before = state.project.textOverlays.first(where: { $0.id == id })
-        do {
-            try await projectManager.updateTextOverlay(textId: id, xNorm: clampedXNorm, yNorm: clampedYNorm)
-            syncProjectFromManager()
-            if let before {
+        let before = state.project.textOverlays[idx]
+        state.project.textOverlays[idx].xNorm = clampedXNorm
+        state.project.textOverlays[idx].yNorm = clampedYNorm
+
+        Task {
+            do {
+                try await projectManager.updateTextOverlay(textId: id, xNorm: clampedXNorm, yNorm: clampedYNorm)
+                syncProjectFromManager()
                 state.history.record(UndoableAction(
                     label: "Move text",
                     undo: { try await projectManager.updateTextOverlay(textId: id, xNorm: before.xNorm, yNorm: before.yNorm) },
                     redo: { try await projectManager.updateTextOverlay(textId: id, xNorm: clampedXNorm, yNorm: clampedYNorm) }
                 ))
+            } catch {
+                print("[TextOverlayCanvasView] move error: \(error)")
+                if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
+                    state.project.textOverlays[revertIdx].xNorm = before.xNorm
+                    state.project.textOverlays[revertIdx].yNorm = before.yNorm
+                }
+                onError("Couldn't save change")
             }
-        } catch {
-            print("[TextOverlayCanvasView] move error: \(error)")
-            onError("Couldn't save change")
         }
     }
 
-    private func persistResize(id: String, scale: Double) async {
+    private func persistResize(id: String, scale: Double) {
+        guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
         let clampedScale = min(3, max(0.5, scale))
-        let beforeScale = state.project.textOverlays.first(where: { $0.id == id })?.widthNorm
-        do {
-            try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale)
-            syncProjectFromManager()
-            if let beforeScale {
+        let beforeScale = state.project.textOverlays[idx].widthNorm
+        state.project.textOverlays[idx].widthNorm = clampedScale
+
+        Task {
+            do {
+                try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale)
+                syncProjectFromManager()
                 state.history.record(UndoableAction(
                     label: "Resize text",
                     undo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: beforeScale) },
                     redo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale) }
                 ))
+            } catch {
+                print("[TextOverlayCanvasView] resize error: \(error)")
+                if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
+                    state.project.textOverlays[revertIdx].widthNorm = beforeScale
+                }
+                onError("Couldn't save change")
             }
-        } catch {
-            print("[TextOverlayCanvasView] resize error: \(error)")
-            onError("Couldn't save change")
         }
     }
 
-    private func persistRotation(id: String, rotation: Double) async {
-        let beforeRotation = state.project.textOverlays.first(where: { $0.id == id })?.rotation
-        do {
-            try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
-            syncProjectFromManager()
-            if let beforeRotation {
+    private func persistRotation(id: String, rotation: Double) {
+        guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        let beforeRotation = state.project.textOverlays[idx].rotation
+        state.project.textOverlays[idx].rotation = rotation
+
+        Task {
+            do {
+                try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
+                syncProjectFromManager()
                 state.history.record(UndoableAction(
                     label: "Rotate text",
                     undo: { try await projectManager.updateTextOverlay(textId: id, rotation: beforeRotation) },
                     redo: { try await projectManager.updateTextOverlay(textId: id, rotation: rotation) }
                 ))
+            } catch {
+                print("[TextOverlayCanvasView] rotate error: \(error)")
+                if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
+                    state.project.textOverlays[revertIdx].rotation = beforeRotation
+                }
+                onError("Couldn't save change")
             }
-        } catch {
-            print("[TextOverlayCanvasView] rotate error: \(error)")
-            onError("Couldn't save change")
         }
     }
 
