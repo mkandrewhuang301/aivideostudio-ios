@@ -78,9 +78,9 @@ struct FullscreenEditorPlayerView: View {
     @State private var isScrubbing = false
 
     /// Item 4 (round 2): the video's aspect-fit rect within `containerSize` (the full-screen
-    /// GeometryReader size here, since the video layer itself is `.ignoresSafeArea()`) — same math
-    /// `AVMakeRect(aspectRatio:insideRect:)` always produces, matching what `videoGravity:
-    /// .resizeAspect` actually draws on screen.
+    /// GeometryReader size here; the reader itself ignores safe areas below so it proposes the
+    /// exact same canvas as the player layer) — same math `AVMakeRect(aspectRatio:insideRect:)`
+    /// always produces, matching what `videoGravity: .resizeAspect` actually draws on screen.
     private func fittedVideoRect(in containerSize: CGSize) -> CGRect {
         guard aspectFraction > 0, containerSize.width > 0, containerSize.height > 0 else {
             return CGRect(origin: .zero, size: containerSize)
@@ -134,11 +134,16 @@ struct FullscreenEditorPlayerView: View {
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
-            // `.ignoresSafeArea()` expands drawing, not this layout coordinate space. Keeping the
-            // root pinned to GeometryReader's exact size makes fittedRect's top-leading offsets
-            // deterministic for top, middle, and bottom caption anchors alike.
+            // Keeping the root pinned to GeometryReader's exact size makes fittedRect's
+            // top-leading offsets deterministic for top, middle, and bottom caption anchors.
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
+        // The player already draws through every safe area. The geometry used to fit the caption
+        // and text canvas must receive that identical full-screen proposal too; otherwise its
+        // vertical center/letterbox rect is computed from a shorter safe-area container and the
+        // same persisted yOffsetNorm lands lower relative to the actual video pixels. Controls
+        // remain safe because playbackControlBar still pads by geo.safeAreaInsets.bottom above.
+        .ignoresSafeArea()
         .statusBar(hidden: true)
     }
 
