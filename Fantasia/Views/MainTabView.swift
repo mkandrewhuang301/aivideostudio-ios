@@ -46,12 +46,16 @@ struct MainTabView: View {
     private let bottomLift: CGFloat = 16
 
     var body: some View {
-        NavigationStack(path: $browsePath) {
-            GeometryReader { geo in
-                let drawerWidth = geo.size.width * 0.65
+        GeometryReader { geo in
+            let drawerWidth = geo.size.width * 0.65
 
-                ZStack(alignment: .bottom) {
-                    TabView(selection: $selectedTab) {
+            ZStack(alignment: .bottom) {
+                TabView(selection: $selectedTab) {
+                    // Home owns the browse NavigationStack: wrapping only this tab (not the whole
+                    // TabView) avoids the documented SwiftUI anti-pattern of a NavigationStack
+                    // ancestor around a TabView whose tabs also nest their own stacks — that
+                    // combo throws AnyNavigationPath.Error.comparisonTypeMismatch on push.
+                    NavigationStack(path: $browsePath) {
                         HomeView(
                             onNavigateToGenerate: { selectedTab = 2 },
                             onSelectPreset: selectPreset,
@@ -59,22 +63,35 @@ struct MainTabView: View {
                             onSelectFormat: { selectedFormat = $0 }
                         )
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
-                        .toolbar(.hidden, for: .tabBar)
-                        .tag(0)
+                        .navigationDestination(for: String.self) { section in
+                            CategoryView(
+                                section: section,
+                                onSelectPreset: selectPreset,
+                                onSelectFormat: { selectedFormat = $0 }
+                            )
+                        }
+                    }
+                    .toolbar(.hidden, for: .tabBar)
+                    .tag(0)
                     NavigationStack { StudioHubView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(1)
                     NavigationStack { GenerateView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(2)
+                    // Cast never pushes/shows a nav bar (sheet-only) — left bare, no stack needed.
                     CastView()
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(3)
-                    LibraryView()
-                        .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
-                        .toolbar(.hidden, for: .tabBar)
-                        .tag(4)
+                    // Library sets .navigationTitle, so it needs its own stack now that the
+                    // ancestor NavigationStack is gone.
+                    NavigationStack {
+                        LibraryView()
+                            .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
+                    }
+                    .toolbar(.hidden, for: .tabBar)
+                    .tag(4)
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Color.clear.frame(height: tabBarHeight + bottomLift)
@@ -100,36 +117,30 @@ struct MainTabView: View {
                     .onTapGesture { drawer.close() }
                     .animation(.easeInOut(duration: 0.22), value: drawer.isOpen)
             }
-                // Side drawer
-                .overlay(alignment: .leading) {
-                    SideDrawerView { section in
-                        browsePath.append(section)
-                    }
-                    .environment(drawer)
-                    .environment(creditManager)
-                    .environment(authManager)
-                    .environment(theme)
-                    .frame(width: drawerWidth)
-                    .ignoresSafeArea()
-                    .offset(x: drawer.isOpen ? 0 : -drawerWidth)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: drawer.isOpen)
+            // Side drawer
+            .overlay(alignment: .leading) {
+                SideDrawerView { section in
+                    selectedTab = 0   // jump to Home first — browse always opens there
+                    browsePath.append(section)
                 }
+                .environment(drawer)
+                .environment(creditManager)
+                .environment(authManager)
+                .environment(theme)
+                .frame(width: drawerWidth)
+                .ignoresSafeArea()
+                .offset(x: drawer.isOpen ? 0 : -drawerWidth)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: drawer.isOpen)
             }
-            .ignoresSafeArea(edges: .bottom)
-            .environment(drawer)
-            .navigationDestination(for: String.self) { section in
-                CategoryView(
-                    section: section,
-                    onSelectPreset: selectPreset,
-                    onSelectFormat: { selectedFormat = $0 }
-                )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
-                selectedTab = 2
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
-                selectedTab = 2
-            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .environment(drawer)
+        .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
+            selectedTab = 2
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
+            selectedTab = 2
+        }
         // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
         // Also close the Magic Editor cover here (it no longer self-dismisses — presenter-driven
         // close avoids a double-dismiss bounce; no-op for other presets whose item is already nil).
@@ -184,12 +195,11 @@ struct MainTabView: View {
             )
             .environment(theme)
         }
-            .task {
-                // Best-effort sync of server truth on launch, so consent granted on another device
-                // (or a prior install) is respected without re-prompting.
-                if let me = try? await APIClient.shared.fetchMe() {
-                    hasFaceConsent = me.hasFaceConsent
-                }
+        .task {
+            // Best-effort sync of server truth on launch, so consent granted on another device
+            // (or a prior install) is respected without re-prompting.
+            if let me = try? await APIClient.shared.fetchMe() {
+                hasFaceConsent = me.hasFaceConsent
             }
         }
     }
