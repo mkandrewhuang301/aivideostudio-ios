@@ -12,6 +12,7 @@ struct MainTabView: View {
     @State private var selectedTab = 2   // open on Create by default
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
+    @State private var browsePath: [String] = []
     @State private var selectedPreset: Preset?
     // SC2: first-use face-input consent hard gate. Local mirror of the server's authoritative
     // `has_face_consent` flag (T-09.2-21 — server also enforces this; the flag here is UX only).
@@ -33,11 +34,12 @@ struct MainTabView: View {
     private let bottomLift: CGFloat = 16
 
     var body: some View {
-        GeometryReader { geo in
-            let drawerWidth = geo.size.width * 0.65
+        NavigationStack(path: $browsePath) {
+            GeometryReader { geo in
+                let drawerWidth = geo.size.width * 0.65
 
-            ZStack(alignment: .bottom) {
-                TabView(selection: $selectedTab) {
+                ZStack(alignment: .bottom) {
+                    TabView(selection: $selectedTab) {
                     HomeView(
                         onNavigateToGenerate: { selectedTab = 2 },
                         onSelectPreset: { preset in
@@ -92,9 +94,11 @@ struct MainTabView: View {
                     .onTapGesture { drawer.close() }
                     .animation(.easeInOut(duration: 0.22), value: drawer.isOpen)
             }
-            // Side drawer
-            .overlay(alignment: .leading) {
-                SideDrawerView()
+                // Side drawer
+                .overlay(alignment: .leading) {
+                    SideDrawerView { section in
+                        browsePath.append(section)
+                    }
                     .environment(drawer)
                     .environment(creditManager)
                     .environment(authManager)
@@ -103,16 +107,16 @@ struct MainTabView: View {
                     .ignoresSafeArea()
                     .offset(x: drawer.isOpen ? 0 : -drawerWidth)
                     .animation(.spring(response: 0.35, dampingFraction: 0.85), value: drawer.isOpen)
+                }
             }
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .environment(drawer)
-        .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
-            selectedTab = 2
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
-            selectedTab = 2
-        }
+            .ignoresSafeArea(edges: .bottom)
+            .environment(drawer)
+            .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
+                selectedTab = 2
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
+                selectedTab = 2
+            }
         // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
         // Also close the Magic Editor cover here (it no longer self-dismisses — presenter-driven
         // close avoids a double-dismiss bounce; no-op for other presets whose item is already nil).
@@ -161,11 +165,12 @@ struct MainTabView: View {
             )
             .environment(theme)
         }
-        .task {
-            // Best-effort sync of server truth on launch, so consent granted on another device
-            // (or a prior install) is respected without re-prompting.
-            if let me = try? await APIClient.shared.fetchMe() {
-                hasFaceConsent = me.hasFaceConsent
+            .task {
+                // Best-effort sync of server truth on launch, so consent granted on another device
+                // (or a prior install) is respected without re-prompting.
+                if let me = try? await APIClient.shared.fetchMe() {
+                    hasFaceConsent = me.hasFaceConsent
+                }
             }
         }
     }

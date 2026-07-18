@@ -4,13 +4,54 @@ struct SideDrawerView: View {
     @Environment(DrawerManager.self) private var drawer
     @Environment(CreditManager.self) private var creditManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(FormatRegistryManager.self) private var formatsRegistry
     @Environment(ThemeManager.self) private var theme
 
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
+    @State private var presetRegistry = PresetRegistryManager()
     @State private var showSignOutConfirm = false
     @State private var showManageSubscription = false
 
+    var onSelectBrowseSection: (String) -> Void = { _ in }
+
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
+
+    private struct BrowseSection {
+        let id: String
+        let title: String
+        let icon: String
+        let tint: Color
+    }
+
+    private var browseSections: [BrowseSection] {
+        [
+            BrowseSection(id: "formats", title: "Formats", icon: "sparkles", tint: accent),
+            BrowseSection(
+                id: "shows_vlogs",
+                title: "Shows & Vlogs",
+                icon: "play.rectangle",
+                tint: Color(red: 0.31, green: 0.68, blue: 0.96)
+            ),
+            BrowseSection(
+                id: "video_effects",
+                title: "Video Effects",
+                icon: "wand.and.stars",
+                tint: Color(red: 0.96, green: 0.39, blue: 0.58)
+            ),
+            BrowseSection(
+                id: "photo_effects",
+                title: "Photo Effects",
+                icon: "photo",
+                tint: Color(red: 0.22, green: 0.73, blue: 0.67)
+            ),
+        ]
+        .filter { section in
+            if section.id == "formats" {
+                return formatsRegistry.formats.contains { $0.section == section.id && $0.isLive }
+            }
+            return presetRegistry.presets.contains { $0.section == section.id && !$0.isSoon }
+        }
+    }
 
     private var displayName: String {
         authManager.currentUser?.displayName
@@ -43,12 +84,18 @@ struct SideDrawerView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 6) {
-                        sectionLabel("PREFERENCES")
-                        settingsCard
+                        if !browseSections.isEmpty {
+                            sectionLabel("BROWSE")
+                            browseCard
+                        }
 
                         sectionLabel("APPEARANCE")
                             .padding(.top, 8)
                         appearanceCard
+
+                        sectionLabel("PREFERENCES")
+                            .padding(.top, 8)
+                        settingsCard
 
                         sectionLabel("ACCOUNT")
                             .padding(.top, 8)
@@ -78,6 +125,10 @@ struct SideDrawerView: View {
         .fullScreenCover(isPresented: $showManageSubscription) {
             ManageSubscriptionView(isPresented: $showManageSubscription)
                 .environment(creditManager)
+        }
+        .task {
+            await presetRegistry.loadIfNeeded()
+            await formatsRegistry.loadIfNeeded()
         }
     }
 
@@ -122,6 +173,20 @@ struct SideDrawerView: View {
     }
 
     // MARK: - Settings card
+
+    private var browseCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(browseSections.enumerated()), id: \.element.id) { index, section in
+                if index > 0 { rowDivider }
+                actionRow(icon: section.icon, iconColor: section.tint, label: section.title) {
+                    drawer.close()
+                    onSelectBrowseSection(section.id)
+                }
+            }
+        }
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+    }
 
     private var settingsCard: some View {
         VStack(spacing: 0) {
