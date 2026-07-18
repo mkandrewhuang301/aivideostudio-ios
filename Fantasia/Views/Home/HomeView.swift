@@ -11,7 +11,6 @@ struct HomeView: View {
     @Environment(FormatRegistryManager.self) private var formatsRegistry
     @Environment(GenerationManager.self) private var generationManager
     @State private var registry = PresetRegistryManager()
-    @State private var presentedFormat: Format?
     // Phase 13, Plan 09 (D-06): the Studio hub is the ONLY entry point into Edit Studio, opened
     // exclusively from this hero tap — self-contained here (not bubbled up to MainTabView like
     // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
@@ -26,6 +25,8 @@ struct HomeView: View {
     /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
     /// standalone (D-10 sheet doesn't exist yet in this wave).
     var onSelectPreset: (Preset) -> Void = { _ in }
+    var onSelectCategory: (String) -> Void = { _ in }
+    var onSelectFormat: (Format) -> Void = { _ in }
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -96,22 +97,22 @@ struct HomeView: View {
                     }
 
                     if !formatsToShow.isEmpty {
-                        sectionHeader("Formats")
+                        sectionHeader("Formats", section: "formats")
                         formatsRow
                     }
 
                     if !showsPresets.isEmpty {
-                        sectionHeader("Shows & Vlogs")
+                        sectionHeader("Shows & Vlogs", section: "shows_vlogs")
                         showsRow
                     }
 
                     if !videoEffectsPresets.isEmpty {
-                        sectionHeader("Video Effects")
+                        sectionHeader("Video Effects", section: "video_effects")
                         effectsRow(videoEffectsPresets)
                     }
 
                     if !photoEffectsPresets.isEmpty {
-                        sectionHeader("Photo Effects")
+                        sectionHeader("Photo Effects", section: "photo_effects")
                         effectsRow(photoEffectsPresets)
                     }
 
@@ -133,12 +134,6 @@ struct HomeView: View {
             }
             .environment(theme)
         }
-        .sheet(item: $presentedFormat) { format in
-            ExplainerFormatSheet(format: format)
-                .presentationBackground(theme.background)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-        }
     }
 
     // MARK: - Background
@@ -158,15 +153,23 @@ struct HomeView: View {
 
     // MARK: - Section header (D-05: bold title left, grey "See all" right, uniform everywhere)
 
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: String, section: String? = nil) -> some View {
         HStack {
             Text(title)
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(theme.textPrimary)
             Spacer()
-            Text("See all ›")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.textTertiary)
+            if let section {
+                Button {
+                    onSelectCategory(section)
+                } label: {
+                    Text("See all ›")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("See all \(title)")
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
@@ -444,143 +447,11 @@ struct HomeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 12) {
                 ForEach(formatsToShow) { format in
-                    formatCard(format)
+                    FormatCardView(format: format, onTap: onSelectFormat)
                 }
             }
             .padding(.horizontal, 12)
         }
-    }
-
-    private func formatCard(_ format: Format) -> some View {
-        Button {
-            guard format.isLive else { return }
-            presentedFormat = format
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                Color.clear
-                    .frame(width: 172, height: 124)
-                    .overlay {
-                        formatArtwork(format)
-                            .allowsHitTesting(false)
-                    }
-                    .overlay(alignment: .topLeading) {
-                        formatBadge(format)
-                            .padding(10)
-                    }
-                    .saturation(format.isLive ? 1 : 0.58)
-                    .brightness(format.isLive ? 0 : -0.1)
-                    .clipped()
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(format.title)
-                        .font(.system(size: 14, weight: .heavy))
-                        .foregroundStyle(theme.textPrimary)
-                        .lineLimit(1)
-
-                    if let subtitle = format.subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 10.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: 148, height: 58, alignment: .leading)
-                .padding(.horizontal, 12)
-            }
-            .frame(width: 172)
-            .background(theme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 15))
-            .overlay(
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(theme.surfaceBorder, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 15))
-        }
-        .buttonStyle(PressableButtonStyle())
-        .allowsHitTesting(format.isLive)
-        .accessibilityLabel(format.isLive ? format.title : "\(format.title), coming soon")
-        .accessibilityHint(format.isLive ? "Opens format options" : "")
-    }
-
-    @ViewBuilder
-    private func formatBadge(_ format: Format) -> some View {
-        if !format.isLive {
-            formatBadgeText("SOON", background: AnyShapeStyle(Color.black.opacity(0.42)))
-        } else if let badge = format.badge, !badge.isEmpty {
-            formatBadgeText(badge, background: AnyShapeStyle(explainerAccentGradient))
-        }
-    }
-
-    private func formatBadgeText(_ text: String, background: AnyShapeStyle) -> some View {
-        Text(text)
-            .font(.system(size: 8.5, weight: .heavy))
-            .tracking(0.7)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(background, in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    @ViewBuilder
-    private func formatArtwork(_ format: Format) -> some View {
-        if let rawURL = format.tile.posterUrl,
-           let url = URL(string: rawURL),
-           let scheme = url.scheme?.lowercased(),
-           scheme == "https" || scheme == "http" {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    formatArtworkFallback(format)
-                }
-            }
-        } else {
-            formatArtworkFallback(format)
-        }
-    }
-
-    private func formatArtworkFallback(_ format: Format) -> some View {
-        LinearGradient(
-            colors: formatPalette(format),
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-            .overlay {
-                Image(systemName: formatSymbol(format))
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-    }
-
-    private func formatPalette(_ format: Format) -> [Color] {
-        switch format.formatId {
-        case "daily-verse":
-            return [Color(red: 0.95, green: 0.58, blue: 0.28), Color(red: 0.62, green: 0.29, blue: 0.45)]
-        case "spanish-lessons":
-            return [Color(red: 0.16, green: 0.68, blue: 0.63), Color(red: 0.18, green: 0.39, blue: 0.72)]
-        case "history-reimagined":
-            return [Color(red: 0.77, green: 0.32, blue: 0.36), Color(red: 0.38, green: 0.24, blue: 0.57)]
-        default:
-            return [accent, Color(red: 0.357, green: 0.561, blue: 0.851)]
-        }
-    }
-
-    private func formatSymbol(_ format: Format) -> String {
-        switch format.formatId {
-        case "daily-verse": "book.closed.fill"
-        case "spanish-lessons": "character.book.closed.fill"
-        case "history-reimagined": "building.columns.fill"
-        default: "sparkles"
-        }
-    }
-
-    private var explainerAccentGradient: LinearGradient {
-        LinearGradient(
-            colors: [accent, Color(red: 0.357, green: 0.561, blue: 0.851)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
     }
 
     // MARK: - Shows & Vlogs (two half-width cards)

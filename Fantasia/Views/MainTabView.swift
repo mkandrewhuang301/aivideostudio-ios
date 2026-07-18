@@ -14,6 +14,7 @@ struct MainTabView: View {
     @State private var drawer = DrawerManager()
     @State private var browsePath: [String] = []
     @State private var selectedPreset: Preset?
+    @State private var selectedFormat: Format?
     // SC2: first-use face-input consent hard gate. Local mirror of the server's authoritative
     // `has_face_consent` flag (T-09.2-21 — server also enforces this; the flag here is UX only).
     @AppStorage("hasFaceConsent") private var hasFaceConsent = false
@@ -30,6 +31,17 @@ struct MainTabView: View {
         preset.mediaType == "faceswap" || preset.mediaType == "avatar"
     }
 
+    /// Single preset-tap route shared by Home and every registry category.
+    private func selectPreset(_ preset: Preset) {
+        if preset.presetId == "magic-editor" {
+            magicEditorPreset = preset
+        } else if isFaceInput(preset) && !hasFaceConsent {
+            pendingFacePreset = preset
+        } else {
+            selectedPreset = preset
+        }
+    }
+
     private let tabBarHeight: CGFloat = 74
     private let bottomLift: CGFloat = 16
 
@@ -40,18 +52,12 @@ struct MainTabView: View {
 
                 ZStack(alignment: .bottom) {
                     TabView(selection: $selectedTab) {
-                    HomeView(
-                        onNavigateToGenerate: { selectedTab = 2 },
-                        onSelectPreset: { preset in
-                            if preset.presetId == "magic-editor" {
-                                magicEditorPreset = preset
-                            } else if isFaceInput(preset) && !hasFaceConsent {
-                                pendingFacePreset = preset
-                            } else {
-                                selectedPreset = preset
-                            }
-                        }
-                    )
+                        HomeView(
+                            onNavigateToGenerate: { selectedTab = 2 },
+                            onSelectPreset: selectPreset,
+                            onSelectCategory: { browsePath.append($0) },
+                            onSelectFormat: { selectedFormat = $0 }
+                        )
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(0)
@@ -111,6 +117,13 @@ struct MainTabView: View {
             }
             .ignoresSafeArea(edges: .bottom)
             .environment(drawer)
+            .navigationDestination(for: String.self) { section in
+                CategoryView(
+                    section: section,
+                    onSelectPreset: selectPreset,
+                    onSelectFormat: { selectedFormat = $0 }
+                )
+            }
             .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
                 selectedTab = 2
             }
@@ -139,6 +152,12 @@ struct MainTabView: View {
                 .environment(creditManager)
                 .environment(generationManager)
                 .environment(theme)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+        }
+        .sheet(item: $selectedFormat) { format in
+            ExplainerFormatSheet(format: format)
                 .presentationBackground(theme.background)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)

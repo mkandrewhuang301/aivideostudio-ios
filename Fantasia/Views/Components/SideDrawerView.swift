@@ -16,35 +16,8 @@ struct SideDrawerView: View {
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
-    private struct BrowseSection {
-        let id: String
-        let title: String
-        let icon: String
-        let tint: Color
-    }
-
-    private var browseSections: [BrowseSection] {
-        [
-            BrowseSection(id: "formats", title: "Formats", icon: "sparkles", tint: accent),
-            BrowseSection(
-                id: "shows_vlogs",
-                title: "Shows & Vlogs",
-                icon: "play.rectangle",
-                tint: Color(red: 0.31, green: 0.68, blue: 0.96)
-            ),
-            BrowseSection(
-                id: "video_effects",
-                title: "Video Effects",
-                icon: "wand.and.stars",
-                tint: Color(red: 0.96, green: 0.39, blue: 0.58)
-            ),
-            BrowseSection(
-                id: "photo_effects",
-                title: "Photo Effects",
-                icon: "photo",
-                tint: Color(red: 0.22, green: 0.73, blue: 0.67)
-            ),
-        ]
+    private var browseSections: [BrowseCategory] {
+        BrowseCategory.all
         .filter { section in
             if section.id == "formats" {
                 return formatsRegistry.formats.contains { $0.section == section.id && $0.isLive }

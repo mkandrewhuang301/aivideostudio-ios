@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		02BBAB59549272FFA33C31CD /* CoverPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */; };
+		D5B8C3E9F204176BACD85321 /* CategoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A7B2D8E1F3065A9BC74210 /* CategoryView.swift */; };
 		037202680A377B15FFF32B37 /* EditorCompositionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5157219F42DF412D5FF699B /* EditorCompositionBuilder.swift */; };
 		03DE4BE9123D30D92B6D6A4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 71907E2C4814D307EE0AADF4 /* Assets.xcassets */; };
 		09A51445466B4091D2D272B3 /* OnboardingQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */; };
@@ -148,6 +149,7 @@
 
 /* Begin PBXFileReference section */
 		006BD2265CFB3B00103E7FF2 /* HappyHorseModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HappyHorseModelTests.swift; sourceTree = "<group>"; };
+		C4A7B2D8E1F3065A9BC74210 /* CategoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryView.swift; sourceTree = "<group>"; };
 		0226A3C8D078EB4BB18B608E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		045559253B09A54FC9E2075E /* EditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorState.swift; sourceTree = "<group>"; };
 		0781CBA7E723CB78D90C3CB4 /* TextOverlayTrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextOverlayTrackRow.swift; sourceTree = "<group>"; };
@@ -366,6 +368,7 @@
 		310917A575E9D26FDCBE414E /* Home */ = {
 			isa = PBXGroup;
 			children = (
+				C4A7B2D8E1F3065A9BC74210 /* CategoryView.swift */,
 				0226A3C8D078EB4BB18B608E /* HomeView.swift */,
 				B96DAC085464091A33CE3D79 /* LoopPlayerPool.swift */,
 				237303656EFC3D6EFF8E850F /* PresetTileView.swift */,
@@ -859,6 +862,7 @@
 				D68C30A5ACC054F44E532B0D /* SplashView.swift in Sources */,
 				F5ECDAFC70EFB9D8BE10068F /* StudioHubView.swift in Sources */,
 				CD588BB0CE704C261299154A /* TextOverlayCanvasView.swift in Sources */,
+				D5B8C3E9F204176BACD85321 /* CategoryView.swift in Sources */,
 				B005229F73374713E0EFCD6C /* TextOverlayPillView.swift in Sources */,
 				F5BC9EED839AD6832329A1EE /* TextOverlayTrackRow.swift in Sources */,
 				853EE388913AAC155DAD230F /* ThemeManager.swift in Sources */,
