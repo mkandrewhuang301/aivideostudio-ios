@@ -48,7 +48,10 @@
 // fitted video rect (`AVMakeRect(aspectRatio:insideRect:)`) the inline editor preview
 // (EditorView.previewStage) already computes and constrains its own overlay mounts to — passed in
 // as `aspectFraction` so this is byte-for-byte the same source of truth, never a second
-// independent derivation that could drift.
+// independent derivation that could drift. The fitted overlay canvas must be a SIBLING of the
+// safe-area-ignoring video layer. Keeping it as that layer's `.overlay` inherits the expanded
+// safe-area proposal, so CaptionOverlayView can still resolve against the full screen (putting
+// the 16:9 Bottom preset in the lower letterbox) even when an outer frame looks constrained.
 
 import SwiftUI
 import AVFoundation
@@ -91,7 +94,7 @@ struct FullscreenEditorPlayerView: View {
     var body: some View {
         GeometryReader { geo in
             let fittedRect = fittedVideoRect(in: geo.size)
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 Color.black.ignoresSafeArea()
 
                 if let player {
@@ -102,30 +105,22 @@ struct FullscreenEditorPlayerView: View {
                             FillingVideoPlayerView(player: player, videoGravity: .resizeAspect)
                         }
                     }
-                        .ignoresSafeArea()
-                        .overlay {
-                            // Item 5: preview-only surface — `.allowsHitTesting(false)` means none
-                            // of TextOverlayCanvasView's gestures (move/resize/rotate/edit) can
-                            // actually fire here, so `onError` is inert; passed through anyway for
-                            // API consistency should that ever change.
-                            // Item 4 (round 2): sized/positioned to the fitted video rect, not the
-                            // full-screen container — see file header.
-                            TextOverlayCanvasView(state: state, showsControls: false, onError: onError)
-                                .frame(width: fittedRect.width, height: fittedRect.height)
-                                .position(x: fittedRect.midX, y: fittedRect.midY)
-                                .allowsHitTesting(false)
-                        }
-                        .overlay {
-                            // Item 3 (Andrew review, 2026-07-17): CaptionOverlayView gained a
-                            // vertical drag-to-reposition gesture — isDraggable: false keeps this
-                            // preview-only surface non-interactive for it, same convention as
-                            // TextOverlayCanvasView's showsControls: false above.
-                            // Item 4 (round 2): sized/positioned to the fitted video rect — see
-                            // file header.
-                            CaptionOverlayView(state: state, isDraggable: false)
-                                .frame(width: fittedRect.width, height: fittedRect.height)
-                                .position(x: fittedRect.midX, y: fittedRect.midY)
-                        }
+                    .ignoresSafeArea()
+
+                    // Verification item 6: this fixed-size sibling is the ACTUAL coordinate
+                    // space proposed to both overlay GeometryReaders. Do not move it back onto
+                    // the safe-area-ignoring video view with `.overlay` (see file header).
+                    ZStack {
+                        // Preview-only surface — none of TextOverlayCanvasView's editing gestures
+                        // can fire here, so `onError` remains an API-consistency hook.
+                        TextOverlayCanvasView(state: state, showsControls: false, onError: onError)
+                            .allowsHitTesting(false)
+
+                        // Caption drag is likewise disabled in this preview-only surface.
+                        CaptionOverlayView(state: state, isDraggable: false)
+                    }
+                    .frame(width: fittedRect.width, height: fittedRect.height)
+                    .offset(x: fittedRect.minX, y: fittedRect.minY)
                 } else {
                     ProgressView().tint(.white)
                 }
@@ -137,7 +132,12 @@ struct FullscreenEditorPlayerView: View {
                             .padding(.bottom, max(geo.safeAreaInsets.bottom, 16))
                     }
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
+            // `.ignoresSafeArea()` expands drawing, not this layout coordinate space. Keeping the
+            // root pinned to GeometryReader's exact size makes fittedRect's top-leading offsets
+            // deterministic for top, middle, and bottom caption anchors alike.
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .statusBar(hidden: true)
     }
