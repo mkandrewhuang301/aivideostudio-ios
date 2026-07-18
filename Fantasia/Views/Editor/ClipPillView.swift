@@ -72,6 +72,13 @@ struct ClipPillView: View {
     /// Fires once, on release (or cancellation) — the caller commits the drop (or no-ops if
     /// nothing moved) and exits reorder mode.
     let onReorderEnded: () -> Void
+    /// Item 1 (round 2, Andrew review 2026-07-17): fires `true` the instant an edge-handle drag
+    /// starts and `false` when it ends (both handles share this — only one can be active at a
+    /// time, gated by `isSelected`). TimelineTrackView threads this into its own
+    /// `trimmingClipId` guard so the ancestor scrub gesture (now `.simultaneousGesture`, tracking
+    /// every touch on this pill concurrently) never scrubs the timeline while the user is mid-trim
+    /// — see TimelineTrackView's file header for the full precedence model.
+    var onTrimActiveChange: (Bool) -> Void = { _ in }
 
     @State private var leftDragStartTrim: Double? = nil
     @State private var rightDragStartTrim: Double? = nil
@@ -405,6 +412,9 @@ struct ClipPillView: View {
     private var leftHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                // Item 1: signal BEFORE the isZooming guard so the ancestor's trimmingClipId guard
+                // is set the instant this touch starts, regardless of the zoom-guard's early return.
+                onTrimActiveChange(true)
                 guard !isZooming else { return }
                 if leftDragStartTrim == nil { leftDragStartTrim = clip.trimStartSeconds }
                 let deltaSec = value.translation.width / pxPerSecond
@@ -414,6 +424,7 @@ struct ClipPillView: View {
                 previewTrimStart = newStart
             }
             .onEnded { _ in
+                onTrimActiveChange(false)
                 guard !isZooming else {
                     leftDragStartTrim = nil
                     previewTrimStart = nil
@@ -432,6 +443,8 @@ struct ClipPillView: View {
     private var rightHandleGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                // Item 1: see leftHandleGesture's identical comment.
+                onTrimActiveChange(true)
                 guard !isZooming else { return }
                 if rightDragStartTrim == nil {
                     rightDragStartTrim = clip.trimEndSeconds ?? clip.originalDurationSeconds ?? clip.trimStartSeconds
@@ -444,6 +457,7 @@ struct ClipPillView: View {
                 previewTrimEnd = newEnd
             }
             .onEnded { _ in
+                onTrimActiveChange(false)
                 guard !isZooming else {
                     rightDragStartTrim = nil
                     previewTrimStart = nil

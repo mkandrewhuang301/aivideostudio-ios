@@ -5,19 +5,41 @@
 // Text/Audio/Caption track-row mount points that plans 13-15 fill in. Replaces plan 11's
 // TimelineMountView(state:) placeholder in EditorView.swift.
 //
-// Gesture mechanics reproduce Spike 001 verbatim (.planning/spikes/001-caption-timing-drag/
-// Sources/TimelineView.swift, VALIDATED on-device): content is translated under a FIXED center
-// playhead via `.offset()`, never a native scrolling container. Background `DragGesture(minimumDistance: 2)`
-// scrubs `state.currentTime`; `ClipPillView`'s `.highPriorityGesture`s (body-move / edge-handle
-// trim) win over this background gesture per SwiftUI's topmost-view-at-touch-point hit-testing —
-// no manual gesture-priority arbitration needed beyond that, exactly as the spike proved.
-//
 // Clips are laid out SEQUENTIALLY (adjacent, back-to-back playback) via a plain HStack — unlike
 // the freeform-position Text/Audio/Caption pills (plans 13-15), a clip's timeline position is
 // always the sum of every earlier clip's trimmed duration, never an independent x/y. Dragging a
 // clip's body previews a live visual offset and, on release, PATCHes its `sort_order` to the
 // dropped-on neighbor's position — the server is trusted to resequence the rest (same contract
 // ProjectManager.updateAudioClip's `sortOrder` param already relies on for audio pill reordering).
+//
+// GESTURE PRECEDENCE MODEL (Item 1, round 2, Andrew review 2026-07-17 — this is the THIRD pass
+// over this machinery; read this before touching any gesture here again):
+//
+// Round 1 (654c578) fixed ClipPillView's OWN reorder gesture (`.highPriorityGesture` →
+// `.simultaneousGesture`) but a swipe starting on a pill still didn't scrub on-device. Root cause:
+// `scrubGesture` was attached to a lone `Color.clear` hit-target that is a SIBLING of the
+// VStack{ruler, clipRow} branch in the fixed-region ZStack below — NOT an ancestor of any
+// ClipPillView. A touch that hit-tests into a ClipPillView descendant never reaches a sibling's
+// gesture recognizer at all; `.simultaneousGesture` vs `.gesture` on that sibling made no
+// difference because the recognizer was never in the right part of the tree to see the touch in
+// the first place.
+//
+// Fix: `scrubGesture` now wraps a container that holds BOTH the hit-target AND the actual
+// VStack{ruler, clipRow} — a genuine ancestor of every ClipPillView — via `.simultaneousGesture`
+// (not `.gesture`), so it starts tracking every touch on the fixed region from the instant it
+// begins, regardless of which descendant view ends up owning the tap/drag. `tracksGesture`
+// (audio/text/caption rows below) was ALREADY attached to a real ancestor container, but is now
+// also `.simultaneousGesture` for the same reason: simultaneous attachment means precedence is
+// decided ENTIRELY by the state guards in each gesture's `onChanged`, never by attachment form:
+//   - `reorderingClipId == nil` — a clip mid-long-press-reorder (ClipPillView.reorderGesture)
+//     suppresses scrub/track-scroll for the rest of that touch.
+//   - `trimmingClipId == nil` — a clip mid-edge-handle-trim (ClipPillView's 22pt handles, still
+//     `.highPriorityGesture`, minimumDistance 0) suppresses scrub for the rest of that touch.
+//     `onTrimActiveChange` fires true/false at handle-drag start/end; minimumDistance 0 on the
+//     handle guarantees it sets this BEFORE scrubGesture's minimumDistance:2 can ever fire for the
+//     same touch, so a trim can never be hijacked into a scrub.
+// A quick swipe never satisfies the long-press's 0.5s hold or lands on a handle, so it scrubs
+// immediately, exactly like a swipe anywhere else on the timeline.
 //
 // Plan 13-20 (i2/i3/i4): visual-parity rework matching the locked sketch pixel-for-pixel.
 // - Block height is now 200pt total: an 88pt FIXED region (ruler + clip row — never scrolls,
@@ -194,6 +216,10 @@ struct TimelineTrackView: View {
     // squares in VIEWPORT coordinates starting at x = playBoxWidth + 12 — always fully on-screen
     // regardless of where the playhead was. Slot math re-anchors to the overlay's own pitch
     // (`reorderPitch`), which scales down to fit up to ~12 clips before allowing overflow.
+    /// Item 1 (round 2): mirrors `reorderingClipId`'s precedence role — set for the duration of an
+    /// active edge-handle trim (ClipPillView's `onTrimActiveChange`), guarding `scrubGesture` from
+    /// hijacking a trim drag into a timeline scrub. See the file header's gesture-precedence model.
+    @State private var trimmingClipId: String? = nil
     @State private var reorderingClipId: String? = nil
     @State private var reorderDragX: CGFloat = 0
     @State private var liveOrder: [String] = []
@@ -259,27 +285,32 @@ struct TimelineTrackView: View {
                 // above already covers this area visually).
                 trackBackground
 
-                // Fixed-region scrub hit-target — unambiguous (no ScrollView competes here).
-                // F11 (Plan 13-21): a plain tap (no movement, so scrubGesture's DragGesture never
-                // fires) now also deselects — pills' own .onTapGesture still wins for taps that
-                // land on THEM specifically (SwiftUI's descendant-first hit-testing, same contract
-                // this whole file already relies on for drag-vs-scrub arbitration).
-                Color.clear
-                    .frame(height: fixedRegionHeight)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .gesture(scrubGesture)
-                    .onTapGesture {
-                        guard tapSelectionGate.acceptsTap() else { return }
-                        state.select(.none)
-                    }
+                // Item 1 (round 2): scrubGesture is attached to THIS wrapping container — a real
+                // ancestor of every ClipPillView below — via `.simultaneousGesture`, not to the
+                // lone `Color.clear` hit-target alone (see file header's gesture-precedence model
+                // for why that sibling-only attachment was the actual bug).
+                ZStack(alignment: .topLeading) {
+                    // Fixed-region scrub hit-target — unambiguous (no ScrollView competes here).
+                    // F11 (Plan 13-21): a plain tap (no movement, so scrubGesture's DragGesture
+                    // never fires) now also deselects — pills' own .onTapGesture still wins for
+                    // taps that land on THEM specifically (SwiftUI's descendant-first hit-testing).
+                    Color.clear
+                        .frame(height: fixedRegionHeight)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard tapSelectionGate.acceptsTap() else { return }
+                            state.select(.none)
+                        }
 
-                VStack(alignment: .leading, spacing: rulerToClipSpacing) {
-                    ruler(contentWidth: contentWidth)
-                    clipRow(viewportWidth: viewportWidth)
+                    VStack(alignment: .leading, spacing: rulerToClipSpacing) {
+                        ruler(contentWidth: contentWidth)
+                        clipRow(viewportWidth: viewportWidth)
+                    }
+                    .frame(width: contentWidth, alignment: .leading)
+                    .offset(x: contentOffset, y: topInset)
                 }
-                .frame(width: contentWidth, alignment: .leading)
-                .offset(x: contentOffset, y: topInset)
+                .simultaneousGesture(scrubGesture)
 
                 // F12+F13: manual tracks viewport — Audio rows ABOVE Text rows (reference image
                 // order), then the single Caption rail, stacking downward. Ruler/clip row/play/+
@@ -307,7 +338,12 @@ struct TimelineTrackView: View {
                 .frame(width: viewportWidth, height: tracksViewportHeight, alignment: .topLeading)
                 .clipped()
                 .contentShape(Rectangle())
-                .gesture(tracksGesture)
+                // Item 1 (round 2): `.simultaneousGesture` — see file header's precedence model.
+                // This container already wraps AudioTrackRow/TextOverlayTrackRow/CaptionTrackRow as
+                // real descendants, so this was already a true ancestor; simultaneous attachment
+                // keeps it consistent with scrubGesture above and lets it track a touch even if a
+                // descendant pill's own gesture ultimately wins or fails.
+                .simultaneousGesture(tracksGesture)
                 .onTapGesture {
                     guard tapSelectionGate.acceptsTap() else { return }
                     state.select(.none)
@@ -420,8 +456,10 @@ struct TimelineTrackView: View {
         DragGesture(minimumDistance: 2)
             .updating($fixedScrubGestureActive) { _, active, _ in active = true }
             .onChanged { value in
-                // 13-22 i12: suppressed while reorder mode is active.
-                guard reorderingClipId == nil, !state.isZooming else { return }
+                // 13-22 i12: suppressed while reorder mode is active. Item 1 (round 2): also
+                // suppressed while a clip's edge handle is mid-trim (trimmingClipId) — see file
+                // header's gesture-precedence model.
+                guard reorderingClipId == nil, trimmingClipId == nil, !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                 tapSelectionGate.beginMovement(.fixedRegionScrub)
                 state.isScrubbing = true
@@ -713,7 +751,8 @@ struct TimelineTrackView: View {
                             viewportWidth: viewportWidth
                         )
                     },
-                    onReorderEnded: { commitReorder(clip: clip) }
+                    onReorderEnded: { commitReorder(clip: clip) },
+                    onTrimActiveChange: { active in trimmingClipId = active ? clip.id : nil }
                 )
             }
         }
