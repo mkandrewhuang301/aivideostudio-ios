@@ -173,6 +173,11 @@ struct EditorView: View {
                     player: player,
                     usesComposedVideoOutput: usesComposedVideoOutput,
                     videoOutputRenderer: videoOutputRenderer,
+                    // Item 4 (round 2, Andrew review 2026-07-17): the SAME aspect fraction
+                    // previewStage below already fits its own overlay layers to — passed through
+                    // so FullscreenEditorPlayerView's overlay rect is byte-for-byte identical,
+                    // never a second independent derivation. See that view's file header.
+                    aspectFraction: aspectFraction(state.aspectRatio),
                     onMinimize: { showFullscreenPlayer = false },
                     // Item 5: FullscreenEditorPlayerView's own TextOverlayCanvasView mount already
                     // has `.allowsHitTesting(false)` (it's a preview-only surface — no move/resize/

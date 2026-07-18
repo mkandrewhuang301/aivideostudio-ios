@@ -36,6 +36,19 @@
 // 13-22 i6.3/i13: the minimize button moved OFF its own top-trailing row and INTO the bottom
 // playback control bar as the last element (icon `arrow.down.right.and.arrow.up.left`, 24pt
 // frame) — the old separate top row is gone entirely.
+//
+// Item 4 (round 2, Andrew review 2026-07-17): the video layer (`FillingVideoPlayerView`/
+// `EditorVideoOutputView`) is `.ignoresSafeArea()`, filling the WHOLE screen, and
+// `videoGravity: .resizeAspect` letterboxes the actual video frame WITHIN that full-screen layer
+// — but TextOverlayCanvasView/CaptionOverlayView were sized to that same full-screen container,
+// so their normalized (x/y norm, caption yOffsetNorm, top/middle/bottom presets) coordinates were
+// relative to the FULL SCREEN, not the letterboxed video rect. For any aspect that doesn't match
+// the device screen (e.g. a 16:9 project), captions/text landed offset into the letterbox bars
+// instead of inside the frame. Fixed: both overlay layers are now sized/positioned to the SAME
+// fitted video rect (`AVMakeRect(aspectRatio:insideRect:)`) the inline editor preview
+// (EditorView.previewStage) already computes and constrains its own overlay mounts to — passed in
+// as `aspectFraction` so this is byte-for-byte the same source of truth, never a second
+// independent derivation that could drift.
 
 import SwiftUI
 import AVFoundation
@@ -48,6 +61,11 @@ struct FullscreenEditorPlayerView: View {
     let player: AVPlayer?
     let usesComposedVideoOutput: Bool
     let videoOutputRenderer: EditorVideoOutputRenderer
+    /// Item 4 (round 2): the project-canvas aspect fraction (width/height), identical to what
+    /// EditorView.previewStage derives via its own `aspectFraction(state.aspectRatio)` — see file
+    /// header. Used ONLY to fit the overlay layers to the video's actual letterboxed rect; the
+    /// video layer itself already letterboxes correctly on its own via `videoGravity: .resizeAspect`.
+    let aspectFraction: CGFloat
     let onMinimize: () -> Void
     /// Item 5 (Andrew review, 2026-07-17): threaded to this view's own TextOverlayCanvasView
     /// mount below — see that mount's `.allowsHitTesting(false)` comment for why this is inert
@@ -56,8 +74,23 @@ struct FullscreenEditorPlayerView: View {
 
     @State private var isScrubbing = false
 
+    /// Item 4 (round 2): the video's aspect-fit rect within `containerSize` (the full-screen
+    /// GeometryReader size here, since the video layer itself is `.ignoresSafeArea()`) — same math
+    /// `AVMakeRect(aspectRatio:insideRect:)` always produces, matching what `videoGravity:
+    /// .resizeAspect` actually draws on screen.
+    private func fittedVideoRect(in containerSize: CGSize) -> CGRect {
+        guard aspectFraction > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
+        }
+        return AVMakeRect(
+            aspectRatio: CGSize(width: aspectFraction, height: 1),
+            insideRect: CGRect(origin: .zero, size: containerSize)
+        )
+    }
+
     var body: some View {
         GeometryReader { geo in
+            let fittedRect = fittedVideoRect(in: geo.size)
             ZStack {
                 Color.black.ignoresSafeArea()
 
@@ -75,7 +108,11 @@ struct FullscreenEditorPlayerView: View {
                             // of TextOverlayCanvasView's gestures (move/resize/rotate/edit) can
                             // actually fire here, so `onError` is inert; passed through anyway for
                             // API consistency should that ever change.
+                            // Item 4 (round 2): sized/positioned to the fitted video rect, not the
+                            // full-screen container — see file header.
                             TextOverlayCanvasView(state: state, showsControls: false, onError: onError)
+                                .frame(width: fittedRect.width, height: fittedRect.height)
+                                .position(x: fittedRect.midX, y: fittedRect.midY)
                                 .allowsHitTesting(false)
                         }
                         .overlay {
@@ -83,7 +120,11 @@ struct FullscreenEditorPlayerView: View {
                             // vertical drag-to-reposition gesture — isDraggable: false keeps this
                             // preview-only surface non-interactive for it, same convention as
                             // TextOverlayCanvasView's showsControls: false above.
+                            // Item 4 (round 2): sized/positioned to the fitted video rect — see
+                            // file header.
                             CaptionOverlayView(state: state, isDraggable: false)
+                                .frame(width: fittedRect.width, height: fittedRect.height)
+                                .position(x: fittedRect.midX, y: fittedRect.midY)
                         }
                 } else {
                     ProgressView().tint(.white)
