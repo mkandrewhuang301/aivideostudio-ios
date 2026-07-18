@@ -53,9 +53,16 @@ struct CoverPickerSheet: View {
     @State private var totalDuration: Double = 0
 
     @State private var scrubbedTime: Double = 0
-    /// Last frame whose selection gesture completed. It stays on the previous frame while the
-    /// strip is moving, then advances on release. Overlay state is intentionally independent.
-    @State private var committedCoverTime: Double = 0
+    /// Item 3 (round 2, Andrew review 2026-07-17): SPLIT from the old single `committedCoverTime`
+    /// — this now tracks ONLY the frame actually persisted server-side as the project's cover.
+    /// Browsing/scrubbing the strip never touches it; it moves exactly once, in `saveCover()`,
+    /// right after a successful `setCoverImage` PATCH. The white dot (`committedMarkerX`) binds to
+    /// THIS, not to wherever the user is currently scrubbed to — previously the strip's
+    /// drag-release handler wrote straight into this same variable on every release, so the dot
+    /// chased the browsing position instead of marking the actually-saved cover. Starts at 0 —
+    /// this ephemeral editor never decomposes the existing server-side cover back into a strip
+    /// position (see file header), so there's no earlier "saved" time to seed it with.
+    @State private var savedCoverTime: Double = 0
     @State private var previewResult: CoverPreviewResult?
     @State private var stripFrames: [UIImage?] = []
     @State private var stripCellCount = 0
@@ -261,7 +268,7 @@ struct CoverPickerSheet: View {
             let count = max(1, Int(ceil(totalDuration * px / stripCellWidth)))
             let stripOffset = viewportWidth / 2 - scrubbedTime * px
             let committedMarkerX = Self.committedMarkerX(
-                committedTime: committedCoverTime,
+                committedTime: savedCoverTime,
                 scrubbedTime: scrubbedTime,
                 pixelsPerSecond: px,
                 viewportWidth: viewportWidth
@@ -311,7 +318,7 @@ struct CoverPickerSheet: View {
         .frame(height: stripCellHeight + stripMarkerHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Cover frame selector")
-        .accessibilityValue("Selected at \(TimelineTrackView.formatTime(committedCoverTime))")
+        .accessibilityValue("Saved cover at \(TimelineTrackView.formatTime(savedCoverTime))")
     }
 
     private func stripCellView(index: Int, stripPx: CGFloat) -> some View {
@@ -357,7 +364,9 @@ struct CoverPickerSheet: View {
             }
             .onEnded { _ in
                 stripDragStartTime = nil
-                committedCoverTime = scrubbedTime
+                // Item 3 (round 2): no longer writes `savedCoverTime` here — browsing to a new
+                // frame must NOT move the white dot. It moves only in `saveCover()`, on a
+                // successful save.
                 // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
                 // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
                 requestPreview(at: scrubbedTime, quality: .precise)
@@ -383,8 +392,9 @@ struct CoverPickerSheet: View {
                     addTextOverlay()
                 }
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    coverTabLabel(icon: "photo", label: "Add photo", isSelected: selectedTab == .addPhoto)
+                    coverTabLabel(icon: "photo", label: "Add photo")
                 }
+                .buttonStyle(QuietPressButtonStyle())
             }
             .padding(.top, 8)
             .padding(.bottom, 6)
@@ -394,21 +404,31 @@ struct CoverPickerSheet: View {
 
     private func coverTab(icon: String, label: String, tab: CoverEditorTab, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            coverTabLabel(icon: icon, label: label, isSelected: selectedTab == tab)
+            coverTabLabel(icon: icon, label: label)
         }
+        .buttonStyle(QuietPressButtonStyle())
         .accessibilityLabel(label)
     }
 
-    private func coverTabLabel(icon: String, label: String, isSelected: Bool) -> some View {
+    // Item 3 (round 2, Andrew review 2026-07-17): these three tabs are one-shot action triggers
+    // (Cover resets to frame-picking + deselects; Text immediately ADDS a new overlay on every
+    // tap; Add Photo opens the system picker) — none of them represent a persistent "current mode"
+    // worth calling out with a bright/selected look. The old `isSelected ? .white : .white.opacity
+    // (0.55)` styling made whichever tab matched `selectedTab` (which defaults to "Cover") render
+    // fully opaque white at rest, reading as a highlighted/pressed button even though nothing was
+    // actually active — Andrew's ask. Fixed: uniform quiet gray for all three, always; the ONLY
+    // brightening is a real press (see QuietPressButtonStyle below), gone the instant the finger
+    // lifts.
+    private func coverTabLabel(icon: String, label: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.system(size: 19))
             Text(label)
                 .font(.system(size: 10, weight: .medium))
         }
-        // Cover editing is a utility surface, so selection stays neutral. Purple remains reserved
-        // for the primary Save action instead of making the current "Cover" tab look like a CTA.
-        .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
+        // No `.foregroundStyle` here on purpose — QuietPressButtonStyle (below) is the ONE place
+        // that sets this label's color, so "quiet at rest, brighter only while actually pressed"
+        // stays a single source of truth instead of two competing styles.
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
     }
@@ -721,6 +741,12 @@ struct CoverPickerSheet: View {
         do {
             try await projectManager.setCoverImage(data: jpeg)
             isSaving = false
+            // Item 3 (round 2): the ONLY place `savedCoverTime` moves — right after a successful
+            // save, at the exact frame that was just persisted. `scrubbedTime` is the strip's
+            // resting position, unchanged since the last drag release that produced this precise
+            // preview (Save is disabled — see `isCurrentPrecisePreviewReady` — for the entire
+            // window between a new drag starting and its precise render landing).
+            savedCoverTime = scrubbedTime
             onCoverSet()
             dismiss()
         } catch {
@@ -1468,5 +1494,18 @@ private struct CoverPhotoOverlayItemView: View {
                 onResize(liveWidthPoints)
                 widthDeltaPoints = 0
             }
+    }
+}
+
+// MARK: - Item 3 (round 2): quiet bottom-tab press style
+
+/// The bottom Cover/Text/Add-photo tabs are one-shot action triggers, not a persistent selected
+/// mode — see `coverTabLabel`'s doc comment. This is the SOLE place their color is set: quiet gray
+/// at rest, full white for exactly the duration a finger is down on them, matching Andrew's "gray
+/// controls, pressed only when needed" spec.
+private struct QuietPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(configuration.isPressed ? Color.white : Color.white.opacity(0.55))
     }
 }
