@@ -95,6 +95,7 @@ struct GenerateView: View {
 
     // Paywall and submit state
     @State private var showPaywall = false
+    @State private var showCreditStore = false
     @State private var isSubmitting = false
     @State private var errorMessage: String? = nil
 
@@ -218,7 +219,7 @@ struct GenerateView: View {
     }
 
     private var hasInsufficientCredits: Bool {
-        creditManager.entitlementLevel != .none && creditManager.creditsBalance < generationCost
+        creditManager.creditsBalance < generationCost
     }
 
     private let suggestions: [(label: String, icon: String, prompt: String)] = [
@@ -609,6 +610,10 @@ struct GenerateView: View {
         }
         .fullScreenCover(isPresented: $showPaywall) {
             PaywallView(isPresented: $showPaywall)
+                .environment(creditManager)
+        }
+        .fullScreenCover(isPresented: $showCreditStore) {
+            CreditStoreView(isPresented: $showCreditStore)
                 .environment(creditManager)
         }
         .fullScreenCover(isPresented: $showCameraPicker) {
@@ -1028,15 +1033,11 @@ struct GenerateView: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Button {
                         promptFocused = false
-                        guard creditManager.entitlementLevel != .none else {
-                            showPaywall = true
-                            return
-                        }
                         // Temporary tap-time errors — no placeholder card is created and the
                         // composer (prompt/references) is left untouched because we return
                         // before dispatchGeneration() ever runs.
                         guard !hasInsufficientCredits else {
-                            showError("Insufficient credits")
+                            presentInsufficientCredits()
                             return
                         }
                         guard !missingRequiredImage else {
@@ -1960,7 +1961,7 @@ struct GenerateView: View {
                 // Balance went stale between the client-side pre-flight check and dispatch
                 // (e.g. a concurrent generation on another device) — resync so the composer's
                 // insufficient-credits check reflects the real server-confirmed balance.
-                showError("Insufficient credits")
+                presentInsufficientCredits()
                 await creditManager.fetchBalance()
             } else {
                 print("[GenerateView] submit rejected: \(apiError)")
@@ -1974,6 +1975,14 @@ struct GenerateView: View {
             attachedReferences = capturedReferences
             showError("An error has occurred. Please try again.")
             await generationManager.refresh()
+        }
+    }
+
+    private func presentInsufficientCredits() {
+        if creditManager.entitlementLevel == .none {
+            showPaywall = true
+        } else {
+            showCreditStore = true
         }
     }
 
