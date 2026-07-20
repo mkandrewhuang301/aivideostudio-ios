@@ -24,7 +24,10 @@ struct ProfileCreditSheet: View {
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
     private var displayName: String {
-        authManager.currentUser?.displayName
+        if authManager.currentUser?.isAnonymous == true {
+            return "Guest"
+        }
+        return authManager.currentUser?.displayName
             ?? authManager.currentUser?.email?.components(separatedBy: "@").first
             ?? "Account"
     }
@@ -54,6 +57,9 @@ struct ProfileCreditSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     identityBlock
+                    if authManager.currentUser?.isAnonymous == true {
+                        guestLinkSection
+                    }
                     creditsBlock
                     menuSection
                     footer
@@ -84,7 +90,9 @@ struct ProfileCreditSheet: View {
         .alert("Delete Account?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete Account", role: .destructive) {
-                if authManager.isAppleLinkedUser {
+                if authManager.currentUser?.isAnonymous == true {
+                    Task { await performAccountDeletion() }
+                } else if authManager.isAppleLinkedUser {
                     showAppleReauthentication = true
                 } else {
                     Task { await performAccountDeletion() }
@@ -114,6 +122,91 @@ struct ProfileCreditSheet: View {
             }
         }
         .interactiveDismissDisabled(isDeleting)
+    }
+
+    // MARK: - Guest continuity
+
+    private var guestLinkSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Save your progress")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("You're using the app as a guest. Sign in now to keep your videos and credits if you switch devices.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 0) {
+                providerLinkRow(provider: .apple, label: "Sign in with Apple")
+                rowDivider
+                providerLinkRow(provider: .google, label: "Sign in with Google")
+            }
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+
+            if let linkError = authManager.linkError {
+                Text(linkError.localizedDescription)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Sign-in error: \(linkError.localizedDescription)")
+            }
+        }
+        .padding(16)
+        .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.18), lineWidth: 0.5))
+    }
+
+    private func providerLinkRow(provider: LinkProvider, label: String) -> some View {
+        Button {
+            Task {
+                try? await authManager.linkOrMerge(provider: provider, creditManager: creditManager)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                providerIcon(provider)
+                    .frame(width: 32, height: 32)
+                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 8))
+
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if authManager.isLinking {
+                    ProgressView()
+                        .tint(theme.textTertiary)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(theme.textTertiary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(authManager.isLinking)
+        .accessibilityHint("Links this guest account without losing its saved content")
+    }
+
+    @ViewBuilder
+    private func providerIcon(_ provider: LinkProvider) -> some View {
+        switch provider {
+        case .apple:
+            Image(systemName: "apple.logo")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.primary)
+        case .google:
+            Image("google_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
+        }
     }
 
     // MARK: - Identity
@@ -227,20 +320,22 @@ struct ProfileCreditSheet: View {
 
             // Account actions card
             VStack(spacing: 0) {
-                Button { showSignOutConfirm = true } label: {
-                    HStack(spacing: 12) {
-                        iconContainer(systemName: "rectangle.portrait.and.arrow.right", color: .red.opacity(0.9))
-                        Text("Sign Out")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.red)
-                        Spacer()
+                if authManager.currentUser?.isAnonymous != true {
+                    Button { showSignOutConfirm = true } label: {
+                        HStack(spacing: 12) {
+                            iconContainer(systemName: "rectangle.portrait.and.arrow.right", color: .red.opacity(0.9))
+                            Text("Sign Out")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.red)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(height: 52)
                     }
-                    .padding(.horizontal, 16)
-                    .frame(height: 52)
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                rowDivider
+                    rowDivider
+                }
 
                 Button { showDeleteConfirm = true } label: {
                     HStack(spacing: 12) {
