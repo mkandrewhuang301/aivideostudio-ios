@@ -96,6 +96,7 @@ struct GenerateView: View {
     // Paywall and submit state
     @State private var showPaywall = false
     @State private var showCreditStore = false
+    @AppStorage("hasRequestedPushOnGenerate") private var hasRequestedPushOnGenerate = false
     @State private var isSubmitting = false
     @State private var errorMessage: String? = nil
 
@@ -1052,6 +1053,12 @@ struct GenerateView: View {
                             return
                         }
                         guard !isSubmitDisabled else { return }
+                        if !hasRequestedPushOnGenerate {
+                            // Set before launching the async request so rapid taps cannot enqueue
+                            // multiple native permission prompts for the same installation.
+                            hasRequestedPushOnGenerate = true
+                            Task { await PushNotificationManager.requestIfNeeded() }
+                        }
                         Task { await dispatchGeneration() }
                     } label: {
                         Image(systemName: "arrow.up")

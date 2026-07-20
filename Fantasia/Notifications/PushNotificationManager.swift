@@ -1,7 +1,7 @@
 // PushNotificationManager.swift
 // Fantasia
-// Requests native iOS push-notification permission on first sign-in (no custom pre-prompt per
-// CONTEXT.md) and forwards the resulting APNs device token to the backend via APIClient.
+// Requests native iOS push-notification permission when the first generation starts and forwards
+// the resulting APNs device token to the backend via APIClient.
 
 import SwiftUI
 import UserNotifications
@@ -17,20 +17,25 @@ final class PushNotificationManager: NSObject {
         super.init()
     }
 
-    /// Fires the native iOS permission dialog (no custom pre-prompt per CONTEXT.md), then
-    /// registers for remote notifications if granted. Device token capture happens via
-    /// AppDelegate-equivalent UIApplicationDelegate callback wired in FantasiaApp — this
-    /// method only triggers the OS dialog and the registration call.
-    func requestPermissionAndRegister() async {
+    /// Requests permission only while the system status is still undetermined, then registers
+    /// with APNs if granted. The call is intentionally tied to the first generation action.
+    static func requestIfNeeded() async {
         let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .notDetermined else { return }
+
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
             if granted {
-                await UIApplication.shared.registerForRemoteNotifications()
+                UIApplication.shared.registerForRemoteNotifications()
             }
         } catch {
             print("[PushNotificationManager] Authorization request failed: \(error)")
         }
+    }
+
+    func requestPermissionAndRegister() async {
+        await Self.requestIfNeeded()
     }
 
     /// Called from the UIApplicationDelegate adaptor's didRegisterForRemoteNotificationsWithDeviceToken.
