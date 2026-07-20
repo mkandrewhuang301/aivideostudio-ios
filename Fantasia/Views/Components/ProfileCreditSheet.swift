@@ -20,6 +20,7 @@ struct ProfileCreditSheet: View {
     @State private var showDeleteFailure = false
     @State private var isDeleting = false
     @State private var appleRawNonce: String?
+    @State private var existingAccountPassword = ""
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -138,13 +139,17 @@ struct ProfileCreditSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(spacing: 0) {
-                providerLinkRow(provider: .apple, label: "Sign in with Apple")
-                rowDivider
-                providerLinkRow(provider: .google, label: "Sign in with Google")
+            if let email = authManager.pendingEmailMergeAddress {
+                existingEmailMergeForm(email: email)
+            } else {
+                VStack(spacing: 0) {
+                    providerLinkRow(provider: .apple, label: "Sign in with Apple")
+                    rowDivider
+                    providerLinkRow(provider: .google, label: "Sign in with Google")
+                }
+                .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
             }
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
 
             if let linkError = authManager.linkError {
                 Text(linkError.localizedDescription)
@@ -157,6 +162,60 @@ struct ProfileCreditSheet: View {
         .padding(16)
         .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.18), lineWidth: 0.5))
+    }
+
+    private func existingEmailMergeForm(email: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("This email already has a Fantasia password account. Enter that password once to merge this guest account and add Google sign-in.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(email)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+
+            SecureField("Fantasia password", text: $existingAccountPassword)
+                .textContentType(.password)
+                .padding(.horizontal, 12)
+                .frame(height: 46)
+                .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 11))
+                .overlay(RoundedRectangle(cornerRadius: 11).stroke(theme.surfaceBorder, lineWidth: 0.5))
+
+            HStack(spacing: 10) {
+                Button("Cancel") {
+                    existingAccountPassword = ""
+                    authManager.cancelPendingEmailMerge()
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    Task {
+                        do {
+                            try await authManager.completePendingEmailMerge(
+                                password: existingAccountPassword,
+                                creditManager: creditManager
+                            )
+                            existingAccountPassword = ""
+                        } catch {
+                            // AuthManager exposes the precise recoverable error below the form.
+                        }
+                    }
+                } label: {
+                    if authManager.isLinking {
+                        ProgressView()
+                    } else {
+                        Text("Merge & Continue")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+                .disabled(existingAccountPassword.isEmpty || authManager.isLinking)
+            }
+        }
+        .padding(12)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     private func providerLinkRow(provider: LinkProvider, label: String) -> some View {

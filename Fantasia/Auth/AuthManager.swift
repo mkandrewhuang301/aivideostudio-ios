@@ -17,6 +17,9 @@ enum AuthManagerError: Error, LocalizedError {
     case missingNonce
     case missingAppleIdToken
     case missingAppleAuthorizationCode
+    case missingExistingAccountEmail
+    case noPendingEmailAccountMerge
+    case incorrectExistingAccountPassword
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +28,9 @@ enum AuthManagerError: Error, LocalizedError {
         case .missingNonce: return "Apple sign-in nonce was missing. Try again."
         case .missingAppleIdToken: return "Apple sign-in did not return an identity token."
         case .missingAppleAuthorizationCode: return "Apple sign-in did not return an authorization code."
+        case .missingExistingAccountEmail: return "We found an existing account, but couldn't read its email address. Sign in with email and password first."
+        case .noPendingEmailAccountMerge: return "That account-linking attempt expired. Try Sign in with Google again."
+        case .incorrectExistingAccountPassword: return "That password is incorrect. Enter the password for this Fantasia account."
         }
     }
 }
@@ -44,9 +50,23 @@ final class AuthManager {
     var currentNonce: String?  // Stored here (not locally) so it survives to Apple sign-in delegate callback
     var linkError: Error?
     var isLinking: Bool = false
+    var pendingEmailMergeAddress: String?
 
     nonisolated(unsafe) private var listenerHandle: AuthStateDidChangeListenerHandle?
     private var appleLinkCoordinator: AppleSignInCoordinator?
+    @ObservationIgnored private var pendingEmailMerge: PendingEmailMerge?
+
+    private struct PendingEmailMerge {
+        let email: String
+        let credential: AuthCredential
+        let anonymousUid: String
+        let anonymousIdToken: String
+    }
+
+    private struct ProviderCredential {
+        let credential: AuthCredential
+        let email: String?
+    }
 
     // Listener registration deferred to start() — must not call Auth.auth() until
     // FirebaseApp.configure() has run. Keeps init() free of Firebase calls so the
@@ -68,6 +88,7 @@ final class AuthManager {
     }
 
     func signOut() async throws {
+        clearPendingEmailMerge()
         try Auth.auth().signOut()
         let replacement = try await Auth.auth().signInAnonymously()
         currentUser = replacement.user
@@ -78,6 +99,7 @@ final class AuthManager {
     }
 
     func deleteAccount(appleAuthorizationCode: String? = nil) async throws {
+        clearPendingEmailMerge()
         if isAppleLinkedUser {
             guard let appleAuthorizationCode else {
                 throw AuthManagerError.missingAppleAuthorizationCode
@@ -112,8 +134,8 @@ final class AuthManager {
     // MARK: - Sign in with Google
 
     func signInWithGoogle() async throws {
-        let credential = try await googleCredential()
-        _ = try await Auth.auth().signIn(with: credential)
+        let providerCredential = try await googleCredential()
+        _ = try await Auth.auth().signIn(with: providerCredential.credential)
         // listener fires automatically and sets currentUser
     }
 
@@ -149,7 +171,8 @@ final class AuthManager {
         do {
             let anonymousUid = anonymousUser.uid
             let anonymousIdToken = try await anonymousUser.getIDToken(forcingRefresh: true)
-            let credential = try await providerCredential(for: provider)
+            let providerLogin = try await providerCredential(for: provider)
+            let credential = providerLogin.credential
 
             do {
                 let result = try await anonymousUser.link(with: credential)
@@ -161,7 +184,7 @@ final class AuthManager {
                 if let updatedCredential = error.userInfo[AuthErrorUserInfoUpdatedCredentialKey] as? AuthCredential {
                     mergeCredential = updatedCredential
                 } else {
-                    mergeCredential = try await providerCredential(for: provider)
+                    mergeCredential = try await providerCredential(for: provider).credential
                 }
                 let result = try await Auth.auth().signIn(with: mergeCredential)
 
@@ -176,6 +199,21 @@ final class AuthManager {
                 }
 
                 await refreshIdentity(result.user, creditManager: creditManager)
+            } catch let error as NSError
+                where error.domain == AuthErrorDomain
+                    && Self.isEmailAccountCollision(error) {
+                guard let email = (error.userInfo[AuthErrorUserInfoEmailKey] as? String)
+                    ?? providerLogin.email,
+                      !email.isEmpty else {
+                    throw AuthManagerError.missingExistingAccountEmail
+                }
+                pendingEmailMerge = PendingEmailMerge(
+                    email: email,
+                    credential: credential,
+                    anonymousUid: anonymousUid,
+                    anonymousIdToken: anonymousIdToken
+                )
+                pendingEmailMergeAddress = email
             }
         } catch {
             let nsError = error as NSError
@@ -189,22 +227,81 @@ final class AuthManager {
         }
     }
 
+    /// Completes the recovery required by Firebase when a Google email already belongs to a
+    /// password account: authenticate that existing account, attach Google to its Firebase UID,
+    /// then merge the retained guest data into it.
+    func completePendingEmailMerge(password: String, creditManager: CreditManager? = nil) async throws {
+        guard let pendingEmailMerge, !isLinking else {
+            throw AuthManagerError.noPendingEmailAccountMerge
+        }
+
+        isLinking = true
+        linkError = nil
+        defer { isLinking = false }
+
+        do {
+            let result = try await Auth.auth().signIn(
+                withEmail: pendingEmailMerge.email,
+                password: password
+            )
+            let linkedResult = try await result.user.link(with: pendingEmailMerge.credential)
+
+            do {
+                try await APIClient.shared.mergeAnonymousAccount(
+                    anonymousUid: pendingEmailMerge.anonymousUid,
+                    anonymousIdToken: pendingEmailMerge.anonymousIdToken
+                )
+            } catch APIError.mergeAlreadyCompleted {
+                // A retry after an interrupted UI transition is already complete server-side.
+            }
+
+            clearPendingEmailMerge()
+            await refreshIdentity(linkedResult.user, creditManager: creditManager)
+        } catch {
+            let nsError = error as NSError
+            let code = nsError.domain == AuthErrorDomain ? AuthErrorCode(rawValue: nsError.code) : nil
+            if code == .wrongPassword || code == .invalidCredential {
+                let passwordError = AuthManagerError.incorrectExistingAccountPassword
+                linkError = passwordError
+                throw passwordError
+            } else {
+                linkError = error
+                throw error
+            }
+        }
+    }
+
+    func cancelPendingEmailMerge() {
+        clearPendingEmailMerge()
+        linkError = nil
+    }
+
+    private func clearPendingEmailMerge() {
+        pendingEmailMerge = nil
+        pendingEmailMergeAddress = nil
+    }
+
+    private static func isEmailAccountCollision(_ error: NSError) -> Bool {
+        let code = AuthErrorCode(rawValue: error.code)
+        return code == .emailAlreadyInUse || code == .accountExistsWithDifferentCredential
+    }
+
     private func refreshIdentity(_ user: User, creditManager: CreditManager?) async {
         currentUser = user
         _ = try? await Purchases.shared.logIn(user.uid)
         await creditManager?.fetchBalance(force: true)
     }
 
-    private func providerCredential(for provider: LinkProvider) async throws -> AuthCredential {
+    private func providerCredential(for provider: LinkProvider) async throws -> ProviderCredential {
         switch provider {
         case .google:
             return try await googleCredential()
         case .apple:
-            return try await appleCredential()
+            return ProviderCredential(credential: try await appleCredential(), email: nil)
         }
     }
 
-    private func googleCredential() async throws -> AuthCredential {
+    private func googleCredential() async throws -> ProviderCredential {
         guard let rootVC = await Self.rootViewController() else {
             throw AuthManagerError.noPresentingViewController
         }
@@ -212,9 +309,12 @@ final class AuthManager {
         guard let idToken = result.user.idToken?.tokenString else {
             throw AuthManagerError.missingGoogleIdToken
         }
-        return GoogleAuthProvider.credential(
-            withIDToken: idToken,
-            accessToken: result.user.accessToken.tokenString
+        return ProviderCredential(
+            credential: GoogleAuthProvider.credential(
+                withIDToken: idToken,
+                accessToken: result.user.accessToken.tokenString
+            ),
+            email: result.user.profile?.email
         )
     }
 
