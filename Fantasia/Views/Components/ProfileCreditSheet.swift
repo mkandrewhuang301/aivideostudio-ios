@@ -13,6 +13,7 @@ struct ProfileCreditSheet: View {
     @Binding var isPresented: Bool
 
     @State private var showCreditStore = false
+    @State private var showSignInSheet = false
     @State private var showManageSubscription = false
     @State private var showSignOutConfirm = false
     @State private var showDeleteConfirm = false
@@ -59,7 +60,7 @@ struct ProfileCreditSheet: View {
                 VStack(spacing: 16) {
                     identityBlock
                     if authManager.currentUser?.isAnonymous == true {
-                        guestLinkSection
+                        signInNudge
                     }
                     creditsBlock
                     menuSection
@@ -83,6 +84,11 @@ struct ProfileCreditSheet: View {
             ManageSubscriptionView(isPresented: $showManageSubscription)
                 .environment(creditManager)
         }
+        .sheet(isPresented: $showSignInSheet) {
+            signInSheet
+                .presentationDetents([.height(340)])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $showAppleReauthentication) {
             appleReauthenticationSheet
                 .presentationDetents([.height(260)])
@@ -91,9 +97,7 @@ struct ProfileCreditSheet: View {
         .alert("Delete Account?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete Account", role: .destructive) {
-                if authManager.currentUser?.isAnonymous == true {
-                    Task { await performAccountDeletion() }
-                } else if authManager.isAppleLinkedUser {
+                if authManager.isAppleLinkedUser {
                     showAppleReauthentication = true
                 } else {
                     Task { await performAccountDeletion() }
@@ -125,43 +129,118 @@ struct ProfileCreditSheet: View {
         .interactiveDismissDisabled(isDeleting)
     }
 
-    // MARK: - Guest continuity
+    // MARK: - Guest sign-in (nudge + mini-sheet)
 
-    private var guestLinkSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Save your progress")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text("You're using the app as a guest. Sign in now to keep your videos and credits if you switch devices.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let email = authManager.pendingEmailMergeAddress {
-                existingEmailMergeForm(email: email)
-            } else {
-                VStack(spacing: 0) {
-                    providerLinkRow(provider: .apple, label: "Sign in with Apple")
-                    rowDivider
-                    providerLinkRow(provider: .google, label: "Sign in with Google")
-                }
-                .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
-            }
-
-            if let linkError = authManager.linkError {
-                Text(linkError.localizedDescription)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Sign-in error: \(linkError.localizedDescription)")
-            }
+    private var signInNudge: some View {
+        Button {
+            showSignInSheet = true
+        } label: {
+            Text("Sign in to save your progress ›")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(accentText)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .contentShape(Rectangle())
         }
-        .padding(16)
-        .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.18), lineWidth: 0.5))
+        .buttonStyle(.plain)
+        .padding(.top, -8)
+    }
+
+    private var signInSheet: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 52, height: 52)
+                    .background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+
+                VStack(spacing: 6) {
+                    Text("Save your progress")
+                        .font(.title3.weight(.semibold))
+                    Text("Sign in to keep your videos and credits if you switch devices. Your guest progress carries over.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let email = authManager.pendingEmailMergeAddress {
+                    existingEmailMergeForm(email: email)
+                } else {
+                    VStack(spacing: 10) {
+                        Button {
+                            Task { await linkProvider(.apple) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "apple.logo")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("Sign in with Apple")
+                                    .font(.body.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .foregroundStyle(.black)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            Task { await linkProvider(.google) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image("google_logo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 17, height: 17)
+                                Text("Sign in with Google")
+                                    .font(.body.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .foregroundStyle(.primary)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(theme.surfaceBorder, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .disabled(authManager.isLinking)
+                    .overlay {
+                        if authManager.isLinking {
+                            ProgressView()
+                                .tint(theme.textTertiary)
+                        }
+                    }
+                }
+
+                if let linkError = authManager.linkError {
+                    Text(linkError.localizedDescription)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Sign-in error: \(linkError.localizedDescription)")
+                }
+
+                Text("You can keep using the app as a guest anytime.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+        }
+        .onChange(of: authManager.currentUser?.isAnonymous) { _, isAnonymous in
+            if isAnonymous == false { showSignInSheet = false }
+        }
+    }
+
+    private func linkProvider(_ provider: LinkProvider) async {
+        try? await authManager.linkOrMerge(provider: provider, creditManager: creditManager)
+        if authManager.currentUser?.isAnonymous == false {
+            showSignInSheet = false
+        }
     }
 
     private func existingEmailMergeForm(email: String) -> some View {
@@ -218,57 +297,12 @@ struct ProfileCreditSheet: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
-    private func providerLinkRow(provider: LinkProvider, label: String) -> some View {
-        Button {
-            Task {
-                try? await authManager.linkOrMerge(provider: provider, creditManager: creditManager)
-            }
-        } label: {
-            HStack(spacing: 12) {
-                providerIcon(provider)
-                    .frame(width: 32, height: 32)
-                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 8))
-
-                Text(label)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                if authManager.isLinking {
-                    ProgressView()
-                        .tint(theme.textTertiary)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(theme.textTertiary)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(authManager.isLinking)
-        .accessibilityHint("Links this guest account without losing its saved content")
-    }
-
-    @ViewBuilder
-    private func providerIcon(_ provider: LinkProvider) -> some View {
-        switch provider {
-        case .apple:
-            Image(systemName: "apple.logo")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.primary)
-        case .google:
-            Image("google_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 17, height: 17)
-        }
-    }
-
     // MARK: - Identity
+
+    /// Light lavender for dark mode, falls back to `accent` in light mode for contrast.
+    private var accentText: Color {
+        theme.isLight ? accent : Color(red: 0.71, green: 0.58, blue: 1.0)
+    }
 
     private var identityBlock: some View {
         HStack(spacing: 14) {
@@ -365,21 +399,21 @@ struct ProfileCreditSheet: View {
             .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 0.5))
 
-            // Dashed separator
-            GeometryReader { geo in
-                Path { path in
-                    path.move(to: CGPoint(x: 0, y: 0.5))
-                    path.addLine(to: CGPoint(x: geo.size.width, y: 0.5))
+            if authManager.currentUser?.isAnonymous != true {
+                // Dashed separator
+                GeometryReader { geo in
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: 0.5))
+                        path.addLine(to: CGPoint(x: geo.size.width, y: 0.5))
+                    }
+                    .stroke(theme.divider, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 }
-                .stroke(theme.divider, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-            }
-            .frame(height: 1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 10)
+                .frame(height: 1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 10)
 
-            // Account actions card
-            VStack(spacing: 0) {
-                if authManager.currentUser?.isAnonymous != true {
+                // Account actions card
+                VStack(spacing: 0) {
                     Button { showSignOutConfirm = true } label: {
                         HStack(spacing: 12) {
                             iconContainer(systemName: "rectangle.portrait.and.arrow.right", color: .red.opacity(0.9))
@@ -394,29 +428,29 @@ struct ProfileCreditSheet: View {
                     .buttonStyle(.plain)
 
                     rowDivider
-                }
 
-                Button { showDeleteConfirm = true } label: {
-                    HStack(spacing: 12) {
-                        iconContainer(systemName: "trash.fill", color: .red.opacity(0.9))
-                        Text("Delete Account")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.red)
-                        Spacer()
+                    Button { showDeleteConfirm = true } label: {
+                        HStack(spacing: 12) {
+                            iconContainer(systemName: "trash.fill", color: .red.opacity(0.9))
+                            Text("Delete Account")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.red)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(height: 52)
                     }
-                    .padding(.horizontal, 16)
-                    .frame(height: 52)
+                    .buttonStyle(.plain)
+                    .disabled(isDeleting)
                 }
-                .buttonStyle(.plain)
-                .disabled(isDeleting)
-            }
-            .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.red.opacity(0.15), lineWidth: 0.5))
-            .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) {
-                    Task { try? await authManager.signOut() }
+                .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.red.opacity(0.15), lineWidth: 0.5))
+                .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
+                    Button("Sign Out", role: .destructive) {
+                        Task { try? await authManager.signOut() }
+                    }
+                    Button("Cancel", role: .cancel) {}
                 }
-                Button("Cancel", role: .cancel) {}
             }
         }
     }
@@ -485,7 +519,7 @@ struct ProfileCreditSheet: View {
     }
 
     private func performAccountDeletion(appleAuthorizationCode: String? = nil) async {
-        guard !isDeleting else { return }
+        guard authManager.currentUser?.isAnonymous == false, !isDeleting else { return }
         let deletingUid = authManager.currentUser?.uid
         isDeleting = true
         defer { isDeleting = false }
