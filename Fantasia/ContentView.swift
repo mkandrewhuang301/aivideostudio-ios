@@ -98,6 +98,18 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: authManager.accountMergeRevision) { _, _ in
+            // Firebase switches from the guest UID to the existing provider UID before
+            // POST /api/me/merge runs. The ordinary auth-state callback therefore cannot
+            // refresh these collections safely: it can fetch the target account just before
+            // the backend moves the guest rows, then mark the empty result as fresh for up to
+            // five minutes. This signal is emitted only after /merge returns 204/409.
+            Task {
+                await generationManager.refresh()
+                await mediaLibraryManager.load(forceRefresh: true)
+                await projectManager.refreshProjects()
+            }
+        }
     }
 
     private var isLaunchLoading: Bool {

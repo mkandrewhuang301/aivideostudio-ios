@@ -51,6 +51,10 @@ final class AuthManager {
     var linkError: Error?
     var isLinking: Bool = false
     var pendingEmailMergeAddress: String?
+    /// Changes only after the backend has accepted an anonymous -> existing-account merge.
+    /// ContentView observes this to refresh account-owned collections after Firebase has
+    /// already switched UIDs; the auth-state listener itself fires too early (before /merge).
+    var accountMergeRevision: Int = 0
 
     nonisolated(unsafe) private var listenerHandle: AuthStateDidChangeListenerHandle?
     private var appleLinkCoordinator: AppleSignInCoordinator?
@@ -198,7 +202,7 @@ final class AuthManager {
                     // target already owns the source account's transferable data.
                 }
 
-                await refreshIdentity(result.user, creditManager: creditManager)
+                await refreshIdentity(result.user, creditManager: creditManager, completedMerge: true)
             } catch let error as NSError
                 where error.domain == AuthErrorDomain
                     && Self.isEmailAccountCollision(error) {
@@ -256,7 +260,7 @@ final class AuthManager {
             }
 
             clearPendingEmailMerge()
-            await refreshIdentity(linkedResult.user, creditManager: creditManager)
+            await refreshIdentity(linkedResult.user, creditManager: creditManager, completedMerge: true)
         } catch {
             let nsError = error as NSError
             let code = nsError.domain == AuthErrorDomain ? AuthErrorCode(rawValue: nsError.code) : nil
@@ -286,10 +290,17 @@ final class AuthManager {
         return code == .emailAlreadyInUse || code == .accountExistsWithDifferentCredential
     }
 
-    private func refreshIdentity(_ user: User, creditManager: CreditManager?) async {
+    private func refreshIdentity(
+        _ user: User,
+        creditManager: CreditManager?,
+        completedMerge: Bool = false
+    ) async {
         currentUser = user
         _ = try? await Purchases.shared.logIn(user.uid)
         await creditManager?.fetchBalance(force: true)
+        if completedMerge {
+            accountMergeRevision &+= 1
+        }
     }
 
     private func providerCredential(for provider: LinkProvider) async throws -> ProviderCredential {
