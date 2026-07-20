@@ -3,6 +3,7 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAuth
 import RevenueCat
 import GoogleSignIn
 
@@ -69,14 +70,26 @@ struct FantasiaApp: App {
                     )
                     authManager.start()
 
-                    // Configure RevenueCat AFTER Firebase so Firebase UID is potentially available.
-                    // Configured with nil appUserID here (anonymous user) per RESEARCH.md Pitfall 2.
-                    // ContentView.onChange(currentUser) calls Purchases.shared.logIn(uid) on sign-in.
+                    // Configure RevenueCat synchronously before anonymous sign-in can trigger
+                    // ContentView's auth-state listener. The listener calls logIn(uid), so
+                    // Purchases must already be configured before the awaited Firebase request
+                    // has a chance to publish the new user.
                     Purchases.logLevel = AppConfig.nodeEnv == "production" ? .error : .debug
                     Purchases.configure(
                         withAPIKey: AppConfig.revenueCatApiKey,
-                        appUserID: nil // Set to Firebase UID in AuthManager after auth state restores
+                        appUserID: nil
                     )
+
+                    // Guest-first launch: Firebase restores an existing account from Keychain,
+                    // or silently creates an anonymous account on a true first run. ContentView's
+                    // auth listener identifies the resulting UID to RevenueCat and the backend.
+                    if Auth.auth().currentUser == nil {
+                        do {
+                            _ = try await Auth.auth().signInAnonymously()
+                        } catch {
+                            print("[FantasiaApp] Anonymous sign-in failed: \(error)")
+                        }
+                    }
                     // ensuring: top-up ids so the launch prefetch (not just the stale-cache check)
                     // covers the consumable packs — they live in a separate offering from `current`.
                     Task {
