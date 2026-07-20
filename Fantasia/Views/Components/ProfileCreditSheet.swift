@@ -435,6 +435,11 @@ struct ProfileCreditSheet: View {
                 creditManager.clearAccountCache(uid: deletingUid)
                 ListSnapshotStore.clearAll(uid: deletingUid)
             }
+            creditManager.reset()
+            let defaults = UserDefaults.standard
+            defaults.removeObject(forKey: "hasCompletedOnboarding")
+            defaults.removeObject(forKey: "hasClaimedFreeCredits")
+            defaults.removeObject(forKey: "hasRequestedPushOnGenerate")
             isPresented = false
         } catch {
             print("[ProfileCreditSheet] Account deletion failed: \(error)")

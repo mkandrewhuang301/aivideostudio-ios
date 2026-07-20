@@ -91,7 +91,19 @@ final class AuthManager {
         }
 
         try await APIClient.shared.deleteAccount()
-        try signOut()
+        try? signOut()
+
+        // Guest-first routing requires an authenticated Firebase user at all times. The deleted
+        // UID cannot be reused, so immediately establish a fresh anonymous session instead of
+        // leaving ContentView on its nil-user loading state. A launch retry still recovers if the
+        // network happens to be unavailable at this exact moment.
+        do {
+            let replacement = try await Auth.auth().signInAnonymously()
+            currentUser = replacement.user
+        } catch {
+            currentUser = nil
+            print("[AuthManager] Account deleted, but replacement guest sign-in failed: \(error)")
+        }
     }
 
     // MARK: - Sign in with Google
