@@ -28,7 +28,6 @@
 		1C992AA667BC7F43BF6A54C0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226A3C8D078EB4BB18B608E /* HomeView.swift */; };
 		2234D1252AC365C122FD0D0D /* AppReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717CD558C67E62B28DC71D97 /* AppReview.swift */; };
 		23577959873A72580EBEACD8 /* HighlightingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CADE304C9B50E97EED46BA1 /* HighlightingTextView.swift */; };
-		25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF13629D571EF8D48B749B /* BubblePickerView.swift */; };
 		2936AC324024CAFC07A04B44 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAA9C82EC2A449C5F50F0CD /* PaywallView.swift */; };
 		2B37491440F3B799AC6DB3FC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7137D3DC45A60C75C3109168 /* GoogleSignInSwift */; };
 		2BEA2E1E9B02CBABB5C48C80 /* AddAudioSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */; };
@@ -260,7 +259,6 @@
 		DFD7C9E66CF4DE4824958A25 /* TransparencyBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencyBackdrop.swift; sourceTree = "<group>"; };
 		DFFDAAFFE35FDD68DEC8CB2A /* AddAudioSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddAudioSheet.swift; sourceTree = "<group>"; };
 		E0373383B154A82D02C1939C /* ProfileCreditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCreditSheet.swift; sourceTree = "<group>"; };
-		E1AF13629D571EF8D48B749B /* BubblePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePickerView.swift; sourceTree = "<group>"; };
 		E3662D1C842FED5CB79CDA5D /* CoverPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverPickerSheet.swift; sourceTree = "<group>"; };
 		E800BB75E6A7C706622D1CB0 /* CreditStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditStoreView.swift; sourceTree = "<group>"; };
 		E8168EFBB699C6D13749D7F4 /* EdgeAutoScroll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeAutoScroll.swift; sourceTree = "<group>"; };
@@ -406,7 +404,6 @@
 		53184DDF5C85560F33C29D1E /* Onboarding */ = {
 			isa = PBXGroup;
 			children = (
-				E1AF13629D571EF8D48B749B /* BubblePickerView.swift */,
 				CED4282A9D0FC2042286F4D0 /* OnboardingFeatureSlideView.swift */,
 				7D3BAFAAAE60103802F52B33 /* OnboardingFeaturesView.swift */,
 				CE4A20B7195BE96373D799C9 /* OnboardingQuestion.swift */,
@@ -771,7 +768,6 @@
 				AB6DF7C330755B6212771832 /* AudioTrackRow.swift in Sources */,
 				56F365A49D67F15CB5AB8308 /* AuthManager.swift in Sources */,
 				9E8F4D64E56BB941F57A2634 /* BrandGradient.swift in Sources */,
-				25CE5F74CC04C939F2066EF2 /* BubblePickerView.swift in Sources */,
 				9CBE3B9FE3090E3EB4DBFE1C /* CameraPicker.swift in Sources */,
 				E053D198F65211B4115360EF /* CaptionOverlayView.swift in Sources */,
 				2E4D90B5752D0907008EEA67 /* CaptionPillView.swift in Sources */,

@@ -1,13 +1,12 @@
 // ContentView.swift
 // Fantasia
 // Routing order:
-//   1. Loading (splash)
-//   2. Authenticated + email verified → MainTabView (skip onboarding entirely)
-//   3. Authenticated + email not verified → CheckInboxView (email/password only)
-//   4. Not authenticated + no onboarding → OnboardingView (first launch)
-//   5. Not authenticated + onboarding done → SignInView
+//   1. Loading (splash while auth restores/signs in and initial credits resolve)
+//   2. First run → OnboardingView
+//   3. Onboarding complete → MainTabView
 
 import SwiftUI
+import DeviceCheck
 import RevenueCat
 
 struct ContentView: View {
@@ -42,9 +41,7 @@ struct ContentView: View {
     var body: some View {
         productionRouting
         .preferredColorScheme(theme.colorScheme)
-        .animation(.easeInOut(duration: 0.35), value: authManager.isLoading || !minSplashElapsed)
-        .animation(.easeInOut(duration: 0.35), value: authManager.currentUser == nil)
-        .animation(.easeInOut(duration: 0.35), value: authManager.currentUser?.isEmailVerified)
+        .animation(.easeInOut(duration: 0.35), value: isLaunchLoading)
         .animation(.easeInOut(duration: 0.35), value: hasCompletedOnboarding)
         .animation(.easeInOut(duration: 0.35), value: creditManager.hasLoaded)
         .animation(.easeInOut(duration: 0.35), value: creditManager.hasCachedState)
@@ -95,18 +92,24 @@ struct ContentView: View {
                     async let balance: Void = creditManager.fetchBalance()
                     _ = await rcLogin
                     await balance
-                    await handleFirstSignIn()
+                    if hasCompletedOnboarding {
+                        await claimFreeCreditsIfNeeded()
+                    }
                 }
             }
         }
+    }
+
+    private var isLaunchLoading: Bool {
+        authManager.isLoading || authManager.currentUser == nil || !minSplashElapsed
     }
 
     @ViewBuilder
     private var productionRouting: some View {
         if shouldSkipToMain {
             MainTabView()
-        } else if authManager.isLoading || !minSplashElapsed {
-            // State 1: Loading — show splash until auth state resolves + 2s minimum
+        } else if isLaunchLoading {
+            // State 1: Loading — wait for Firebase restore/anonymous sign-in and the minimum splash.
             SplashView()
         } else if authManager.currentUser != nil && !creditManager.hasLoaded && !creditManager.hasCachedState && !creditsWaitTimedOut {
             // State 1b: Authenticated but profile/credits haven't loaded yet, and we have no
@@ -117,34 +120,49 @@ struct ContentView: View {
             // and MainTabView renders immediately with the last-known balance; fetchBalance()
             // silently corrects it moments later.
             SplashView()
-        } else if let currentUser = authManager.currentUser, currentUser.isEmailVerified {
-            // State 2: Authenticated + verified — skip onboarding, go straight to app
-            MainTabView()
-        } else if let currentUser = authManager.currentUser, !currentUser.isEmailVerified {
-            // State 3: Email/password sign-up, not yet verified (Apple/Google always skip this)
-            CheckInboxView(email: currentUser.email ?? "")
         } else if !hasCompletedOnboarding {
-            // State 4: Unauthenticated, first launch — show onboarding before sign-in
-            OnboardingView(onComplete: { hasCompletedOnboarding = true })
+            // State 2: Authenticated guest on first run — onboarding ends directly in the app.
+            OnboardingView(onComplete: {
+                hasCompletedOnboarding = true
+                Task { await claimFreeCreditsIfNeeded() }
+            })
         } else {
-            // State 5: Unauthenticated, onboarding already seen — sign in
-            SignInView()
+            // State 3: Anonymous and provider-linked users share the same app shell.
+            MainTabView()
         }
     }
 
-    private func handleFirstSignIn() async {
-        // 1. Native push permission dialog + device token registration (CONTEXT.md: fires immediately after first sign-in)
-        await PushNotificationManager.shared.requestPermissionAndRegister()
+    private func claimFreeCreditsIfNeeded() async {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "hasClaimedFreeCredits") else { return }
+        guard let deviceToken = await generateDeviceCheckToken() else { return }
 
-        // 2. Flush cached onboarding answers (06-05 wrote these to UserDefaults before auth existed)
-        if let data = UserDefaults.standard.data(forKey: "pendingOnboardingAnswers"),
-           let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
-            do {
-                try await APIClient.shared.updatePreferences(decoded)
-                UserDefaults.standard.removeObject(forKey: "pendingOnboardingAnswers")
-            } catch {
-                print("[ContentView] Failed to flush onboarding preferences: \(error)")
-                // Leave the cached data in UserDefaults — best-effort save per CONTEXT.md deferred scope.
+        do {
+            try await APIClient.shared.claimFreeCredits(deviceToken: deviceToken)
+            defaults.set(true, forKey: "hasClaimedFreeCredits")
+            await creditManager.fetchBalance(force: true)
+        } catch {
+            // Backend + DeviceCheck are the authoritative idempotency gates. Leave the local
+            // flag unset so a later authenticated launch can safely retry a transient failure.
+            print("[ContentView] Free-credit claim failed: \(error)")
+        }
+    }
+
+    private func generateDeviceCheckToken() async -> String? {
+        let device = DCDevice.current
+        guard device.isSupported else {
+            print("[ContentView] DeviceCheck is unavailable; skipping the free-credit claim")
+            return nil
+        }
+
+        return await withCheckedContinuation { continuation in
+            device.generateToken { data, error in
+                guard let data else {
+                    print("[ContentView] DeviceCheck token generation failed: \(error?.localizedDescription ?? "unknown error")")
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: data.base64EncodedString())
             }
         }
     }

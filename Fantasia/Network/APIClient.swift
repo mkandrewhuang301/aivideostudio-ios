@@ -108,6 +108,13 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/me/preferences", body: body)
     }
 
+    // POST /api/me/free-credits — the backend verifies the DeviceCheck token, owns
+    // once-per-device/UID idempotency, and responds 204 for both granted and ineligible users.
+    func claimFreeCredits(deviceToken: String) async throws {
+        let body = try JSONEncoder().encode(["deviceToken": deviceToken])
+        try await authorizedRequestNoContent(path: "api/me/free-credits", method: "POST", body: body)
+    }
+
     // PATCH /api/me/consent — SC2: records first-use face-input consent attestation (204, no body)
     func updateConsent() async throws {
         try await authorizedRequestNoContent(path: "api/me/consent", method: "PATCH")

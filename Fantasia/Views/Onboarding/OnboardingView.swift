@@ -3,7 +3,7 @@
 // 4-slide feature carousel onboarding.
 // Slide 0: OnboardingVideoView (text-to-cinematic video, existing).
 // Slides 1-3: OnboardingFeatureSlideView — motion transfer, try-on, ads/social.
-// After slide 3: onComplete() → straight into app (deferred sign-in).
+// After slide 3: onComplete() → straight into the app as an authenticated guest.
 
 import SwiftUI
 
