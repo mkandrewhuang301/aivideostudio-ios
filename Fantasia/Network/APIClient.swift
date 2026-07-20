@@ -115,6 +115,34 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/me/free-credits", method: "POST", body: body)
     }
 
+    // POST /api/me/merge — the bearer token identifies the destination account while the
+    // retained anonymous token proves ownership of the source account. Never log either token.
+    func mergeAnonymousAccount(anonymousUid: String, anonymousIdToken: String) async throws {
+        let body = try JSONEncoder().encode([
+            "anonymousUid": anonymousUid,
+            "anonymousToken": anonymousIdToken,
+        ])
+        let targetToken = try await getIDToken()
+        let path = "api/me/merge"
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(targetToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        if status == 204 {
+            return
+        }
+
+        let code = (try? JSONDecoder().decode([String: String].self, from: data))?["code"]
+        if status == 409 {
+            throw APIError.mergeAlreadyCompleted
+        }
+        throw APIError.unexpectedResponse(statusCode: status, code: code)
+    }
+
     // PATCH /api/me/consent — SC2: records first-use face-input consent attestation (204, no body)
     func updateConsent() async throws {
         try await authorizedRequestNoContent(path: "api/me/consent", method: "PATCH")
@@ -990,12 +1018,15 @@ struct UserInfo: Decodable {
 
 enum APIError: Error, LocalizedError {
     case unexpectedResponse(statusCode: Int, code: String?)
+    case mergeAlreadyCompleted
     case notAuthenticated
 
     var errorDescription: String? {
         switch self {
         case .unexpectedResponse:
             return "Unexpected server response"
+        case .mergeAlreadyCompleted:
+            return "This guest account has already been merged"
         case .notAuthenticated:
             return "Not signed in"
         }
