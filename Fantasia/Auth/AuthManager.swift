@@ -67,9 +67,10 @@ final class AuthManager {
         }
     }
 
-    func signOut() throws {
+    func signOut() async throws {
         try Auth.auth().signOut()
-        // The listener fires automatically and sets currentUser = nil
+        let replacement = try await Auth.auth().signInAnonymously()
+        currentUser = replacement.user
     }
 
     var isAppleLinkedUser: Bool {
@@ -91,7 +92,9 @@ final class AuthManager {
         }
 
         try await APIClient.shared.deleteAccount()
-        try? signOut()
+        // Account deletion owns its replacement-session flow below because it also needs to
+        // reset per-account state. Keep that behavior separate from ordinary Sign Out.
+        try? Auth.auth().signOut()
 
         // Guest-first routing requires an authenticated Firebase user at all times. The deleted
         // UID cannot be reused, so immediately establish a fresh anonymous session instead of

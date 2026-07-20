@@ -354,7 +354,9 @@ struct ProfileCreditSheet: View {
             .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.red.opacity(0.15), lineWidth: 0.5))
             .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) { try? authManager.signOut() }
+                Button("Sign Out", role: .destructive) {
+                    Task { try? await authManager.signOut() }
+                }
                 Button("Cancel", role: .cancel) {}
             }
         }

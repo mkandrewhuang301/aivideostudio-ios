@@ -88,7 +88,9 @@ struct SideDrawerView: View {
                 }
         )
         .alert("Sign out of Fantasia?", isPresented: $showSignOutConfirm) {
-            Button("Sign Out", role: .destructive) { try? authManager.signOut() }
+            Button("Sign Out", role: .destructive) {
+                Task { try? await authManager.signOut() }
+            }
             Button("Cancel", role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showManageSubscription) {
