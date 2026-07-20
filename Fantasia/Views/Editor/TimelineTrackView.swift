@@ -24,13 +24,14 @@
 // difference because the recognizer was never in the right part of the tree to see the touch in
 // the first place.
 //
-// Fix: `scrubGesture` now wraps a container that holds BOTH the hit-target AND the actual
+// Fix: `scrubGesture` wraps a container that holds BOTH the hit-target AND the actual
 // VStack{ruler, clipRow} — a genuine ancestor of every ClipPillView — via `.simultaneousGesture`
 // (not `.gesture`), so it starts tracking every touch on the fixed region from the instant it
-// begins, regardless of which descendant view ends up owning the tap/drag. `tracksGesture`
-// (audio/text/caption rows below) was ALREADY attached to a real ancestor container, but is now
-// also `.simultaneousGesture` for the same reason: simultaneous attachment means precedence is
-// decided ENTIRELY by the state guards in each gesture's `onChanged`, never by attachment form:
+// begins, regardless of which descendant view ends up owning the tap/drag. This simultaneous
+// behavior is deliberately LIMITED to that fixed scene region. The tracks viewport was already a
+// real ancestor and keeps `.gesture(tracksGesture)`, allowing each text/audio/caption pill's
+// high-priority manipulation gesture to remain exclusive while empty-track drags still scrub.
+// Fixed-region precedence is decided by the state guards in each gesture's `onChanged`:
 //   - `reorderingClipId == nil` — a clip mid-long-press-reorder (ClipPillView.reorderGesture)
 //     suppresses scrub/track-scroll for the rest of that touch.
 //   - `trimmingClipId == nil` — a clip mid-edge-handle-trim (ClipPillView's 22pt handles, still
@@ -220,6 +221,10 @@ struct TimelineTrackView: View {
     /// active edge-handle trim (ClipPillView's `onTrimActiveChange`), guarding `scrubGesture` from
     /// hijacking a trim drag into a timeline scrub. See the file header's gesture-precedence model.
     @State private var trimmingClipId: String? = nil
+    /// A completed long press only primes a possible reorder. Scene geometry must remain unchanged
+    /// until the finger actually moves far enough to express reorder intent; this keeps a tap or
+    /// slightly long selection press highlight-only instead of collapsing every scene pill.
+    @State private var pendingReorderClipId: String? = nil
     @State private var reorderingClipId: String? = nil
     @State private var reorderDragX: CGFloat = 0
     @State private var liveOrder: [String] = []
@@ -338,12 +343,10 @@ struct TimelineTrackView: View {
                 .frame(width: viewportWidth, height: tracksViewportHeight, alignment: .topLeading)
                 .clipped()
                 .contentShape(Rectangle())
-                // Item 1 (round 2): `.simultaneousGesture` — see file header's precedence model.
-                // This container already wraps AudioTrackRow/TextOverlayTrackRow/CaptionTrackRow as
-                // real descendants, so this was already a true ancestor; simultaneous attachment
-                // keeps it consistent with scrubGesture above and lets it track a touch even if a
-                // descendant pill's own gesture ultimately wins or fails.
-                .simultaneousGesture(tracksGesture)
+                // Text/audio/caption pills own high-priority manipulation gestures. Keeping this
+                // background recognizer exclusive means moving a pill cannot also scrub the shared
+                // playhead; drags that begin on empty track space still reach tracksGesture.
+                .gesture(tracksGesture)
                 .onTapGesture {
                     guard tapSelectionGate.acceptsTap() else { return }
                     state.select(.none)
@@ -459,7 +462,10 @@ struct TimelineTrackView: View {
                 // 13-22 i12: suppressed while reorder mode is active. Item 1 (round 2): also
                 // suppressed while a clip's edge handle is mid-trim (trimmingClipId) — see file
                 // header's gesture-precedence model.
-                guard reorderingClipId == nil, trimmingClipId == nil, !state.isZooming else { return }
+                guard pendingReorderClipId == nil,
+                      reorderingClipId == nil,
+                      trimmingClipId == nil,
+                      !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                 tapSelectionGate.beginMovement(.fixedRegionScrub)
                 state.isScrubbing = true
@@ -741,7 +747,7 @@ struct TimelineTrackView: View {
                     onTrimChange: { newStart, newEnd in
                         updateClipTrim(clipId: clip.id, start: newStart, end: newEnd)
                     },
-                    onReorderLift: { startReorder(clip: clip, viewportWidth: viewportWidth) },
+                    onReorderLift: { primeReorder(clip: clip) },
                     onReorderChanged: { translation, location, startLocation in
                         updateReorderDrag(
                             clip: clip,
@@ -1046,10 +1052,11 @@ struct TimelineTrackView: View {
         }
     }
 
-    // MARK: - 13-22 i12: CapCut-style long-press reorder. `startReorder` enters reorder mode on a
-    // successful long-press lift; `updateReorderDrag` runs on every drag-phase change, projecting
-    // the dragged clip's slot from its floating CENTER against uniform slots and reordering
-    // `liveOrder` (with a spring animation + a light haptic) whenever that projected slot changes;
+    // MARK: - 13-22 i12: CapCut-style long-press reorder. A successful long press only primes the
+    // candidate; the collapsed reorder layout begins after real horizontal drag displacement.
+    // `updateReorderDrag` then projects the dragged clip's slot from its floating CENTER against
+    // uniform slots and reorders `liveOrder` (with a spring animation + a light haptic) whenever
+    // that projected slot changes;
     // `commitReorder` fires on release, persisting via the EXISTING `sortOrder` PATCH contract
     // `handleReorder` used to (reused verbatim: PATCH the dragged clip's sort_order to whatever
     // clip currently occupies the target slot's value).
@@ -1059,12 +1066,24 @@ struct TimelineTrackView: View {
     // down) instead of the fixed content-row 46pt. O3 anchors the visible row on the finger's live
     // slot while projecting against the original slot's stable origin to avoid feedback jumps.
 
-    private func startReorder(clip: ProjectClip, viewportWidth: CGFloat) {
+    static func shouldActivateClipReorder(translation: CGFloat) -> Bool {
+        abs(translation) >= 4
+    }
+
+    private func primeReorder(clip: ProjectClip) {
         // Idempotency guard — the long-press `.first(true)` phase inside ClipPillView's sequenced
         // gesture may deliver more than once before the sequence advances to `.second`.
-        guard !state.isZooming, reorderingClipId != clip.id else { return }
+        guard !state.isZooming,
+              pendingReorderClipId != clip.id,
+              reorderingClipId != clip.id else { return }
+        pendingReorderClipId = clip.id
+        state.select(.clip(clip.id))
+    }
+
+    private func activateReorder(clip: ProjectClip, viewportWidth: CGFloat) {
         let clips = sortedClips
         guard let index = clips.firstIndex(where: { $0.id == clip.id }) else { return }
+        pendingReorderClipId = nil
         liveOrder = clips.map(\.id)
         reorderingClipId = clip.id
         reorderOriginalIndex = index
@@ -1077,7 +1096,6 @@ struct TimelineTrackView: View {
         reorderAnchorX = min(max(pillMidX, playBoxWidth + 8 + halfSlot), viewportWidth - 8 - halfSlot)
         didLatchReorderAnchorToFinger = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        state.select(.clip(clip.id))
     }
 
     private func updateReorderDrag(
@@ -1087,7 +1105,13 @@ struct TimelineTrackView: View {
         startLocation: CGFloat,
         viewportWidth: CGFloat
     ) {
-        guard !state.isZooming, reorderingClipId == clip.id, reorderOriginalIndex != nil else { return }
+        guard !state.isZooming else { return }
+        if reorderingClipId == nil {
+            guard pendingReorderClipId == clip.id,
+                  Self.shouldActivateClipReorder(translation: translation) else { return }
+            activateReorder(clip: clip, viewportWidth: viewportWidth)
+        }
+        guard reorderingClipId == clip.id, reorderOriginalIndex != nil else { return }
         if !didLatchReorderAnchorToFinger {
             reorderAnchorX = startLocation
             didLatchReorderAnchorToFinger = true
@@ -1109,6 +1133,9 @@ struct TimelineTrackView: View {
     }
 
     private func commitReorder(clip: ProjectClip) {
+        if pendingReorderClipId == clip.id {
+            pendingReorderClipId = nil
+        }
         guard reorderingClipId == clip.id else { return }
         defer {
             reorderingClipId = nil

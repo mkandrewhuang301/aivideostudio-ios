@@ -37,11 +37,6 @@ struct GenerationDetailSheet: View {
     @State private var showAnimateConfirm = false
     @State private var isAnimating = false
     @State private var animateError: String? = nil
-    // Magic Editor entry point (09.2-10, SC4): "Edit" opens MaskEditorView on this image's
-    // completed media URL. Bool + stored URL (not fullScreenCover(item:)) since the source is a
-    // plain String, not an Identifiable model.
-    @State private var editSourceURLString: String?
-    @State private var showMaskEditor = false
     @State private var showVideoTranslation = false
 
     // D-4 (09.2-10 Task 3): preset Remix fork — mirrors GenerationCardView's own
@@ -53,6 +48,15 @@ struct GenerationDetailSheet: View {
     @State private var presetForRemix: Preset?
     @State private var remixPrefillSlots: [PresetSlotInput?] = []
     @State private var isPreparingRemix = false
+    @State private var presetInputThumbs: [PresetInputThumbnail] = []
+
+    private struct PresetInputThumbnail: Identifiable {
+        let slotIndex: Int
+        let url: String
+        let isVideo: Bool
+
+        var id: String { "\(slotIndex)-\(url)" }
+    }
 
     /// The registry row matching this generation's stamped preset_id, if any.
     private var matchedPreset: Preset? {
@@ -74,16 +78,16 @@ struct GenerationDetailSheet: View {
                     Button { isPresented = false } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(8)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 28, height: 28)
+                            .background(theme.elevatedBackground, in: Circle())
+                            .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .padding(.trailing, 20)
                 }
             }
-            .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.vertical, 14)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -102,6 +106,7 @@ struct GenerationDetailSheet: View {
                         }
                         .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(alignment: .bottomLeading) { favoriteBadge }
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
                         .task { await loadCachedImage() }
@@ -126,6 +131,7 @@ struct GenerationDetailSheet: View {
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
+                        .overlay(alignment: .bottomLeading) { favoriteBadge }
                         .task { await generateThumbnail(from: videoUrl) }
                     } else {
                         RoundedRectangle(cornerRadius: 12)
@@ -148,97 +154,82 @@ struct GenerationDetailSheet: View {
                             }
                     }
 
-                    // Full prompt text
-                    if let prompt = item.prompt, !prompt.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Prompt")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(prompt)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                        }
+                    if item.isPreset {
+                        presetSummaryBox
+                    } else if let prompt = item.prompt, !prompt.isEmpty {
+                        freeformPromptBox(prompt: prompt)
                     }
 
                     // Parameters
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Parameters")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 0) {
                         // T18: paramRow draws its own trailing hairline; the last visible row
                         // (Credits used when present, else the last param in its branch) passes
                         // showDivider: false so no line dangles after the final row.
                         let hasCredits = item.costCredits > 0
-                        VStack(alignment: .leading, spacing: 0) {
-                            // Preset rows are branded, not model-exposed — the underlying model is
-                            // an implementation detail (and the backend nulls it for presets, D-G).
-                            // Show the preset's own title instead of the raw model name.
-                            if item.isVideoTranslation {
-                                paramRow("Tool", value: "Translate Video")
-                            } else if item.isPreset {
-                                paramRow("Preset", value: matchedPreset?.title ?? "Preset")
-                            } else {
-                                paramRow("Model", value: ModelCatalog.displayName(for: item.model))
+                        // Preset rows are branded, not model-exposed — the underlying model is
+                        // an implementation detail (and the backend nulls it for presets, D-G).
+                        // Show the preset's own title instead of the raw model name.
+                        if item.isVideoTranslation {
+                            paramRow("Tool", value: "Translate Video")
+                        } else if item.isPreset {
+                            paramRow("Preset", value: matchedPreset?.title ?? "Preset")
+                        } else {
+                            paramRow("Model", value: ModelCatalog.displayName(for: item.model))
+                        }
+                        if item.isImage {
+                            // Aspect ratio removed from the image pullup (2026-07-11) — not
+                            // meaningful for faceswap/preset output, which matches the input.
+                            if let w = item.params.width, let h = item.params.height {
+                                paramRow("Resolution", value: "\(w) × \(h)", showDivider: hasCredits)
                             }
-                            if item.isImage {
-                                // Aspect ratio removed from the image pullup (2026-07-11) — not
-                                // meaningful for faceswap/preset output, which matches the input.
-                                if let w = item.params.width, let h = item.params.height {
-                                    paramRow("Resolution", value: "\(w) × \(h)", showDivider: hasCredits)
-                                }
-                            } else {
-                                if let language = item.params.outputLanguage {
-                                    paramRow("Language", value: language)
-                                }
-                                paramRow("Resolution", value: item.params.resolution ?? "—")
-                                paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
-                                paramRow("Aspect Ratio", value: item.params.aspectRatio ?? "—")
-                                paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off", showDivider: hasCredits)
+                        } else {
+                            if let language = item.params.outputLanguage {
+                                paramRow("Language", value: language)
                             }
-                            if hasCredits {
-                                paramRow("Credits used", value: "\(item.costCredits)", showDivider: false)
-                            }
+                            paramRow("Resolution", value: item.params.resolution ?? "—")
+                            paramRow("Duration", value: item.params.duration.map { "\($0)s" } ?? "—")
+                            paramRow("Aspect", value: item.params.aspectRatio ?? "—")
+                            paramRow("Audio", value: (item.params.audioEnabled ?? true) ? "On" : "Off", showDivider: hasCredits)
+                        }
+                        if hasCredits {
+                            paramRow("Credits used", value: "\(item.costCredits)", showDivider: false)
                         }
                     }
-                    .padding(12)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 2)
                     .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
 
                     if item.status == .completed {
                         Text("Generated \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.textTertiary)
                     }
 
                     // Actions
                     if item.status == .completed {
                         VStack(spacing: 14) {
-                            // Remix + Reference (+ Animate for images) + (Edit for images) + Favorite row
-                            HStack(spacing: 10) {
-                                circleActionButton("arrow.2.squarepath", "Remix") {
+                            LazyVGrid(
+                                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                                spacing: 8
+                            ) {
+                                tileActionButton("arrow.2.squarepath", "Remix") {
                                     handleRemix()
                                 }
-                                circleActionButton("paperclip", "Reference") {
+                                tileActionButton("paperclip", "Reference") {
                                     handleReference()
                                 }
                                 if item.isImage {
-                                    circleActionButton(isAnimating ? "hourglass" : "wand.and.stars", "Animate") {
+                                    tileActionButton(isAnimating ? "hourglass" : "wand.and.stars", "Animate") {
                                         showAnimateConfirm = true
                                     }
                                     .disabled(isAnimating)
                                 } else {
-                                    circleActionButton("captions.bubble", "Translate") {
+                                    tileActionButton("captions.bubble", "Translate") {
                                         showVideoTranslation = true
                                     }
                                 }
-                                // Magic Editor (09.2-10, SC4): image items only, deliberately not
-                                // on every feed card (Home "Magic Editor" card is the other entry).
-                                if item.isImage, let src = item.completedMediaUrl {
-                                    circleActionButton("paintbrush.pointed", "Edit") {
-                                        editSourceURLString = src
-                                        showMaskEditor = true
-                                    }
-                                }
-                                circleActionButton(isFavorite ? "heart.fill" : "heart", isFavorite ? "Favorited" : "Favorite") {
+                                tileActionButton(isFavorite ? "heart.fill" : "heart", "Favorite") {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     isFavorite.toggle()                      // optimistic local icon flip
                                     let target = isFavorite
@@ -250,7 +241,6 @@ struct GenerationDetailSheet: View {
                                     }
                                 }
                             }
-                            .frame(maxWidth: .infinity)
 
                             // Download (image or video) — primary CTA
                             if (item.isImage ? item.completedMediaUrl : item.videoUrl) != nil {
@@ -266,13 +256,8 @@ struct GenerationDetailSheet: View {
                                     .frame(maxWidth: .infinity).frame(height: 52)
                                     .foregroundStyle(.white)
                                     .background(
-                                        LinearGradient(
-                                            colors: [Color(red: 0.545, green: 0.427, blue: 0.839),
-                                                     Color(red: 0.357, green: 0.561, blue: 0.851)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        in: RoundedRectangle(cornerRadius: 14)
+                                        LinearGradient.brandPrimary,
+                                        in: RoundedRectangle(cornerRadius: 10)
                                     )
                                     .shadow(color: accent.opacity(0.35), radius: 10, y: 4)
                                 }
@@ -296,49 +281,52 @@ struct GenerationDetailSheet: View {
                                     // theme.surfaceStrong instead of .ultraThinMaterial — the
                                     // material is nearly invisible on the light background, so
                                     // this didn't read as a button in light mode.
-                                    .background(theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 14))
-                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 0.5))
+                                    .background(theme.elevatedBackground, in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
                                 }
                                 .buttonStyle(PressableButtonStyle())
                                 .disabled(isPreparingShare)
                             }
 
-                            // Delete — quiet destructive text row
-                            Button {
-                                showDeleteAlert = true
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "trash").font(.system(size: 15, weight: .medium))
-                                    Text("Delete").font(.subheadline)
+                            HStack {
+                                Button {
+                                    showDeleteAlert = true
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 13, weight: .medium))
+                                        Text("Delete")
+                                            .font(.subheadline)
+                                    }
+                                    .foregroundStyle(Color.red.opacity(0.85))
                                 }
-                                .foregroundStyle(Color.red.opacity(0.85))
-                                .frame(maxWidth: .infinity).frame(height: 44)
-                                .background(Color.red.opacity(theme.isLight ? 0.07 : 0.10), in: RoundedRectangle(cornerRadius: 14))
-                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.12), lineWidth: 0.5))
-                            }
-                            .buttonStyle(PressableButtonStyle())
-                            .disabled(isDeleting)
+                                .buttonStyle(.plain)
+                                .disabled(isDeleting)
 
-                            // Report — small, low-emphasis flag beneath Delete (no button chrome)
-                            Button {
-                                Task { await reportGeneration() }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "flag")                    // outline (not filled inside) — red tint only
-                                        .font(.caption2)
-                                        .foregroundStyle(Color(red: 0.90, green: 0.26, blue: 0.24))   // report red
-                                    Text(isReporting ? "Reported" : "Report an issue").font(.caption)
-                                        .foregroundStyle(theme.textSecondary.opacity(0.7))
+                                Spacer()
+
+                                Button {
+                                    Task { await reportGeneration() }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "flag")
+                                            .font(.caption2)
+                                            .foregroundStyle(Color.red.opacity(0.7))
+                                        Text(isReporting ? "Reported" : "Report an issue")
+                                            .font(.caption)
+                                            .foregroundStyle(theme.textTertiary)
+                                    }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
+                                .buttonStyle(.plain)
+                                .disabled(isReporting)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(isReporting)
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 6)
                         }
                     }
                 }
                 .padding(.horizontal, 20)
+                .padding(.top, 12)
                 .padding(.bottom, 32)
             }
         }
@@ -360,15 +348,6 @@ struct GenerationDetailSheet: View {
                 FullScreenImageView(item: item)
             } else if let urlString = item.videoUrl, let url = URL(string: urlString) {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
-            }
-        }
-        // Magic Editor (09.2-10, SC4) — "Edit" action above.
-        .fullScreenCover(isPresented: $showMaskEditor) {
-            if let urlString = editSourceURLString {
-                MaskEditorView(source: .url(urlString))
-                    .environment(generationManager)
-                    .environment(creditManager)
-                    .environment(theme)
             }
         }
         // When Magic Editor (or any in-sheet submit) fires a generation, close this detail sheet so
@@ -442,22 +421,222 @@ struct GenerationDetailSheet: View {
         .background(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .onAppear { isFavorite = item.isFavorite }
+        .onAppear {
+            isFavorite = item.isFavorite
+            loadPresetInputThumbnails()
+        }
     }
 
     // MARK: - Action helpers
 
+    /// Small bottom-leading heart on the media preview, mirroring LibraryThumbnailView's badge.
+    /// Driven by the local `isFavorite` state so it flips instantly with the Favorite tile.
     @ViewBuilder
-    private func circleActionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+    private var favoriteBadge: some View {
+        if isFavorite {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .padding(10)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func freeformPromptBox(prompt: String) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(LinearGradient.brandPrimary)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(prompt)
+                    .font(.system(size: 14.5))
+                    .lineSpacing(4)
+                    .foregroundStyle(theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+
+                if let references = item.referenceUrls, !references.isEmpty {
+                    Rectangle()
+                        .fill(theme.divider)
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 14)
+
+                    Text("REFERENCES")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(theme.textTertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(references.enumerated()), id: \.offset) { index, reference in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    detailReferenceThumbnail(reference, index: index)
+                                    Text(referenceDisplayName(at: index, in: references))
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(LinearGradient.brandPrimary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var presetSummaryBox: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(LinearGradient.brandPrimary)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(LinearGradient.brandPrimary)
+                    Text(matchedPreset?.title ?? "Preset")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(theme.textPrimary)
+                }
+
+                if !presetInputThumbs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(presetInputThumbs) { thumbnail in
+                                detailPresetThumbnail(thumbnail)
+                            }
+                        }
+                    }
+                }
+
+                if let prompt = magicEditorPrompt {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("PROMPT")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundStyle(theme.textTertiary)
+                        Text(prompt)
+                            .font(.system(size: 14.5))
+                            .lineSpacing(3)
+                            .foregroundStyle(theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text(presetSummaryDescription)
+                        .font(.system(size: 12))
+                        .lineSpacing(2)
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(theme.elevatedBackground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func detailReferenceThumbnail(_ reference: GenerationReference, index: Int) -> some View {
+        Group {
+            if reference.isVideo {
+                ZStack {
+                    LinearGradient.brandPrimary
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            } else {
+                CachedThumbnailImage(
+                    cacheKey: item.id + "-detail-reference-\(index)",
+                    url: URL(string: reference.url)
+                )
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
+    }
+
+    private func referenceDisplayName(at index: Int, in references: [GenerationReference]) -> String {
+        let reference = references[index]
+        let ordinal = references.prefix(index + 1).filter { $0.isVideo == reference.isVideo }.count
+        return reference.isVideo ? "@Video\(ordinal)" : "@Image\(ordinal)"
+    }
+
+    private func detailPresetThumbnail(_ thumbnail: PresetInputThumbnail) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if thumbnail.isVideo {
+                    ZStack {
+                        LinearGradient.brandPrimary
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                } else {
+                    CachedThumbnailImage(
+                        cacheKey: item.id + "-detail-preset-input-\(thumbnail.slotIndex)",
+                        url: URL(string: thumbnail.url)
+                    )
+                }
+            }
+            .frame(width: 52, height: 52)
+
+            if let label = presetSlotLabel(at: thumbnail.slotIndex) {
+                Text(label)
+                    .font(.system(size: 8, weight: .heavy))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(theme.elevatedBackground.opacity(0.88), in: RoundedRectangle(cornerRadius: 3))
+                    .padding(3)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
+    }
+
+    private func presetSlotLabel(at index: Int) -> String? {
+        guard let slots = matchedPreset?.inputSchema?.slots, slots.indices.contains(index) else { return nil }
+        let label = slots[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label.uppercased()
+    }
+
+    private var magicEditorPrompt: String? {
+        guard item.params.presetId == "magic-editor",
+              let prompt = item.prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty else { return nil }
+        return prompt
+    }
+
+    private var presetSummaryDescription: String {
+        let inputCount = item.params.presetInputUploadIds?.compactMap { $0 }.count ?? 0
+        guard inputCount > 0 else { return "The preset writes its own prompt behind the scenes." }
+        let noun = inputCount == 1 ? "photo" : "photos"
+        return "Made from your \(inputCount) \(noun) — the preset writes its own prompt behind the scenes."
+    }
+
+    @ViewBuilder
+    private func tileActionButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 15, weight: .medium))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(theme.textPrimary)
-                    .frame(width: 46, height: 46)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(theme.surfaceBorder, lineWidth: 0.5))
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(theme.textSecondary)
@@ -465,8 +644,41 @@ struct GenerationDetailSheet: View {
                     .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 64)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(PressableButtonStyle())
+    }
+
+    private func loadPresetInputThumbnails() {
+        guard item.isPreset, let ids = item.params.presetInputUploadIds, !ids.isEmpty,
+              presetInputThumbs.isEmpty else { return }
+        Task {
+            if let directInputs = item.presetInputUrls {
+                let directThumbs = directInputs.enumerated().compactMap { index, input in
+                    input.map {
+                        PresetInputThumbnail(slotIndex: index, url: $0.url, isVideo: $0.isVideo)
+                    }
+                }
+                if !directThumbs.isEmpty {
+                    presetInputThumbs = directThumbs
+                    return
+                }
+            }
+            await mediaLibrary.load()
+            var map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let requiredIds = Set(ids.compactMap { $0 })
+            if !requiredIds.isSubset(of: Set(map.keys)) {
+                await mediaLibrary.load(forceRefresh: true)
+                map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
+            presetInputThumbs = ids.enumerated().compactMap { index, id in
+                guard let id, let upload = map[id] else { return nil }
+                return PresetInputThumbnail(slotIndex: index, url: upload.url, isVideo: upload.isVideo)
+            }
+        }
     }
 
     // MARK: - Generation actions
@@ -642,9 +854,13 @@ struct GenerationDetailSheet: View {
     private func paramRow(_ label: String, value: String, showDivider: Bool = true) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text(label).foregroundStyle(.secondary).font(.subheadline)
+                Text(label)
+                    .foregroundStyle(theme.textSecondary)
+                    .font(.system(size: 13.5))
                 Spacer()
-                Text(value).foregroundStyle(.primary).font(.subheadline.weight(.medium))
+                Text(value)
+                    .foregroundStyle(theme.textPrimary)
+                    .font(.system(size: 13.5, weight: .semibold))
             }
             .padding(.vertical, 9)
             if showDivider {

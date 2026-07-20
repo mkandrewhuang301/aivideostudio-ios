@@ -10,6 +10,7 @@ struct MainTabView: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
     @State private var selectedTab = 2   // open on Create by default
+    @State private var tabSelectionFeedbackTrigger = 0
     @State private var showProfileSheet = false
     @State private var drawer = DrawerManager()
     @State private var browsePath: [String] = []
@@ -45,6 +46,12 @@ struct MainTabView: View {
     private let tabBarHeight: CGFloat = 74
     private let bottomLift: CGFloat = 16
 
+    private func selectTabFromBar(_ tab: Int) {
+        guard selectedTab != tab else { return }
+        selectedTab = tab
+        tabSelectionFeedbackTrigger += 1
+    }
+
     var body: some View {
         GeometryReader { geo in
             let drawerWidth = geo.size.width * 0.65
@@ -58,6 +65,7 @@ struct MainTabView: View {
                     NavigationStack(path: $browsePath) {
                         HomeView(
                             onNavigateToGenerate: { selectedTab = 2 },
+                            onNavigateToStudio: { selectedTab = 1 },
                             onSelectPreset: selectPreset,
                             onSelectCategory: { browsePath.append($0) },
                             onSelectFormat: { selectedFormat = $0 }
@@ -84,14 +92,10 @@ struct MainTabView: View {
                         .safeAreaInset(edge: .top, spacing: 0) { topBar() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(3)
-                    // Library sets .navigationTitle, so it needs its own stack now that the
-                    // ancestor NavigationStack is gone.
-                    NavigationStack {
-                        LibraryView()
-                            .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
-                    }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(4)
+                    LibraryView()
+                        .safeAreaInset(edge: .top, spacing: 0) { topBar(compact: true) }
+                        .toolbar(.hidden, for: .tabBar)
+                        .tag(4)
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Color.clear.frame(height: tabBarHeight + bottomLift)
@@ -134,6 +138,7 @@ struct MainTabView: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
+        .sensoryFeedback(.selection, trigger: tabSelectionFeedbackTrigger)
         .environment(drawer)
         .onReceive(NotificationCenter.default.publisher(for: .remixGenerationRequested)) { _ in
             selectedTab = 2
@@ -296,7 +301,7 @@ struct MainTabView: View {
 
                 HStack {
                     Spacer()
-                    Button { selectedTab = 2 } label: {
+                    Button { selectTabFromBar(2) } label: {
                         ZStack {
                             RoundedRectangle(cornerRadius: 13)
                                 .fill(LinearGradient(
@@ -327,7 +332,7 @@ struct MainTabView: View {
     }
 
     private func tabButton(_ index: Int, _ label: String, _ icon: String) -> some View {
-        Button { selectedTab = index } label: {
+        Button { selectTabFromBar(index) } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 20))

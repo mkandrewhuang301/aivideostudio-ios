@@ -53,4 +53,5 @@ struct ManageSubscriptionView: View {
     ManageSubscriptionView(isPresented: .constant(true))
         .environment(CreditManager())
         .environment(OfferingsManager())
+        .environment(ThemeManager())
 }

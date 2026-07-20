@@ -45,6 +45,7 @@ struct PresetInputSheet: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(CreditManager.self) private var creditManager
     @Environment(RatesManager.self) private var ratesManager
+    @Environment(MediaLibraryManager.self) private var mediaLibrary
 
     let preset: Preset
 
@@ -381,7 +382,7 @@ struct PresetInputSheet: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
                         ForEach(Array(slots.enumerated().dropFirst()), id: \.offset) { index, slot in
                             VStack(alignment: .leading, spacing: 8) {
-                                slotLabel(slot, index: index)
+                                slotLabel(slot, index: index, compact: true)
                                 slotTile(index: index, slot: slot, style: .compact)
                             }
                         }
@@ -476,16 +477,35 @@ struct PresetInputSheet: View {
         .buttonStyle(.plain)
     }
 
-    private func slotLabel(_ slot: PresetSlot, index: Int) -> some View {
-        HStack(spacing: 4) {
-            Text(slot.label)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(theme.textPrimary)
-                .lineLimit(1)
-            if slot.optional {
-                Text("Optional")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(theme.textTertiary)
+    private func slotLabel(_ slot: PresetSlot, index: Int, compact: Bool = false) -> some View {
+        HStack(alignment: compact ? .top : .center, spacing: 4) {
+            if compact {
+                // Three-up reference cards are only ~90 pt wide on smaller iPhones. Stacking the
+                // optional marker keeps registry labels such as "Add reference" readable instead
+                // of forcing SwiftUI to truncate them to "Add re…". The invisible second line on
+                // required slots reserves matching height so all three tiles remain aligned.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(slot.label)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text("Optional")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(theme.textTertiary)
+                        .opacity(slot.optional ? 1 : 0)
+                        .accessibilityHidden(!slot.optional)
+                }
+            } else {
+                Text(slot.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+                if slot.optional {
+                    Text("Optional")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(theme.textTertiary)
+                }
             }
             Spacer(minLength: 0)
             // Optional slots that already hold a value get a small clear ("x") affordance —
@@ -1389,6 +1409,14 @@ struct PresetInputSheet: View {
                 isUploading: false,
                 durationSeconds: nil
             )
+            if let id = response.id {
+                mediaLibrary.insert(ReferenceUploadItem(
+                    id: id,
+                    url: response.url,
+                    mimeType: "image/jpeg",
+                    displayName: nil
+                ))
+            }
         }
     }
 
@@ -1409,6 +1437,14 @@ struct PresetInputSheet: View {
             durationSeconds: capSeconds ?? billedDuration,
             frameCount: prepared.frameCount
         )
+        if let id = response.id {
+            mediaLibrary.insert(ReferenceUploadItem(
+                id: id,
+                url: response.url,
+                mimeType: "video/mp4",
+                displayName: nil
+            ))
+        }
     }
 
     private func confirmTrim() {

@@ -149,7 +149,7 @@ struct CreditStoreView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
-                .padding(.bottom, 10)
+                .padding(.bottom, 18)
 
                 // Content states
                 let packs = displayPacks
@@ -158,7 +158,7 @@ struct CreditStoreView: View {
                         VStack(spacing: 10) {
                             ForEach(0..<4, id: \.self) { _ in skeletonCard }
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 28)
                         .padding(.bottom, 40)
                     }
                 } else if packs.isEmpty {
@@ -174,7 +174,7 @@ struct CreditStoreView: View {
                             termsLinksRow
                                 .padding(.top, 6)
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 28)
                         .padding(.bottom, 32)
                     }
                 }
@@ -283,13 +283,14 @@ struct CreditStoreView: View {
         let highlighted = meta?.badge != nil
 
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 packCardTitle(credits: credits, badge: meta?.badge)
                 packCardBenefits(credits: credits)
                 packPriceRow(pack: pack)
                 packPurchaseButton(pack: pack, credits: credits)
             }
-            .padding(14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
             if errorId == pack.id {
                 Text("Purchase failed. Please try again.")
@@ -423,13 +424,13 @@ struct CreditStoreView: View {
     private func packPriceRow(pack: DisplayPack) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(pack.priceString)
-                .font(techFont(.title3, weight: .bold))
+                .font(techFont(.title2, weight: .bold))
                 .tracking(monoTracking)
                 .foregroundStyle(.primary)
 
             if let regular = pack.regularPriceString {
                 Text(regular)
-                    .font(techFont(.title3, weight: .bold))
+                    .font(techFont(.callout, weight: .semibold))
                     .tracking(monoTracking)
                     .foregroundStyle(strikeColor)
                     .strikethrough(true, color: strikeColor)
@@ -481,13 +482,16 @@ struct CreditStoreView: View {
         } label: {
             ZStack(alignment: .top) {
                 RoundedRectangle(cornerRadius: purchaseButtonRadius)
-                    .fill(Color(red: 0.70, green: 0.70, blue: 0.72))
+                    .fill(Color(red: 199.0 / 255.0, green: 184.0 / 255.0, blue: 238.0 / 255.0)) // #C7B8EE
                     .offset(y: 3)
                 packPurchaseLabel(showSpinner: showSpinner)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: purchaseButtonRadius))
+                    .background(
+                        Color(red: 243.0 / 255.0, green: 239.0 / 255.0, blue: 1.0), // #F3EFFF
+                        in: RoundedRectangle(cornerRadius: purchaseButtonRadius)
+                    )
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 45)
+            .frame(height: 42)
         }
         .buttonStyle(.plain)
         .disabled(showSpinner)
@@ -499,15 +503,17 @@ struct CreditStoreView: View {
     private func packPurchaseLabel(showSpinner: Bool) -> some View {
         Group {
             if showSpinner {
-                ProgressView().tint(.black.opacity(0.7)).scaleEffect(0.9)
+                ProgressView()
+                    .tint(Color(red: 91.0 / 255.0, green: 63.0 / 255.0, blue: 168.0 / 255.0)) // #5B3FA8
+                    .scaleEffect(0.9)
             } else {
                 Text("Purchase")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.09, green: 0.09, blue: 0.11))
+                    .foregroundStyle(Color(red: 91.0 / 255.0, green: 63.0 / 255.0, blue: 168.0 / 255.0)) // #5B3FA8
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 42)
+        .frame(height: 39)
     }
 
     // MARK: - Actions

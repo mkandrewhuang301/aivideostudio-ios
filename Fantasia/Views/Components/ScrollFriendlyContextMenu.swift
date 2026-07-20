@@ -20,6 +20,26 @@
 import SwiftUI
 import UIKit
 
+final class ContextMenuHitTestView: UIView {
+    var passthroughTopTrailingSize: CGSize = .zero
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard passthroughTopTrailingSize.width > 0,
+              passthroughTopTrailingSize.height > 0 else {
+            return super.point(inside: point, with: event)
+        }
+        let passthroughRect = CGRect(
+            x: bounds.maxX - passthroughTopTrailingSize.width,
+            y: bounds.minY,
+            width: passthroughTopTrailingSize.width,
+            height: passthroughTopTrailingSize.height
+        )
+        return passthroughRect.contains(point)
+            ? false
+            : super.point(inside: point, with: event)
+    }
+}
+
 /// Transparent overlay carrying a UIContextMenuInteraction (+ optional tap forwarding).
 ///
 /// Because this UIKit view hit-tests across its whole frame, it sits ABOVE any SwiftUI tap
@@ -59,10 +79,14 @@ struct ScrollFriendlyContextMenu: UIViewRepresentable {
     /// Bakes a bottom-leading "heart.fill" badge into the lifted preview for favorited media —
     /// same rationale as `showsPlayIcon` (LibraryThumbnailView only).
     var showsFavoriteBadge: Bool = false
+    /// Optional top-trailing region that should pass touches through to controls layered below
+    /// this UIKit view. The context-menu preview remains full-size; only hit-testing changes.
+    var passthroughTopTrailingSize: CGSize = .zero
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> ContextMenuHitTestView {
+        let view = ContextMenuHitTestView()
         view.backgroundColor = .clear
+        view.passthroughTopTrailingSize = passthroughTopTrailingSize
         view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.didTap))
@@ -70,8 +94,9 @@ struct ScrollFriendlyContextMenu: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
+    func updateUIView(_ uiView: ContextMenuHitTestView, context: Context) {
         context.coordinator.parent = self
+        uiView.passthroughTopTrailingSize = passthroughTopTrailingSize
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }

@@ -58,7 +58,7 @@ struct GenerationCardView: View {
     // HomeView's own `@State private var registry = PresetRegistryManager()` — registry rows are
     // cached to disk (bundled fallback + snapshot), so this is instant, no extra network fetch.
     @State private var presetRegistry = PresetRegistryManager()
-    @State private var presetInputThumbs: [ReferenceUploadItem] = []   // re-signed via GET /api/uploads
+    @State private var presetInputThumbs: [PresetInputThumbnail] = [] // re-signed via GET /api/uploads
     @State private var presetForRemix: Preset?                         // drives fullScreenCover(item:)
     @State private var remixPrefillSlots: [PresetSlotInput?] = []
     @State private var isPreparingRemix = false
@@ -69,6 +69,14 @@ struct GenerationCardView: View {
     private let promptTapExtension: CGFloat = 56
     private var isActive: Bool { item.status == .pending || item.status == .processing }
 
+    private struct PresetInputThumbnail: Identifiable {
+        let slotIndex: Int
+        let url: String
+        let isVideo: Bool
+
+        var id: String { "\(slotIndex)-\(url)" }
+    }
+
     /// The registry row matching this generation's stamped preset_id, if any.
     private var matchedPreset: Preset? {
         guard let presetId = item.params.presetId else { return nil }
@@ -77,55 +85,15 @@ struct GenerationCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Truncated prompt (tap → detail popup, D-29). Chevron + primary text color signal
-            // tappability the platform-native way (Settings rows, Music lists).
-            // D-11/T-09.1-03: preset-run rows NEVER render item.prompt (the expanded server
-            // template) — badge + input thumbnails replace the prompt row entirely.
-            Button(action: onTapDetail) {
-                if item.isPreset {
-                    HStack(spacing: 8) {
-                        Image(systemName: "sparkles")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(accent)
-                        Text(matchedPreset?.title ?? "Preset")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(theme.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        presetInputThumbnailRow
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                } else {
-                    HStack(spacing: 8) {
-                        Text(item.prompt ?? "No prompt")
-                            .font(.callout)
-                            .foregroundStyle(theme.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        referenceThumbnailRow
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                }
-            }
-            .buttonStyle(.plain)
-
             // Aspect-ratio box (D-06: sized to requested aspect ratio)
+            // ×1.06 shaves ~6% off the media height (bottom-cropped via the top-aligned fill
+            // below) and hands it to the prompt box — card total height ≈ unchanged (2026-07-19).
             Color.clear
-                .aspectRatio(cardAspectRatio, contentMode: .fit)
+                .aspectRatio(cardAspectRatio * 1.06, contentMode: .fit)
                 // Hidden while the long-press preview is lifted so the lifted copy is the only
                 // visible image (avoids the "two images" duplicate look).
                 .overlay { mediaContent.opacity(isMediaPreviewActive ? 0 : 1) }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 // Long-press context menu (user request 2026-07-06). ⚠️ MUST stay UIKit-backed:
                 // SwiftUI's .contextMenu here ate fast scroll flicks starting from rest on media
                 // (confirmed regression, twice — see ScrollFriendlyContextMenu's header for the
@@ -154,8 +122,46 @@ struct GenerationCardView: View {
                         .contentShape(Rectangle())
                         .onTapGesture(perform: onTapDetail)
                 }
-                .padding(.horizontal, 14)
+                .overlay(alignment: .bottomTrailing) {
+                    if item.isPreset {
+                        Text("PRESET")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(LinearGradient.brandPrimary, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8)
+                            .allowsHitTesting(false)
+                    } else if let durationLabel = mediaDurationLabel {
+                        Text(durationLabel)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 5))
+                            .padding(8)
+                            .allowsHitTesting(false)
+                    }
+                }
+                // Favorite badge — mirrors LibraryThumbnailView's bottom-leading heart.
+                .overlay(alignment: .bottomLeading) {
+                    if item.isFavorite {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                            .padding(10)
+                            .allowsHitTesting(false)
+                            .opacity(isMediaPreviewActive ? 0 : 1)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
 
+            detailSummaryButton
+                .padding(.horizontal, 12)
+                .padding(.top, 9)
 
             // Action buttons (D-09: always visible; disabled/greyed while active). Delete lives
             // on swipe-to-delete + the detail sheet for completed cards — a destructive accent on
@@ -163,24 +169,26 @@ struct GenerationCardView: View {
             // cards have no output to reference, so "Reference" is replaced with a real Delete
             // button here (D-38: Remix/Regenerate/Delete are the active actions on a failed card) —
             // swipe-to-delete alone wasn't a discoverable enough affordance for clearing errors.
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 actionButton("arrow.2.squarepath", "Remix", action: handleRemixTap)
+                Rectangle().fill(theme.divider).frame(width: 0.5, height: 28)
                 actionButton("arrow.clockwise", "Regen", action: onRegenerate)
+                Rectangle().fill(theme.divider).frame(width: 0.5, height: 28)
                 if item.status == .failed {
                     actionButton("trash", "Delete", action: onRequestDelete, destructive: true)
                 } else {
                     actionButton("paperclip", "Reference", action: onReference)
                 }
             }
-            .padding(.horizontal, 14)
-            // Top padding only (gap to the media above) is smaller than the bottom padding
-            // (gap to the card's own bottom edge) — user request to tighten the media-to-actions
-            // gap specifically, not the whole row's vertical breathing room.
-            .padding(.top, 2)
-            .padding(.bottom, 10)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
         }
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 1))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.surfaceBorder, lineWidth: 1))
         .padding(.horizontal, 16)
 
         // Full-screen player (D-16: tap thumbnail → full-screen)
@@ -240,6 +248,90 @@ struct GenerationCardView: View {
         }
     }
 
+    // Accent-ruled summary box. Preset rows never expose the server-expanded prompt; they use
+    // the registry title and index-aligned input slots instead.
+    private var detailSummaryButton: some View {
+        Button(action: onTapDetail) {
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(LinearGradient.brandPrimary)
+                    .frame(width: 3)
+
+                HStack(spacing: 8) {
+                    if item.isPreset {
+                        Image(systemName: "sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(LinearGradient.brandPrimary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(matchedPreset?.title ?? "Preset")
+                                .font(.system(size: 15.5, weight: .semibold))
+                                .foregroundStyle(theme.textPrimary)
+                                .lineLimit(1)
+                            if let prompt = magicEditorPrompt {
+                                Text(prompt)
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(theme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    } else {
+                        Text(item.prompt ?? "No prompt")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+                    if item.isPreset {
+                        presetInputThumbnailRow
+                    } else {
+                        referenceThumbnailRow
+                    }
+                }
+                .padding(.leading, 11)
+                .padding(.trailing, 10)
+                .padding(.vertical, 13)
+                // Always at least as tall as the with-references state (28pt thumb row) plus
+                // the ~12pt reclaimed from the media's bottom crop — same box height + tap
+                // target on every card, refs or not (2026-07-19).
+                .frame(minHeight: 40)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
+                    .frame(width: 38)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(theme.divider)
+                            .frame(width: 0.5, height: 44)
+                    }
+                }
+            .frame(maxWidth: .infinity)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var mediaDurationLabel: String? {
+        guard !item.isImage,
+              item.status == .completed,
+              let duration = item.params.duration,
+              duration > 0 else { return nil }
+        let minutes = duration / 60
+        let seconds = duration % 60
+        return "\(minutes):\(seconds < 10 ? "0" : "")\(seconds)"
+    }
+
+    private var magicEditorPrompt: String? {
+        guard item.params.presetId == "magic-editor",
+              let prompt = item.prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty else { return nil }
+        return prompt
+    }
+
     // MARK: - Media context menu (long-press)
     // nil while a generation is in flight/failed — the interaction stays inert so a held press
     // does nothing and no empty preview platter is lifted.
@@ -267,8 +359,8 @@ struct GenerationCardView: View {
             let visible = Array(presetInputThumbs.prefix(3))
             let overflow = presetInputThumbs.count - visible.count
             HStack(spacing: 3) {
-                ForEach(Array(visible.enumerated()), id: \.offset) { index, upload in
-                    presetInputThumbnail(upload, index: index)
+                ForEach(visible) { thumbnail in
+                    presetInputThumbnail(thumbnail)
                 }
                 if overflow > 0 {
                     Text("+\(overflow)")
@@ -281,26 +373,44 @@ struct GenerationCardView: View {
     }
 
     @ViewBuilder
-    private func presetInputThumbnail(_ upload: ReferenceUploadItem, index: Int) -> some View {
-        Group {
-            if upload.isVideo {
-                ZStack {
-                    LinearGradient(
-                        colors: [Color(red: 0.608, green: 0.490, blue: 0.906),
-                                 Color(red: 0.416, green: 0.561, blue: 0.878)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
+    private func presetInputThumbnail(_ thumbnail: PresetInputThumbnail) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if thumbnail.isVideo {
+                    ZStack {
+                        LinearGradient.brandPrimary
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                } else {
+                    CachedThumbnailImage(
+                        cacheKey: item.id + "-presetinput-\(thumbnail.slotIndex)",
+                        url: URL(string: thumbnail.url)
                     )
-                    Image(systemName: "video.fill")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
                 }
-            } else {
-                CachedThumbnailImage(cacheKey: item.id + "-presetinput-\(index)", url: URL(string: upload.url))
+            }
+            .frame(width: 28, height: 28)
+
+            if let slotLabel = presetSlotLabel(at: thumbnail.slotIndex) {
+                Text(slotLabel)
+                    .font(.system(size: 6, weight: .heavy))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 1)
+                    .background(theme.elevatedBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 2))
+                    .padding(2)
             }
         }
-        .frame(width: 18, height: 18)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.surfaceBorder, lineWidth: 0.5))
+    }
+
+    private func presetSlotLabel(at index: Int) -> String? {
+        guard let slots = matchedPreset?.inputSchema?.slots, slots.indices.contains(index) else { return nil }
+        let label = slots[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label.uppercased()
     }
 
     // MARK: - Reference thumbnail row (Issue 4)
@@ -343,9 +453,9 @@ struct GenerationCardView: View {
                 CachedThumbnailImage(cacheKey: item.id + "-refthumb-\(index)", url: URL(string: ref.url))
             }
         }
-        .frame(width: 18, height: 18)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.surfaceBorder, lineWidth: 0.5))
+        .frame(width: 28, height: 28)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     // MARK: - Media Content
@@ -396,7 +506,7 @@ struct GenerationCardView: View {
                 // box, allowsHitTesting(false) removes the oversized image from hit testing,
                 // and contentShape makes exactly the visible box tappable.
                 Color.clear
-                    .overlay {
+                    .overlay(alignment: .top) {
                         Group {
                             if let img = cachedImage {
                                 Image(uiImage: img)
@@ -415,7 +525,7 @@ struct GenerationCardView: View {
                 // D-16: static thumbnail + play icon overlay
                 // Same hit-test containment as the image branch above.
                 Color.clear
-                    .overlay {
+                    .overlay(alignment: .top) {
                         ZStack {
                             if item.usesTransparencyBackdrop {
                                 TransparencyBackdrop()
@@ -491,11 +601,32 @@ struct GenerationCardView: View {
         guard item.isPreset, let ids = item.params.presetInputUploadIds, !ids.isEmpty,
               presetInputThumbs.isEmpty else { return }
         Task {
+            // Current API responses carry exact, freshly-signed preset inputs. Prefer those over
+            // the general upload library, whose newest-50 cap can omit inputs used by older cards.
+            if let directInputs = item.presetInputUrls {
+                let directThumbs = directInputs.enumerated().compactMap { index, input in
+                    input.map {
+                        PresetInputThumbnail(slotIndex: index, url: $0.url, isVideo: $0.isVideo)
+                    }
+                }
+                if !directThumbs.isEmpty {
+                    presetInputThumbs = directThumbs
+                    return
+                }
+            }
             await mediaLibrary.load()
-            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let requiredIds = Set(ids.compactMap { $0 })
+            if !requiredIds.isSubset(of: Set(map.keys)) {
+                await mediaLibrary.load(forceRefresh: true)
+                map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
             // 09.1-11: `ids` may contain nil (empty optional slot) — compactMap drops those before
             // the lookup, so only actually-filled slots produce a thumbnail.
-            presetInputThumbs = ids.compactMap { $0 }.compactMap { map[$0] }
+            presetInputThumbs = ids.enumerated().compactMap { index, id in
+                guard let id, let upload = map[id] else { return nil }
+                return PresetInputThumbnail(slotIndex: index, url: upload.url, isVideo: upload.isVideo)
+            }
         }
     }
 
@@ -540,24 +671,18 @@ struct GenerationCardView: View {
 
     // MARK: - Action Button Helper
     private func actionButton(_ icon: String, _ label: String, action: @escaping () -> Void, destructive: Bool = false) -> some View {
-        let fg: Color = destructive ? Color.red.opacity(0.85) : (isActive ? theme.textTertiary : theme.textPrimary.opacity(0.8))
-        let bg: Color = destructive ? Color.red.opacity(theme.isLight ? 0.07 : 0.10) : (isActive ? theme.surface.opacity(0.6) : theme.surface)
-        let border: Color = destructive ? Color.red.opacity(0.12) : (isActive ? theme.divider : theme.surfaceBorder)
-
+        let fg: Color = destructive ? Color.red.opacity(0.85) : (isActive ? theme.textTertiary : theme.textSecondary)
         return Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 7) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                 Text(label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12.5, weight: .semibold))
             }
             .foregroundStyle(fg)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(bg, in: Capsule())
-            .overlay(Capsule().stroke(border, lineWidth: 0.5))
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
-            .frame(minHeight: 44)
         }
         .disabled(isActive)
         .buttonStyle(PressableButtonStyle())

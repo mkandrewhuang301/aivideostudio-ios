@@ -25,7 +25,7 @@ enum AppReview {
         guard appStoreID.isEmpty == false,
               let url = URL(string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review") else {
             #if DEBUG
-            assertionFailure("AppReview.appStoreID is not set — create the App Store Connect app record and paste its numeric ID here. Until then, Rate Fantasia falls back to the slow, throttled SKStoreReviewController prompt.")
+            print("[AppReview] appStoreID not set — using the throttled SKStoreReviewController prompt. Paste the numeric App Store Connect ID into AppReview.appStoreID to enable the reliable direct write-a-review link.")
             #endif
             requestSystemPrompt()
             return

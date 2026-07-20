@@ -665,14 +665,16 @@ struct EditorView: View {
                 }
                 if !previewSurfaceReady {
                     Color.black
-                    if let urlString = state.project.thumbnailUrl, let url = URL(string: urlString) {
-                        LetterboxThumbnailView(
-                            url: url,
-                            cacheKey: "project-cover-\(state.project.id)-\(url.lastPathComponent)"
-                        ) {
-                            Color.black
-                        }
-                        .opacity(0.78)
+                    if let firstFrame = scrubFrameLadder.frame(
+                        project: state.project.clips,
+                        at: state.currentTime,
+                        ranges: clipRanges
+                    ) {
+                        Image(uiImage: firstFrame)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: size.width, height: size.height)
+                            .allowsHitTesting(false)
                     }
                     if player == nil {
                         ProgressView()

@@ -18,6 +18,8 @@ final class RatesManager {
     private(set) var dreamactorRate: Double = 5.0
     // fal.ai Kling v3 Standard image-to-video: live audio-off/audio-on credits/sec.
     private(set) var falKlingV3StandardRates: [String: Double] = RatesManager.falKlingFallback
+    // fal.ai Kling O3 Standard reference-to-video: live audio-off/audio-on credits/sec.
+    private(set) var falKlingO3StandardRates: [String: Double] = RatesManager.falKlingO3Fallback
     // Replicate Kling v3 Motion Control std+audio rate used by AI Influencer Pro.
     private(set) var klingMotionStandardRate: Double = RatesManager.klingMotionStandardFallback
     // Video upscaler (Enhancer): [tier ("standard"|"pro"): [resolution: [fpsBand ("lte30"|"gt30"): credits/sec]]]
@@ -58,6 +60,7 @@ final class RatesManager {
     // DreamActor $0.05/sec × CENTS_PER_DOLLAR (100) = 5.0 credits/sec (generationService.ts DREAMACTOR_RATE).
     private static let dreamactorFallback: Double = 5.0
     private static let falKlingFallback: [String: Double] = ["audioOff": 8.4, "audioOn": 12.6]
+    private static let falKlingO3Fallback: [String: Double] = ["audioOff": 8.4, "audioOn": 11.2]
     private static let klingMotionStandardFallback: Double = 25.2
 
     // bytedance/video-upscaler tiered fallback, converted from VIDEO_UPSCALER_RATES ($/sec) to
@@ -89,6 +92,7 @@ final class RatesManager {
             grokImagineRate = response.grokImagineRate ?? 8
             dreamactorRate = response.dreamactorRate ?? Self.dreamactorFallback
             falKlingV3StandardRates = response.falKlingV3StandardRates ?? Self.falKlingFallback
+            falKlingO3StandardRates = response.falKlingO3StandardRates ?? Self.falKlingO3Fallback
             klingMotionStandardRate = response.klingMotionStandardRate ?? Self.klingMotionStandardFallback
             upscalerRates = response.upscalerRates ?? Self.upscalerFallback
             lastLoadDate = Date()
@@ -98,6 +102,7 @@ final class RatesManager {
                 imageCosts = Self.imageCostFallback
                 dreamactorRate = Self.dreamactorFallback
                 falKlingV3StandardRates = Self.falKlingFallback
+                falKlingO3StandardRates = Self.falKlingO3Fallback
                 klingMotionStandardRate = Self.klingMotionStandardFallback
                 upscalerRates = Self.upscalerFallback
             }
@@ -125,6 +130,11 @@ final class RatesManager {
             let rate = falKlingV3StandardRates[key] ?? Self.falKlingFallback[key]!
             // Avoid charging one extra credit when a decimal rate lands microscopically above
             // an exact integer because of floating-point representation (for example 5 × 8.4).
+            return Int(ceil(Double(durationSeconds) * rate - 1e-9))
+        }
+        if model == "fal-ai/kling-video/o3/standard/reference-to-video" {
+            let key = audioEnabled ? "audioOn" : "audioOff"
+            let rate = falKlingO3StandardRates[key] ?? Self.falKlingO3Fallback[key]!
             return Int(ceil(Double(durationSeconds) * rate - 1e-9))
         }
         let table = rates.isEmpty ? Self.fallback : rates

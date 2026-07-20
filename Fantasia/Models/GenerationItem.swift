@@ -126,6 +126,9 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     let costCredits: Int
     let videoUrl: String?        // presigned R2 URL for the completed media (video or image)
     let referenceUrls: [GenerationReference]?  // presigned URLs for reference media (remix/regen)
+    // Presigned preset inputs, index-aligned to params.presetInputUploadIds. The backend returns
+    // these directly so history cards are not limited by GET /uploads' newest-50 library window.
+    let presetInputUrls: [GenerationReference?]?
     let createdAt: Date
     let completedAt: Date?
     let failureReason: String?   // 'content_policy' | 'copyright' | 'generic_error' | nil (legacy rows)
@@ -141,6 +144,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         case costCredits = "cost_credits"
         case videoUrl = "video_url"
         case referenceUrls = "reference_urls"
+        case presetInputUrls = "preset_input_urls"
         case createdAt = "created_at"
         case completedAt = "completed_at"
         case failureReason = "failure_reason"
@@ -164,6 +168,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         costCredits = try container.decode(Int.self, forKey: .costCredits)
         videoUrl = try container.decodeIfPresent(String.self, forKey: .videoUrl)
         referenceUrls = try container.decodeIfPresent([GenerationReference].self, forKey: .referenceUrls)
+        presetInputUrls = try container.decodeIfPresent([GenerationReference?].self, forKey: .presetInputUrls)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         failureReason = try container.decodeIfPresent(String.self, forKey: .failureReason)
@@ -192,6 +197,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         self.costCredits = costCredits
         self.videoUrl = nil
         self.referenceUrls = referenceUrls
+        self.presetInputUrls = nil
         self.createdAt = createdAt
         self.completedAt = nil
         self.failureReason = nil

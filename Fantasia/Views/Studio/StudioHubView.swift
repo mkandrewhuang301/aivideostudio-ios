@@ -1,7 +1,8 @@
 // StudioHubView.swift
 // Fantasia
 // Phase 13, Plan 09: the Studio project hub (D-06) — entered exclusively via the Home "Edit
-// Studio" hero card. 2-column grid: "+" tile first, then the user's saved projects newest-first.
+// Studio" hero card. A full-width New Project banner sits above a 2-column grid of the user's
+// saved projects newest-first.
 // Uses the app-scoped ProjectManager shared with Home, the media picker, and the editor. That
 // lets the last persisted project snapshot paint before this screen's first frame and prevents a
 // second loading cycle when entering Studio from Home.
@@ -13,7 +14,6 @@ import SwiftUI
 
 struct StudioHubView: View {
     @Environment(ThemeManager.self) private var theme
-    @Environment(\.dismiss) private var dismiss
     @Environment(ProjectManager.self) private var projectManager
     @Environment(GenerationManager.self) private var generationManager
 
@@ -29,30 +29,26 @@ struct StudioHubView: View {
     // LibraryThumbnailView/GenerationCardView's existing dialog.
     @State private var projectPendingDelete: ProjectSummary?
 
+    private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
+
     var body: some View {
         ZStack {
             theme.background.ignoresSafeArea()
-            ScrollView {
-                stateContent
+            ScrollView(showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    pageHeader
+                    newProjectBanner
+                    projectsLabel
+                    stateContent
+                }
+                .padding(.bottom, 112)
             }
             .refreshable {
                 await projectManager.refreshProjects()
                 trackActiveStudioExports()
             }
         }
-        .navigationTitle("Studio")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .foregroundStyle(theme.textPrimary)
-                }
-                .accessibilityLabel("Close Studio")
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
         .task {
             await projectManager.loadProjects()
             trackActiveStudioExports()
@@ -108,6 +104,79 @@ struct StudioHubView: View {
         }
     }
 
+    // MARK: - Page chrome (Cast sibling treatment)
+
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Studio")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(theme.textPrimary)
+            Text("Your edits, all in one place.")
+                .font(.subheadline)
+                .foregroundStyle(theme.textSecondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 3)
+    }
+
+    private var newProjectBanner: some View {
+        Button { showMediaPicker = true } label: {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("New Project")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(theme.textPrimary)
+                    Text("Start from a video, photo, or generation")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                    .frame(width: 34, height: 34)
+                    .background(theme.surfaceStrong, in: Circle())
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 30)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(theme.surface)
+                    .overlay {
+                        LinearGradient(
+                            colors: [accent.opacity(theme.isLight ? 0.22 : 0.38), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(accent.opacity(0.30), lineWidth: 1)
+            }
+        }
+        .buttonStyle(PressableButtonStyle())
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .accessibilityHint("Opens the media picker")
+    }
+
+    private var projectsLabel: some View {
+        Text("PROJECTS")
+            .font(.system(size: 10, weight: .heavy))
+            .tracking(1.3)
+            .foregroundStyle(theme.textTertiary)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+    }
+
     // MARK: - States (loading / error / empty / populated)
 
     @ViewBuilder
@@ -119,16 +188,56 @@ struct StudioHubView: View {
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 if projectManager.projects.isEmpty {
-                    Text("No projects yet — tap + to start your first edit.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(theme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 24)
-                        .padding(.bottom, 8)
+                    emptyState
+                } else {
+                    grid
                 }
-                grid
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 9) {
+            Image(systemName: "film.stack")
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(accent)
+                .frame(width: 52, height: 52)
+                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+
+            Text("No projects yet")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(theme.textPrimary)
+
+            Text("Combine videos, photos, and generations into your next edit.")
+                .font(.subheadline)
+                .foregroundStyle(theme.textSecondary)
+                .multilineTextAlignment(.center)
+
+            Button { showMediaPicker = true } label: {
+                Text("New Project")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 40)
+                    .background(accent, in: Capsule())
+            }
+            .buttonStyle(PressableButtonStyle())
+            .padding(.top, 5)
+            .accessibilityHint("Opens the media picker")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 26)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(
+                    accent.opacity(0.40),
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                )
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
     }
 
     private var grid: some View {
@@ -136,7 +245,6 @@ struct StudioHubView: View {
             columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
             spacing: 10
         ) {
-            AddProjectTile { showMediaPicker = true }
             ForEach(projectManager.projects) { project in
                 ProjectTileView(
                     project: project,
@@ -155,8 +263,7 @@ struct StudioHubView: View {
                 )
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 24)
+        .padding(.horizontal, 14)
     }
 
     private var loadingGrid: some View {

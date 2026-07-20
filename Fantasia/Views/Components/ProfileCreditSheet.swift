@@ -3,6 +3,7 @@
 // Profile bottom sheet: identity, credits, actions, account management.
 
 import SwiftUI
+import AuthenticationServices
 
 struct ProfileCreditSheet: View {
     @Environment(CreditManager.self) private var creditManager
@@ -14,6 +15,11 @@ struct ProfileCreditSheet: View {
     @State private var showCreditStore = false
     @State private var showManageSubscription = false
     @State private var showSignOutConfirm = false
+    @State private var showDeleteConfirm = false
+    @State private var showAppleReauthentication = false
+    @State private var showDeleteFailure = false
+    @State private var isDeleting = false
+    @State private var appleRawNonce: String?
 
     private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
 
@@ -70,6 +76,44 @@ struct ProfileCreditSheet: View {
             ManageSubscriptionView(isPresented: $showManageSubscription)
                 .environment(creditManager)
         }
+        .sheet(isPresented: $showAppleReauthentication) {
+            appleReauthenticationSheet
+                .presentationDetents([.height(260)])
+                .presentationDragIndicator(.visible)
+        }
+        .alert("Delete Account?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete Account", role: .destructive) {
+                if authManager.isAppleLinkedUser {
+                    showAppleReauthentication = true
+                } else {
+                    Task { await performAccountDeletion() }
+                }
+            }
+        } message: {
+            Text("Your account, \(creditManager.creditsBalance) credits, all videos, projects, and uploads will be permanently deleted. This can't be undone.\nAn active subscription is not cancelled by this — manage it in Settings › Apple ID › Subscriptions.")
+        }
+        .alert("Couldn't delete your account. Check your connection and try again.", isPresented: $showDeleteFailure) {
+            Button("OK") {}
+        }
+        .overlay {
+            if isDeleting {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Deleting…")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
+        }
+        .interactiveDismissDisabled(isDeleting)
     }
 
     // MARK: - Identity
@@ -145,7 +189,7 @@ struct ProfileCreditSheet: View {
             .padding(.top, 6)
         }
         .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
@@ -181,7 +225,7 @@ struct ProfileCreditSheet: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 10)
 
-            // Sign out card
+            // Account actions card
             VStack(spacing: 0) {
                 Button { showSignOutConfirm = true } label: {
                     HStack(spacing: 12) {
@@ -195,6 +239,22 @@ struct ProfileCreditSheet: View {
                     .frame(height: 52)
                 }
                 .buttonStyle(.plain)
+
+                rowDivider
+
+                Button { showDeleteConfirm = true } label: {
+                    HStack(spacing: 12) {
+                        iconContainer(systemName: "trash.fill", color: .red.opacity(0.9))
+                        Text("Delete Account")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.red)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 52)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
             }
             .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.red.opacity(0.15), lineWidth: 0.5))
@@ -202,6 +262,88 @@ struct ProfileCreditSheet: View {
                 Button("Sign Out", role: .destructive) { try? authManager.signOut() }
                 Button("Cancel", role: .cancel) {}
             }
+        }
+    }
+
+    // MARK: - Account deletion
+
+    private var appleReauthenticationSheet: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "person.badge.key.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(accent)
+
+            VStack(spacing: 6) {
+                Text("Confirm it's you")
+                    .font(.title3.weight(.semibold))
+                Text("Sign in with Apple again to permanently delete your account.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            SignInWithAppleButton(.continue) { request in
+                let rawNonce = authManager.generateNonce()
+                appleRawNonce = rawNonce
+                request.requestedScopes = [.email, .fullName]
+                request.nonce = authManager.sha256(rawNonce)
+            } onCompletion: { result in
+                handleAppleReauthentication(result)
+            }
+            .signInWithAppleButtonStyle(.whiteOutline)
+            .frame(height: 50)
+        }
+        .padding(24)
+    }
+
+    private func handleAppleReauthentication(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let rawNonce = appleRawNonce,
+                  let codeData = credential.authorizationCode,
+                  let authorizationCode = String(data: codeData, encoding: .utf8) else {
+                showAppleReauthentication = false
+                showDeleteFailure = true
+                return
+            }
+
+            Task {
+                do {
+                    try await authManager.signInWithApple(credential: credential, rawNonce: rawNonce)
+                    showAppleReauthentication = false
+                    await performAccountDeletion(appleAuthorizationCode: authorizationCode)
+                } catch {
+                    print("[ProfileCreditSheet] Apple re-authentication failed: \(error)")
+                    showAppleReauthentication = false
+                    showDeleteFailure = true
+                }
+            }
+        case .failure(let error):
+            if (error as NSError).code != ASAuthorizationError.canceled.rawValue {
+                print("[ProfileCreditSheet] Apple re-authentication failed: \(error)")
+                showDeleteFailure = true
+            }
+            showAppleReauthentication = false
+        }
+    }
+
+    private func performAccountDeletion(appleAuthorizationCode: String? = nil) async {
+        guard !isDeleting else { return }
+        let deletingUid = authManager.currentUser?.uid
+        isDeleting = true
+        defer { isDeleting = false }
+
+        do {
+            try await authManager.deleteAccount(appleAuthorizationCode: appleAuthorizationCode)
+            if let deletingUid {
+                creditManager.clearAccountCache(uid: deletingUid)
+                ListSnapshotStore.clearAll(uid: deletingUid)
+            }
+            isPresented = false
+        } catch {
+            print("[ProfileCreditSheet] Account deletion failed: \(error)")
+            showDeleteFailure = true
         }
     }
 

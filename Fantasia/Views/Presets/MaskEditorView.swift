@@ -48,6 +48,7 @@ struct MaskEditorView: View {
     @Environment(ThemeManager.self) private var theme
     @Environment(GenerationManager.self) private var generationManager
     @Environment(CreditManager.self) private var creditManager
+    @Environment(MediaLibraryManager.self) private var mediaLibrary
 
     // The (possibly downsized) source image actually displayed + painted over + uploaded — its
     // `.size` IS the "source pixel size" the exported mask must exactly match (Pitfall 2/7).
@@ -587,6 +588,17 @@ struct MaskEditorView: View {
                 data: maskData, mimeType: "image/png", fileName: "magic-editor-mask.png"
             )
             let (sourceUpload, maskUpload) = try await (sourceUploadTask, maskUploadTask)
+            // Make the user-facing source immediately available to feed/detail preset cards.
+            // Do not insert the painted alpha mask: the backend marks it kind=mask and excludes
+            // it from the user's reference library by design.
+            if let sourceUploadId = sourceUpload.id {
+                mediaLibrary.insert(ReferenceUploadItem(
+                    id: sourceUploadId,
+                    url: sourceUpload.url,
+                    mimeType: "image/jpeg",
+                    displayName: nil
+                ))
+            }
 
             // D-11: only preset_id + upload ids + mask_upload_id are sent — the server's
             // presetResolver owns model/media_type/prompt expansion for the magic-editor preset.

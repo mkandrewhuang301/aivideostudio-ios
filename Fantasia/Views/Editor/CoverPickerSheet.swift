@@ -53,16 +53,9 @@ struct CoverPickerSheet: View {
     @State private var totalDuration: Double = 0
 
     @State private var scrubbedTime: Double = 0
-    /// Item 3 (round 2, Andrew review 2026-07-17): SPLIT from the old single `committedCoverTime`
-    /// — this now tracks ONLY the frame actually persisted server-side as the project's cover.
-    /// Browsing/scrubbing the strip never touches it; it moves exactly once, in `saveCover()`,
-    /// right after a successful `setCoverImage` PATCH. The white dot (`committedMarkerX`) binds to
-    /// THIS, not to wherever the user is currently scrubbed to — previously the strip's
-    /// drag-release handler wrote straight into this same variable on every release, so the dot
-    /// chased the browsing position instead of marking the actually-saved cover. Starts at 0 —
-    /// this ephemeral editor never decomposes the existing server-side cover back into a strip
-    /// position (see file header), so there's no earlier "saved" time to seed it with.
-    @State private var savedCoverTime: Double = 0
+    /// The frame explicitly confirmed with the bottom Cover control. Scrubbing only browses; the
+    /// dot moves when Cover is tapped so it clearly marks the frame that will be saved.
+    @State private var selectedCoverTime: Double = 0
     @State private var previewResult: CoverPreviewResult?
     @State private var stripFrames: [UIImage?] = []
     @State private var stripCellCount = 0
@@ -115,6 +108,7 @@ struct CoverPickerSheet: View {
               result.quality == .precise,
               result.version == expectedPrecisePreviewVersion,
               result.version == measuredDisplayVersion,
+              abs(selectedCoverTime - scrubbedTime) < 0.000_1,
               canvasDisplaySize.width > 0,
               canvasDisplaySize.height > 0
         else { return false }
@@ -268,7 +262,7 @@ struct CoverPickerSheet: View {
             let count = max(1, Int(ceil(totalDuration * px / stripCellWidth)))
             let stripOffset = viewportWidth / 2 - scrubbedTime * px
             let committedMarkerX = Self.committedMarkerX(
-                committedTime: savedCoverTime,
+                committedTime: selectedCoverTime,
                 scrubbedTime: scrubbedTime,
                 pixelsPerSecond: px,
                 viewportWidth: viewportWidth
@@ -318,7 +312,7 @@ struct CoverPickerSheet: View {
         .frame(height: stripCellHeight + stripMarkerHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Cover frame selector")
-        .accessibilityValue("Saved cover at \(TimelineTrackView.formatTime(savedCoverTime))")
+        .accessibilityValue("Selected cover at \(TimelineTrackView.formatTime(selectedCoverTime))")
     }
 
     private func stripCellView(index: Int, stripPx: CGFloat) -> some View {
@@ -364,9 +358,8 @@ struct CoverPickerSheet: View {
             }
             .onEnded { _ in
                 stripDragStartTime = nil
-                // Item 3 (round 2): no longer writes `savedCoverTime` here — browsing to a new
-                // frame must NOT move the white dot. It moves only in `saveCover()`, on a
-                // successful save.
+                // Browsing alone does not move the dot. The bottom Cover action explicitly
+                // confirms the current frame and moves the marker there.
                 // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
                 // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
                 requestPreview(at: scrubbedTime, quality: .precise)
@@ -386,6 +379,7 @@ struct CoverPickerSheet: View {
                 coverTab(icon: "film", label: "Cover", tab: .frame) {
                     selectedTab = .frame
                     selectedOverlayId = nil
+                    selectedCoverTime = scrubbedTime
                 }
                 coverTab(icon: "textformat", label: "Text", tab: .text) {
                     selectedTab = .text
@@ -411,7 +405,7 @@ struct CoverPickerSheet: View {
     }
 
     // Item 3 (round 2, Andrew review 2026-07-17): these three tabs are one-shot action triggers
-    // (Cover resets to frame-picking + deselects; Text immediately ADDS a new overlay on every
+    // (Cover confirms the browsed frame + deselects; Text immediately ADDS a new overlay on every
     // tap; Add Photo opens the system picker) — none of them represent a persistent "current mode"
     // worth calling out with a bright/selected look. The old `isSelected ? .white : .white.opacity
     // (0.55)` styling made whichever tab matched `selectedTab` (which defaults to "Cover") render
@@ -741,12 +735,7 @@ struct CoverPickerSheet: View {
         do {
             try await projectManager.setCoverImage(data: jpeg)
             isSaving = false
-            // Item 3 (round 2): the ONLY place `savedCoverTime` moves — right after a successful
-            // save, at the exact frame that was just persisted. `scrubbedTime` is the strip's
-            // resting position, unchanged since the last drag release that produced this precise
-            // preview (Save is disabled — see `isCurrentPrecisePreviewReady` — for the entire
-            // window between a new drag starting and its precise render landing).
-            savedCoverTime = scrubbedTime
+            selectedCoverTime = scrubbedTime
             onCoverSet()
             dismiss()
         } catch {

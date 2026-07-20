@@ -35,4 +35,18 @@ enum ListSnapshotStore {
         guard let url = url(name: name, uid: uid) else { return }
         try? FileManager.default.removeItem(at: url)
     }
+
+    /// Account deletion cleanup for all UID-keyed list/detail snapshots, including editor
+    /// snapshots whose project IDs may no longer be present in the currently loaded page.
+    static func clearAll(uid: String) {
+        guard let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+              ) else { return }
+        let suffix = "-\(uid).json"
+        for file in files where file.lastPathComponent.hasSuffix(suffix) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
 }

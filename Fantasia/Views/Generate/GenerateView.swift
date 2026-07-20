@@ -272,15 +272,15 @@ struct GenerateView: View {
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            // Plain VStack (not Lazy): this list is a single bounded page of
-                            // history, not an infinite feed. Eagerly measuring every card is
-                            // what makes defaultScrollAnchor(.bottom) below land on the exact
-                            // bottom — LazyVStack doesn't size off-screen variable-height rows
-                            // ahead of time, so the anchor's initial offset came out wrong.
+                            // This is a bounded history page, so measure every variable-height
+                            // card up front. LazyVStack estimates off-screen row heights; as those
+                            // estimates are corrected, its reported content height can remain
+                            // larger than the rendered cards and leave a scrollable blank region
+                            // past the newest item. VStack gives ScrollView the exact bottom edge.
                             VStack(spacing: 12) {
                                 if generationManager.nextCursor != nil {
-                                    // Reports its position instead of using onAppear — onAppear
-                                    // fires immediately for offscreen rows in a non-lazy VStack.
+                                    // Reports its position instead of using onAppear so loading
+                                    // remains tied to the row actually entering the viewport.
                                     Color.clear
                                         .frame(height: 1)
                                         .background(
@@ -916,10 +916,10 @@ struct GenerateView: View {
                         }
                     } label: {
                         Image(systemName: "paperclip")
-                            .font(.system(size: 19, weight: .medium))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundStyle(theme.textSecondary)
                             .frame(width: 36, height: 36)
-                            .offset(y: 3)
+                            .offset(y: 1)
                     }
                     // The menu pops upward from this bottom-anchored button, and iOS renders
                     // upward-popping menus bottom-to-top by default — .fixed keeps declared
@@ -1086,7 +1086,7 @@ struct GenerateView: View {
             }
 
             Rectangle()
-                .fill(theme.divider)
+                .fill(theme.surfaceStrongBorder.opacity(0.65))
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
                 // 1 (was 2) — tighter gap between the prompt text and the pills row.
@@ -1103,7 +1103,9 @@ struct GenerateView: View {
                 audioEnabled: $audioEnabled,
                 selectedImageResolution: $selectedImageResolution
             )
-            .padding(.top, 2)
+            // 6 (was 2) — opens up the gap under the hairline divider so the line sits a
+            // bit further above the settings strip (2026-07-19 user request).
+            .padding(.top, 6)
             .padding(.bottom, 6)
         }
         .fixedSize(horizontal: false, vertical: true)

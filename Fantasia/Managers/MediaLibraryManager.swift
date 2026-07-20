@@ -67,10 +67,19 @@ final class MediaLibraryManager {
         ListSnapshotStore.save(items, name: Self.snapshotName, uid: uid)
     }
 
-    func load() async {
+    func load(forceRefresh: Bool = false) async {
         // Cache hit: show the existing list instantly, no network call, no spinner.
-        guard !hasLoadedOnce || isStale else { return }
-        guard !isLoading else { return }
+        guard forceRefresh || !hasLoadedOnce || isStale else { return }
+        // Several feed cards can appear in the same layout pass. They must all wait for the one
+        // shared fetch to finish before resolving preset_input_upload_ids; returning immediately
+        // here left every card except the first one looking up ids in the stale snapshot.
+        if isLoading {
+            while isLoading {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return
+        }
         isLoading = true
         loadFailed = false
         defer { isLoading = false }
@@ -86,6 +95,7 @@ final class MediaLibraryManager {
     }
 
     func insert(_ item: ReferenceUploadItem) {
+        items.removeAll { $0.id == item.id }
         items.insert(item, at: 0)
         persistSnapshot()
     }

@@ -53,6 +53,10 @@ struct ProjectTileView: View {
     @Environment(ThemeManager.self) private var theme
     @State private var isMediaPreviewActive = false
 
+    // Two 32pt controls + 6pt spacing + surrounding breathing room. This region passes through
+    // the UIKit card interaction so download/share taps reach the SwiftUI buttons beneath it.
+    private let exportActionsHitAreaSize = CGSize(width: 86, height: 48)
+
     private var displayTitle: String {
         guard let title = project.title, !title.isEmpty else { return "Untitled Project" }
         return title
@@ -107,7 +111,8 @@ struct ProjectTileView: View {
                     },
                     onTap: onTap,
                     onPreviewingChanged: { active in isMediaPreviewActive = active },
-                    previewCornerRadius: 16
+                    previewCornerRadius: 16,
+                    passthroughTopTrailingSize: exportActionsHitAreaSize
                 )
             }
             .overlay(alignment: .topLeading) {

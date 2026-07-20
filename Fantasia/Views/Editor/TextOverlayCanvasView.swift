@@ -50,11 +50,21 @@ struct TextOverlayCanvasView: View {
                         onMove: { xNorm, yNorm in
                             persistMove(id: overlay.id, xNorm: xNorm, yNorm: yNorm)
                         },
-                        onResize: { scale in
-                            persistResize(id: overlay.id, scale: scale)
+                        onResize: { scale, xNorm, yNorm in
+                            persistResize(
+                                id: overlay.id,
+                                scale: scale,
+                                xNorm: xNorm,
+                                yNorm: yNorm
+                            )
                         },
-                        onRotate: { rotation in
-                            persistRotation(id: overlay.id, rotation: rotation)
+                        onRotate: { rotation, xNorm, yNorm in
+                            persistRotation(
+                                id: overlay.id,
+                                rotation: rotation,
+                                xNorm: xNorm,
+                                yNorm: yNorm
+                            )
                         },
                         onEditCommit: { newText in
                             Task { await persistTextEdit(id: overlay.id, text: newText) }
@@ -149,49 +159,99 @@ struct TextOverlayCanvasView: View {
         }
     }
 
-    private func persistResize(id: String, scale: Double) {
+    private func persistResize(id: String, scale: Double, xNorm: Double, yNorm: Double) {
         guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
         let clampedScale = min(3, max(0.5, scale))
-        let beforeScale = state.project.textOverlays[idx].widthNorm
+        let clampedXNorm = min(1, max(0, xNorm))
+        let clampedYNorm = min(1, max(0, yNorm))
+        let before = state.project.textOverlays[idx]
         state.project.textOverlays[idx].widthNorm = clampedScale
+        state.project.textOverlays[idx].xNorm = clampedXNorm
+        state.project.textOverlays[idx].yNorm = clampedYNorm
 
         Task {
             do {
-                try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale)
+                try await projectManager.updateTextOverlay(
+                    textId: id,
+                    xNorm: clampedXNorm,
+                    yNorm: clampedYNorm,
+                    widthNorm: clampedScale
+                )
                 syncProjectFromManager()
                 state.history.record(UndoableAction(
                     label: "Resize text",
-                    undo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: beforeScale) },
-                    redo: { try await projectManager.updateTextOverlay(textId: id, widthNorm: clampedScale) }
+                    undo: {
+                        try await projectManager.updateTextOverlay(
+                            textId: id,
+                            xNorm: before.xNorm,
+                            yNorm: before.yNorm,
+                            widthNorm: before.widthNorm
+                        )
+                    },
+                    redo: {
+                        try await projectManager.updateTextOverlay(
+                            textId: id,
+                            xNorm: clampedXNorm,
+                            yNorm: clampedYNorm,
+                            widthNorm: clampedScale
+                        )
+                    }
                 ))
             } catch {
                 print("[TextOverlayCanvasView] resize error: \(error)")
                 if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
-                    state.project.textOverlays[revertIdx].widthNorm = beforeScale
+                    state.project.textOverlays[revertIdx].widthNorm = before.widthNorm
+                    state.project.textOverlays[revertIdx].xNorm = before.xNorm
+                    state.project.textOverlays[revertIdx].yNorm = before.yNorm
                 }
                 onError("Couldn't save change")
             }
         }
     }
 
-    private func persistRotation(id: String, rotation: Double) {
+    private func persistRotation(id: String, rotation: Double, xNorm: Double, yNorm: Double) {
         guard let idx = state.project.textOverlays.firstIndex(where: { $0.id == id }) else { return }
-        let beforeRotation = state.project.textOverlays[idx].rotation
+        let clampedXNorm = min(1, max(0, xNorm))
+        let clampedYNorm = min(1, max(0, yNorm))
+        let before = state.project.textOverlays[idx]
         state.project.textOverlays[idx].rotation = rotation
+        state.project.textOverlays[idx].xNorm = clampedXNorm
+        state.project.textOverlays[idx].yNorm = clampedYNorm
 
         Task {
             do {
-                try await projectManager.updateTextOverlay(textId: id, rotation: rotation)
+                try await projectManager.updateTextOverlay(
+                    textId: id,
+                    xNorm: clampedXNorm,
+                    yNorm: clampedYNorm,
+                    rotation: rotation
+                )
                 syncProjectFromManager()
                 state.history.record(UndoableAction(
                     label: "Rotate text",
-                    undo: { try await projectManager.updateTextOverlay(textId: id, rotation: beforeRotation) },
-                    redo: { try await projectManager.updateTextOverlay(textId: id, rotation: rotation) }
+                    undo: {
+                        try await projectManager.updateTextOverlay(
+                            textId: id,
+                            xNorm: before.xNorm,
+                            yNorm: before.yNorm,
+                            rotation: before.rotation
+                        )
+                    },
+                    redo: {
+                        try await projectManager.updateTextOverlay(
+                            textId: id,
+                            xNorm: clampedXNorm,
+                            yNorm: clampedYNorm,
+                            rotation: rotation
+                        )
+                    }
                 ))
             } catch {
                 print("[TextOverlayCanvasView] rotate error: \(error)")
                 if let revertIdx = state.project.textOverlays.firstIndex(where: { $0.id == id }) {
-                    state.project.textOverlays[revertIdx].rotation = beforeRotation
+                    state.project.textOverlays[revertIdx].rotation = before.rotation
+                    state.project.textOverlays[revertIdx].xNorm = before.xNorm
+                    state.project.textOverlays[revertIdx].yNorm = before.yNorm
                 }
                 onError("Couldn't save change")
             }
@@ -286,6 +346,36 @@ struct TextOverlayCanvasView: View {
     }
 }
 
+/// Keeps the rendered text rectangle inside the video canvas, including after rotation. Position
+/// values describe the overlay's center, so constraining the center alone is insufficient near an
+/// edge: the rotated half-extents must be reserved on every side.
+enum TextOverlayCanvasGeometry {
+    static func constrainedCenter(
+        proposed: CGPoint,
+        contentSize: CGSize,
+        rotationDegrees: Double,
+        canvasSize: CGSize
+    ) -> CGPoint {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return proposed }
+
+        let radians = CGFloat(rotationDegrees * .pi / 180)
+        let cosine = abs(cos(radians))
+        let sine = abs(sin(radians))
+        let halfWidth = (contentSize.width * cosine + contentSize.height * sine) / 2
+        let halfHeight = (contentSize.width * sine + contentSize.height * cosine) / 2
+
+        return CGPoint(
+            x: clamp(proposed.x, extent: halfWidth, canvasLength: canvasSize.width),
+            y: clamp(proposed.y, extent: halfHeight, canvasLength: canvasSize.height)
+        )
+    }
+
+    private static func clamp(_ value: CGFloat, extent: CGFloat, canvasLength: CGFloat) -> CGFloat {
+        guard extent * 2 < canvasLength else { return canvasLength / 2 }
+        return min(canvasLength - extent, max(extent, value))
+    }
+}
+
 // MARK: - One on-video text overlay: drag-anywhere-on-body move, corner controls when selected.
 
 private struct TextOverlayItemView: View {
@@ -303,11 +393,12 @@ private struct TextOverlayItemView: View {
     /// ClipPillView's onReorder/onTrimChange contract: this view only previews the live drag via a
     /// local offset, the CALLER performs the PATCH.
     let onMove: (Double, Double) -> Void
-    /// Fires once, on resize-handle release, with the final font-scale factor (0.5x-3x).
-    let onResize: (Double) -> Void
+    /// Fires once, on resize-handle release, with the final scale and any center correction needed
+    /// to keep the resized text inside the video frame.
+    let onResize: (Double, Double, Double) -> Void
     /// Fires once, on rotation-handle release, with the final angle in degrees (clockwise-positive,
     /// matching `.rotationEffect`) — 13-19 Task H.
-    let onRotate: (Double) -> Void
+    let onRotate: (Double, Double, Double) -> Void
     /// Fires once, when the inline edit TextField commits a non-empty, changed value.
     let onEditCommit: (String) -> Void
     let onEditTriggerConsumed: () -> Void
@@ -321,6 +412,7 @@ private struct TextOverlayItemView: View {
     @State private var rotationGrabAngle: Double? = nil
     @State private var isEditing = false
     @State private var editDraft = ""
+    @State private var renderedContentSize: CGSize = .zero
     @FocusState private var editFieldFocused: Bool
 
     private let baseFontSize: CGFloat = 26
@@ -334,6 +426,16 @@ private struct TextOverlayItemView: View {
         CGPoint(x: overlay.xNorm * canvasSize.width, y: overlay.yNorm * canvasSize.height)
     }
 
+    private var displayedCenter: CGPoint {
+        constrainedCenter(
+            proposed: CGPoint(
+                x: basePosition.x + dragOffset.width,
+                y: basePosition.y + dragOffset.height
+            ),
+            rotation: liveRotation
+        )
+    }
+
     var body: some View {
         Group {
             if isEditing {
@@ -342,7 +444,7 @@ private struct TextOverlayItemView: View {
                 displayView
             }
         }
-        .position(x: basePosition.x + dragOffset.width, y: basePosition.y + dragOffset.height)
+        .position(x: displayedCenter.x, y: displayedCenter.y)
         .onAppear { editDraft = overlay.text }
         .onChange(of: overlay.text) { _, newValue in
             if !isEditing { editDraft = newValue }
@@ -378,6 +480,9 @@ private struct TextOverlayItemView: View {
             .shadow(color: .black.opacity(0.65), radius: 10, y: 2)
             .fixedSize()
             .padding(6)
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) {
+                renderedContentSize = $0
+            }
             .overlay(selectionFrame)
             .contentShape(Rectangle())
             .onTapGesture { onSelect() }
@@ -547,7 +652,7 @@ private struct TextOverlayItemView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("overlayCanvas"))
             .onChanged { value in
                 onSelect()
-                let center = basePosition
+                let center = constrainedCenter(proposed: basePosition, rotation: liveRotation)
                 let angle = atan2(value.location.y - center.y, value.location.x - center.x)
                 if rotationGrabAngle == nil {
                     rotationGrabAngle = angle
@@ -561,9 +666,11 @@ private struct TextOverlayItemView: View {
                 finalRotation = finalRotation.truncatingRemainder(dividingBy: 360)
                 if finalRotation > 180 { finalRotation -= 360 }
                 if finalRotation <= -180 { finalRotation += 360 }
+                let center = constrainedCenter(proposed: basePosition, rotation: finalRotation)
+                let normalized = normalizedPosition(for: center)
                 rotationDelta = 0
                 rotationGrabAngle = nil
-                onRotate(finalRotation)
+                onRotate(finalRotation, normalized.x, normalized.y)
             }
     }
 
@@ -576,12 +683,15 @@ private struct TextOverlayItemView: View {
                 dragOffset = value.translation
             }
             .onEnded { value in
-                let deltaXNorm = value.translation.width / max(canvasSize.width, 1)
-                let deltaYNorm = value.translation.height / max(canvasSize.height, 1)
-                let newX = min(0.98, max(0.02, overlay.xNorm + deltaXNorm))
-                let newY = min(0.98, max(0.02, overlay.yNorm + deltaYNorm))
+                let proposed = CGPoint(
+                    x: basePosition.x + value.translation.width,
+                    y: basePosition.y + value.translation.height
+                )
+                let normalized = normalizedPosition(
+                    for: constrainedCenter(proposed: proposed, rotation: liveRotation)
+                )
                 dragOffset = .zero
-                onMove(newX, newY)
+                onMove(normalized.x, normalized.y)
             }
     }
 
@@ -596,9 +706,27 @@ private struct TextOverlayItemView: View {
             }
             .onEnded { _ in
                 let finalScale = liveScale
+                let center = constrainedCenter(proposed: basePosition, rotation: liveRotation)
+                let normalized = normalizedPosition(for: center)
                 scaleDelta = 0
-                onResize(finalScale)
+                onResize(finalScale, normalized.x, normalized.y)
             }
+    }
+
+    private func constrainedCenter(proposed: CGPoint, rotation: Double) -> CGPoint {
+        TextOverlayCanvasGeometry.constrainedCenter(
+            proposed: proposed,
+            contentSize: renderedContentSize,
+            rotationDegrees: rotation,
+            canvasSize: canvasSize
+        )
+    }
+
+    private func normalizedPosition(for center: CGPoint) -> (x: Double, y: Double) {
+        (
+            x: Double(center.x / max(canvasSize.width, 1)),
+            y: Double(center.y / max(canvasSize.height, 1))
+        )
     }
 
     // MARK: - Edit commit

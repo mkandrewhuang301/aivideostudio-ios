@@ -15,6 +15,7 @@ enum AuthManagerError: Error, LocalizedError {
     case missingGoogleIdToken
     case missingNonce
     case missingAppleIdToken
+    case missingAppleAuthorizationCode
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,7 @@ enum AuthManagerError: Error, LocalizedError {
         case .missingGoogleIdToken: return "Google sign-in did not return an ID token."
         case .missingNonce: return "Apple sign-in nonce was missing. Try again."
         case .missingAppleIdToken: return "Apple sign-in did not return an identity token."
+        case .missingAppleAuthorizationCode: return "Apple sign-in did not return an authorization code."
         }
     }
 }
@@ -61,9 +63,26 @@ final class AuthManager {
         // The listener fires automatically and sets currentUser = nil
     }
 
-    func deleteAccount() async throws {
-        try await Auth.auth().currentUser?.delete()
-        // The listener fires automatically and sets currentUser = nil
+    var isAppleLinkedUser: Bool {
+        currentUser?.providerData.contains(where: { $0.providerID == "apple.com" }) == true
+    }
+
+    func deleteAccount(appleAuthorizationCode: String? = nil) async throws {
+        if isAppleLinkedUser {
+            guard let appleAuthorizationCode else {
+                throw AuthManagerError.missingAppleAuthorizationCode
+            }
+            do {
+                try await Auth.auth().revokeToken(withAuthorizationCode: appleAuthorizationCode)
+            } catch {
+                // Apple revocation is best-effort. Server-side account/data deletion remains the
+                // authoritative privacy action and must not be blocked by an Apple outage.
+                print("[AuthManager] Apple token revocation failed: \(error)")
+            }
+        }
+
+        try await APIClient.shared.deleteAccount()
+        try signOut()
     }
 
     // MARK: - Sign in with Google

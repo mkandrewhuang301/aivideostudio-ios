@@ -98,6 +98,13 @@ final class CreditManager {
         clearOptimisticFloor()
     }
 
+    /// Account deletion must remove the persisted, UID-keyed balance as well as resetting
+    /// in-memory state; otherwise a Firebase orphan that signs back in with the same uid can
+    /// briefly hydrate the deleted account's old credits before GET /api/me corrects it.
+    func clearAccountCache(uid: String) {
+        UserDefaults.standard.removeObject(forKey: Self.cacheKey(for: uid))
+    }
+
     /// Immediately reflect a confirmed top-up purchase, ahead of the RC webhook grant landing
     /// server-side (which can take anywhere from a couple seconds to ~100s in practice — RC
     /// delivery + a cold Railway boot). The floor lifts itself the moment a `fetchBalance()`

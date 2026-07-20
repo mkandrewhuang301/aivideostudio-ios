@@ -113,6 +113,24 @@ actor APIClient {
         try await authorizedRequestNoContent(path: "api/me/consent", method: "PATCH")
     }
 
+    // DELETE /api/me — 401 is idempotent success: the server may have committed deletion and
+    // removed the Firebase user before a prior 204 response reached the client.
+    func deleteAccount() async throws {
+        let token = try await getIDToken()
+        let path = "api/me"
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 204 || status == 401 else {
+            let code = (try? JSONDecoder().decode([String: String].self, from: data))?["code"]
+            throw APIError.unexpectedResponse(statusCode: status, code: code)
+        }
+    }
+
     // MARK: - Generation API
 
     // D-31: GET /api/generations with optional cursor parameter
@@ -907,6 +925,7 @@ struct RatesResponse: Decodable {
     let dreamactorRate: Double?      // flat credits/sec for bytedance/dreamactor-m2.0
     let upscalerRates: [String: [String: [String: Double]]]?  // [tier: [resolution: [fpsBand: credits/sec]]]
     let falKlingV3StandardRates: [String: Double]? // audioOff/audioOn credits per second
+    let falKlingO3StandardRates: [String: Double]? // Kling O3 reference-to-video audioOff/audioOn credits per second
     let klingMotionStandardRate: Double? // Replicate Motion Control std+audio credits per second
 
     enum CodingKeys: String, CodingKey {
@@ -916,6 +935,7 @@ struct RatesResponse: Decodable {
         case dreamactorRate = "dreamactorRate"
         case upscalerRates = "upscalerRates"
         case falKlingV3StandardRates = "falKlingV3StandardRates"
+        case falKlingO3StandardRates = "falKlingO3StandardRates"
         case klingMotionStandardRate = "klingMotionStandardRate"
     }
 }

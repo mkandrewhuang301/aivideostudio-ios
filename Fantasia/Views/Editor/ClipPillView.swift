@@ -21,7 +21,7 @@
 // 13-22 i12: CapCut-style long-press reorder REPLACES the old plain-drag body reorder entirely.
 // A plain drag on a clip's body no longer attaches to anything here — it falls through to
 // TimelineTrackView's background scrubGesture (CapCut behavior: dragging a clip scrubs). Only a
-// LongPressGesture(minimumDuration: 0.35).sequenced(before: DragGesture()) engages reorder mode;
+// LongPressGesture(minimumDuration: 0.65).sequenced(before: DragGesture()) engages reorder mode;
 // TimelineTrackView (the caller, which alone knows the full clip list) owns ALL cross-clip state
 // (reorderingClipId/liveOrder/slot math) — this view only reports lift/drag/end events up and
 // renders itself differently (collapsed uniform square, floating+scaled+shadowed if it's the
@@ -186,7 +186,7 @@ struct ClipPillView: View {
         // DragGesture from EVER getting a chance to recognize a touch that started on a pill, for
         // the WHOLE touch session, even after this LongPress.sequenced(before: Drag) ultimately
         // FAILS (a quick swipe blows past the long-press's movement tolerance well before the
-        // 0.5s threshold). A failed highPriorityGesture does not hand the touch back mid-session —
+        // 0.65s threshold). A failed highPriorityGesture does not hand the touch back mid-session —
         // the ancestor gesture never started tracking it in the first place, so the swipe just
         // dies. This reproduces on EVERY clip (selected or not), not only a selected one — the
         // 22pt edge handles below are the part that's actually selected-gated, and are NOT part of
@@ -199,7 +199,7 @@ struct ClipPillView: View {
         // gestures ALREADY guard `reorderingClipId == nil` at the top of their `onChanged` (added
         // for exactly this scenario, but never effective before since the pill's
         // `.highPriorityGesture` prevented them from running at all) — so a quick swipe scrubs
-        // normally, and the instant a genuine 0.5s hold promotes this clip into reorder mode
+        // normally, and the instant a genuine 0.65s hold promotes this clip into reorder mode
         // (`onReorderLift` sets `reorderingClipId`), the ancestor gestures' own guard makes their
         // `onChanged` a no-op for the rest of that touch, so reordering and scrubbing can never
         // fire concurrently from the same drag.
@@ -379,12 +379,12 @@ struct ClipPillView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - 13-22 i12 / 13-24 K1: long-press-to-lift reorder. Hold threshold is 0.5s so a tap
+    // MARK: - 13-22 i12 / 13-24 K1: long-press-to-lift reorder. Hold threshold is 0.65s so a tap
     // never lifts. GestureState guarantees exit on ANY release/cancel (bare .onEnded can miss).
     // A plain (non-held) drag fails the long-press and falls through to background scrub.
 
     private var reorderGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.5)
+        LongPressGesture(minimumDuration: 0.65)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineBlock")))
             .updating($reorderGestureActive) { _, state, _ in
                 state = true

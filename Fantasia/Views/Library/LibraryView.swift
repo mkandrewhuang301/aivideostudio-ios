@@ -118,8 +118,6 @@ struct LibraryView: View {
                 }
             }
         }
-        .navigationTitle("Library")
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             // Presigned video/image URLs are 24h TTL and re-signed on every fetch — refresh so
             // URLs for older items don't go stale mid-session (unlike Home/Feed/Generate,
@@ -140,6 +138,11 @@ struct LibraryView: View {
                     set: { if !$0 { selectedItem = nil } }
                 )
             )
+            // SwiftUI can reuse the sheet host when a new tile is tapped soon after the
+            // previous sheet finishes dismissing. The pager owns its selection in @State, so
+            // without an explicit identity that reused host can retain the previous page ID
+            // and open on the last generation instead of the newly tapped one.
+            .id(item.id)
         }
     }
 

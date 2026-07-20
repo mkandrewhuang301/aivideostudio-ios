@@ -11,17 +11,16 @@ struct HomeView: View {
     @Environment(FormatRegistryManager.self) private var formatsRegistry
     @Environment(GenerationManager.self) private var generationManager
     @State private var registry = PresetRegistryManager()
-    // Phase 13, Plan 09 (D-06): the Studio hub is the ONLY entry point into Edit Studio, opened
-    // exclusively from this hero tap — self-contained here (not bubbled up to MainTabView like
-    // onSelectPreset) since Studio isn't a generation preset and needs no PresetInputSheet/consent
-    // routing.
-    @State private var showStudioHub = false
     // App-scoped so Home's project preview and Studio render the same cache-first state. Creating
     // separate stores here and in Studio made both screens paint empty before their `.task`
     // hydration ran, producing the visible red/purple placeholder flash on every entry.
     @Environment(ProjectManager.self) private var heroProjectManager
+    @State private var selectedHomeSection = "top"
 
     var onNavigateToGenerate: () -> Void
+    /// The Edit Studio hero selects MainTabView's existing Studio tab instead of presenting a
+    /// second copy of the hub over the tab hierarchy.
+    var onNavigateToStudio: () -> Void = {}
     /// Wired by Plan 07/08 to present PresetInputSheet; default no-op lets this plan compile
     /// standalone (D-10 sheet doesn't exist yet in this wave).
     var onSelectPreset: (Preset) -> Void = { _ in }
@@ -29,6 +28,11 @@ struct HomeView: View {
     var onSelectFormat: (Format) -> Void = { _ in }
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
+
+    private struct HomeSectionChip: Identifiable {
+        let id: String
+        let label: String
+    }
 
     // MARK: - Registry buckets (D-02 order)
 
@@ -62,6 +66,25 @@ struct HomeView: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// The top destination is always present. Registry-backed destinations only appear when the
+    /// matching section has at least one live item, so a chip can never jump to a SOON-only shelf.
+    private var homeSectionChips: [HomeSectionChip] {
+        var chips = [HomeSectionChip(id: "top", label: "For You")]
+        if formatsToShow.contains(where: \.isLive) {
+            chips.append(HomeSectionChip(id: "formats", label: "Formats"))
+        }
+        if showsPresets.contains(where: { $0.status == "live" }) {
+            chips.append(HomeSectionChip(id: "shows_vlogs", label: "Shows"))
+        }
+        if videoEffectsPresets.contains(where: { $0.status == "live" }) {
+            chips.append(HomeSectionChip(id: "video_effects", label: "Video FX"))
+        }
+        if photoEffectsPresets.contains(where: { $0.status == "live" }) {
+            chips.append(HomeSectionChip(id: "photo_effects", label: "Photo FX"))
+        }
+        return chips
+    }
+
     /// Most recent distinct preset runs from the existing app-wide generation snapshot. Freeform
     /// rows and registry misses are skipped; no second backend feed or local preference is needed.
     private var recentPresets: [Preset] {
@@ -85,39 +108,59 @@ struct HomeView: View {
         ZStack {
             background
 
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let heroPreset {
-                        heroCard(heroPreset)
-                    }
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id("top")
 
-                    if !recentPresets.isEmpty {
-                        sectionHeader("Jump back in")
-                        jumpBackInRow
-                    }
+                        if let heroPreset {
+                            heroCard(heroPreset)
+                        }
 
-                    if !formatsToShow.isEmpty {
-                        sectionHeader("Formats", section: "formats")
-                        formatsRow
-                    }
+                        if !recentPresets.isEmpty {
+                            sectionHeader("Jump back in")
+                            jumpBackInRow
+                        }
 
-                    if !showsPresets.isEmpty {
-                        sectionHeader("Shows & Vlogs", section: "shows_vlogs")
-                        showsRow
-                    }
+                        if !formatsToShow.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                sectionHeader("Formats", section: "formats")
+                                formatsRow
+                            }
+                            .id("formats")
+                        }
 
-                    if !videoEffectsPresets.isEmpty {
-                        sectionHeader("Video Effects", section: "video_effects")
-                        effectsRow(videoEffectsPresets)
-                    }
+                        if !showsPresets.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                sectionHeader("Shows & Vlogs", section: "shows_vlogs")
+                                showsRow
+                            }
+                            .id("shows_vlogs")
+                        }
 
-                    if !photoEffectsPresets.isEmpty {
-                        sectionHeader("Photo Effects", section: "photo_effects")
-                        effectsRow(photoEffectsPresets)
-                    }
+                        if !videoEffectsPresets.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                sectionHeader("Video Effects", section: "video_effects")
+                                effectsRow(videoEffectsPresets)
+                            }
+                            .id("video_effects")
+                        }
 
+                        if !photoEffectsPresets.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                sectionHeader("Photo Effects", section: "photo_effects")
+                                effectsRow(photoEffectsPresets)
+                            }
+                            .id("photo_effects")
+                        }
+                    }
+                    .padding(.bottom, 110)
                 }
-                .padding(.bottom, 110)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    homeSectionChipStrip(proxy: proxy)
+                }
             }
         }
         .task {
@@ -127,12 +170,49 @@ struct HomeView: View {
         .task {
             await heroProjectManager.loadProjects()
         }
-        // D-06: the Studio hub, opened exclusively from the hero card below.
-        .fullScreenCover(isPresented: $showStudioHub) {
-            NavigationStack {
-                StudioHubView()
+    }
+
+    // MARK: - Sticky section navigation
+
+    private func homeSectionChipStrip(proxy: ScrollViewProxy) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(homeSectionChips) { chip in
+                    let isSelected = selectedHomeSection == chip.id
+                    Button {
+                        selectedHomeSection = chip.id
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            proxy.scrollTo(chip.id, anchor: .top)
+                        }
+                    } label: {
+                        Text(chip.label)
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(0.3)
+                            .foregroundStyle(isSelected ? Color.white : theme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                isSelected ? accent : theme.surface,
+                                in: Capsule()
+                            )
+                            .overlay {
+                                Capsule()
+                                    .stroke(isSelected ? Color.clear : theme.surfaceBorder, lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityHint("Scrolls to \(chip.label)")
+                }
             }
-            .environment(theme)
+            .padding(.horizontal, 12)
+        }
+        .background(theme.elevatedBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.divider)
+                .frame(height: 0.5)
         }
     }
 
@@ -189,7 +269,7 @@ struct HomeView: View {
         let projects = heroProjectManager.projects
 
         return Color.clear
-            .aspectRatio(isEditStudio ? 16.0 / 9.0 : 16.0 / 10.0, contentMode: .fit)
+            .aspectRatio(isEditStudio ? 3.15 : 16.0 / 10.0, contentMode: .fit)
             .overlay {
                 if isEditStudio {
                     heroProjectStack(projects: projects)
@@ -202,19 +282,19 @@ struct HomeView: View {
             .overlay(alignment: .bottom) {
                 ZStack(alignment: .bottom) {
                     LinearGradient(
-                        colors: [.clear, .black.opacity(isEditStudio ? 0.6 : 0.72)],
-                        startPoint: .init(x: 0.5, y: isEditStudio ? 0.3 : 0.5),
+                        colors: isEditStudio ? [.clear, .clear] : [.clear, .black.opacity(0.72)],
+                        startPoint: .init(x: 0.5, y: 0.5),
                         endPoint: .bottom
                     )
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(preset.title)
                                 .font(.system(size: 19, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(isEditStudio ? Color(red: 0.13, green: 0.11, blue: 0.20) : .white)
                             if isEditStudio {
-                                Text(projects.isEmpty ? "Start your first edit" : "Your projects, ready to finish")
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(.white.opacity(0.78))
+                                Text("Trim, text, sound — your editor")
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.13, green: 0.11, blue: 0.20).opacity(0.52))
                             } else if let subtitle = preset.subtitle {
                                 Text(subtitle)
                                     .font(.system(size: 11.5))
@@ -223,19 +303,10 @@ struct HomeView: View {
                         }
                         Spacer()
                         if isEditStudio {
-                            Text("Try It ↗")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    LinearGradient(
-                                        colors: [Color(red: 0.545, green: 0.361, blue: 0.965), Color(red: 1.0, green: 0.302, blue: 0.557)],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing
-                                    ),
-                                    in: Capsule()
-                                )
-                                .shadow(color: Color(red: 0.545, green: 0.361, blue: 0.965).opacity(0.5), radius: 10)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color(red: 0.13, green: 0.11, blue: 0.20).opacity(0.38))
+                                .padding(.bottom, 2)
                         } else if showComingSoon {
                             Text("Coming Soon")
                                 .font(.system(size: 12, weight: .bold))
@@ -245,9 +316,9 @@ struct HomeView: View {
                                 .background(.white.opacity(0.92), in: Capsule())
                         }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, isEditStudio ? 17 : 14)
                     .padding(.top, 34)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, isEditStudio ? 14 : 12)
                 }
                 .allowsHitTesting(false)
             }
@@ -256,61 +327,60 @@ struct HomeView: View {
             .overlay {
                 if isEditStudio {
                     RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(.white.opacity(0.28), lineWidth: 1.5)
+                        .strokeBorder(Color(red: 0.13, green: 0.11, blue: 0.20).opacity(0.10), lineWidth: 1)
                         .allowsHitTesting(false)
                 }
             }
-            .shadow(color: isEditStudio ? Color(red: 0.545, green: 0.361, blue: 0.965).opacity(0.18) : .clear, radius: 20)
+            .shadow(color: isEditStudio ? .black.opacity(0.08) : .clear, radius: 12, y: 4)
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .contentShape(Rectangle())
             .onTapGesture {
                 if isEditStudio {
-                    showStudioHub = true
+                    onNavigateToStudio()
                 } else if !preset.isSoon {
                     onSelectPreset(preset)
                 }
             }
     }
 
-    /// Sketch 003 winner B: 3 fanned portrait cards — 2 project-preview slots (leftmost rotated
-    /// -9°, middle unrotated) + a constant dotted "+" card (rightmost, rotated +9°), matching the
-    /// locked percentages (24% card width, left 20/38/56%, top 12/6/12%). Empty state (0 saved
-    /// projects) renders a warm/cool color-gradient pair (not gray) — live, not placeholder-dead;
-    /// populated state swaps in real project thumbnails as they're created.
+    /// Two project previews followed by a constant gray add card. The medium-size trio stays in
+    /// the upper-right, clear of the title and subtitle inside the extra-compact hero.
     private func heroProjectStack(projects: [ProjectSummary]) -> some View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let cardW = w * 0.24
-            let cardH = cardW * 16.0 / 9.0
+            let cardW = w * 0.15
+            let cardH = cardW * 1.35
 
             ZStack {
                 heroThumbSlot(project: projects.count > 0 ? projects[0] : nil, gradient: heroSlotGradient(0))
                     .frame(width: cardW, height: cardH)
-                    .rotationEffect(.degrees(-9))
-                    .position(x: w * 0.20 + cardW / 2, y: h * 0.12 + cardH / 2)
+                    .position(x: w * 0.50 + cardW / 2, y: h * 0.06 + cardH / 2)
 
                 heroThumbSlot(project: projects.count > 1 ? projects[1] : nil, gradient: heroSlotGradient(1))
                     .frame(width: cardW, height: cardH)
-                    .position(x: w * 0.38 + cardW / 2, y: h * 0.06 + cardH / 2)
+                    .position(x: w * 0.66 + cardW / 2, y: h * 0.06 + cardH / 2)
 
-                heroPlusSlot
+                heroAddSlot
                     .frame(width: cardW, height: cardH)
-                    .rotationEffect(.degrees(9))
-                    .position(x: w * 0.56 + cardW / 2, y: h * 0.12 + cardH / 2)
+                    .position(x: w * 0.82 + cardW / 2, y: h * 0.06 + cardH / 2)
             }
         }
-        .background(theme.elevatedBackground)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.965, green: 0.949, blue: 0.995),
+                    Color(red: 0.915, green: 0.890, blue: 0.970),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 
-    /// One of the two left-hand stacked cards. `project == nil` (cold start) or a real project
-    /// with no thumbnail yet both render `gradient`; a real project WITH a thumbnail renders it.
-    /// Exactly one glyph (the play triangle) is ever drawn — never stacked with a second icon,
-    /// which is what previously read as a "white box" behind the triangle when a thumbnail-less
-    /// project overlapped a film icon with the play icon on top of it.
-    /// 13-24 K7: card frame is fixed by the caller (`.frame(width:height:)`); thumbnail center-crops
-    /// inside via Color.clear + overlay so a landscape/'original' image cannot influence layout.
+    /// One compact preview card. A missing project or thumbnail renders `gradient`; a real cover
+    /// center-crops inside the fixed caller-provided frame so source aspect ratio cannot alter layout.
     private func heroThumbSlot(project: ProjectSummary?, gradient: LinearGradient) -> some View {
         Color.clear
             .overlay {
@@ -325,44 +395,44 @@ struct HomeView: View {
                     } else {
                         gradient
                     }
-                    Image(systemName: "play.fill")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.85))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
-            .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(red: 0.13, green: 0.11, blue: 0.20).opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
     }
 
-    /// First slot: warm magenta→orange. Second slot: cool violet→blue. Both drawn from the app's
-    /// existing accent family so the cold-start hero reads as "this app", not a generic filler.
+    /// Constant add-project treatment for the third slot.
+    private var heroAddSlot: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color(red: 0.34, green: 0.34, blue: 0.38))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(
+                        Color.white.opacity(0.62),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1, 4])
+                    )
+            )
+            .overlay {
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
+    }
+
+    /// Empty-state colors mirror the compact studio-card artwork: purple, then blue.
     private func heroSlotGradient(_ index: Int) -> LinearGradient {
         let palettes: [[Color]] = [
-            [Color(red: 1.0, green: 0.302, blue: 0.557), Color(red: 0.949, green: 0.463, blue: 0.243)],
-            [Color(red: 0.545, green: 0.361, blue: 0.965), Color(red: 0.243, green: 0.416, blue: 0.949)],
+            [Color(red: 0.52, green: 0.36, blue: 0.78), Color(red: 0.24, green: 0.17, blue: 0.39)],
+            [Color(red: 0.31, green: 0.58, blue: 0.83), Color(red: 0.12, green: 0.28, blue: 0.48)],
         ]
         let colors = palettes[index % palettes.count]
         return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    /// The constant third card — always a "+", never a project. Same fixed dotted-border
-    /// affordance as `AddProjectTile` inside the Studio hub itself.
-    private var heroPlusSlot: some View {
-        RoundedRectangle(cornerRadius: 9)
-            .fill(Color(red: 0.137, green: 0.137, blue: 0.161))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                    .foregroundStyle(.white.opacity(0.4))
-            )
-            .overlay(
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.5))
-            )
-            .shadow(color: .black.opacity(0.5), radius: 9, x: 0, y: 8)
     }
 
     // MARK: - Video Effects / Photo Effects (single horizontal shelf per section)

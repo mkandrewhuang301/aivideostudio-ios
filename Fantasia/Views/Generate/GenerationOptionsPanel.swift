@@ -66,6 +66,9 @@ enum ModelCatalog {
         ModelOption(id: "fal-ai/kling-video/v3/standard/image-to-video", name: "Kling 3.0 Standard",
                     tagline: "Cinematic image-to-video with optional native audio",
                     requiresImage: true),
+        ModelOption(id: "fal-ai/kling-video/o3/standard/reference-to-video", name: "Kling O3 Reference",
+                    tagline: "Character-driven video with native lip-synced dialogue (EN/ZH/JA/KO/ES)",
+                    requiresImage: true),
         ModelOption(id: "alibaba/happyhorse-1.1", name: "HappyHorse 1.1",
                     tagline: "Premium video with native audio and multilingual lip-sync",
                     requiresImage: false,
@@ -103,8 +106,6 @@ struct GenerationOptionsPanel: View {
     @AppStorage("modelPickerEnabled") private var modelPickerEnabled = true
     @Environment(ThemeManager.self) private var theme
 
-    private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
-
     private var modeIcon: String {
         switch selectedMode {
         case "AI Avatar": return "person.crop.square.fill"
@@ -121,6 +122,7 @@ struct GenerationOptionsPanel: View {
         switch selectedModel {
         case "bytedance/seedance-2.0": return ["480p", "720p", "1080p", "4k"]
         case "fal-ai/kling-video/v3/standard/image-to-video": return ["720p"]
+        case "fal-ai/kling-video/o3/standard/reference-to-video": return ["720p"]
         case "alibaba/happyhorse-1.1": return ["720p", "1080p"]
         default: return ["480p", "720p"]
         }
@@ -128,9 +130,9 @@ struct GenerationOptionsPanel: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 // Type
-                menuPill("Type", icon: modeIcon, value: selectedMode) {
+                menuSegment("Type", icon: modeIcon, value: selectedMode) {
                     Picker("Type", selection: $selectedMode) {
                         Text("AI Video").tag("AI Video")
                         Text("AI Image").tag("AI Image")
@@ -144,12 +146,14 @@ struct GenerationOptionsPanel: View {
                 // Model — button-based so each item can show a tagline + checkmark
                 // Hidden while the "Model Selector" preference is off; locked to the mode's default model.
                 if modelPickerEnabled {
+                    segmentDivider
                     modelPill
                 }
 
                 // Duration — video only
                 if selectedMode != "AI Image" {
-                    menuPill("Duration", icon: "clock", value: "\(selectedDuration)s") {
+                    segmentDivider
+                    menuSegment("Duration", icon: "clock", value: "\(selectedDuration)s") {
                         Picker("Duration", selection: $selectedDuration) {
                             Text("4 seconds").tag(4)
                             Text("5 seconds").tag(5)
@@ -162,7 +166,8 @@ struct GenerationOptionsPanel: View {
 
                 if selectedMode == "AI Image" {
                     // Image mode resolution picker — pixel dimensions, not video resolutions
-                    menuPill("Aspect", icon: "aspectratio", value: selectedImageResolution.displayName) {
+                    segmentDivider
+                    menuSegment("Aspect", icon: "aspectratio", value: selectedImageResolution.displayName) {
                         Picker("Aspect Ratio", selection: $selectedImageResolution) {
                             ForEach(ImageResolution.allCases) { res in
                                 Text(res.displayName).tag(res)
@@ -170,7 +175,8 @@ struct GenerationOptionsPanel: View {
                         }
                     }
                 } else {
-                    menuPill("Resolution", icon: "sparkles", value: selectedResolution) {
+                    segmentDivider
+                    menuSegment("Resolution", icon: "sparkles", value: selectedResolution) {
                         Picker("Resolution", selection: $selectedResolution) {
                             ForEach(supportedVideoResolutions, id: \.self) { resolution in
                                 Text(
@@ -191,7 +197,8 @@ struct GenerationOptionsPanel: View {
 
                     // Kling's start image defines framing; its Standard i2v schema has no aspect input.
                     if selectedModel != "fal-ai/kling-video/v3/standard/image-to-video" {
-                        menuPill("Aspect Ratio", icon: "aspectratio", value: selectedAspectRatio) {
+                        segmentDivider
+                        menuSegment("Aspect Ratio", icon: "aspectratio", value: selectedAspectRatio) {
                             Picker("Aspect Ratio", selection: $selectedAspectRatio) {
                                 Text("16:9 · Landscape").tag("16:9")
                                 Text("9:16 · TikTok / Reels").tag("9:16")
@@ -206,27 +213,25 @@ struct GenerationOptionsPanel: View {
                 // Audio — video only. Provider-fixed models expose a locked "Always On" pill.
                 if selectedMode != "AI Image" {
                     let audioIsFixed = ModelCatalog.video.first { $0.id == selectedModel }?.forcedAudio ?? false
-                    VStack(spacing: 4) {
-                        Text("AUDIO")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(theme.textTertiary)
-                            .kerning(0.4)
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) { audioEnabled.toggle() }
-                        } label: {
-                            pillLabel(
-                                icon: (audioIsFixed || audioEnabled) ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                                value: audioIsFixed ? "Always On" : (audioEnabled ? "On" : "Off"),
-                                showChevron: false,
-                                isActive: audioIsFixed || audioEnabled
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(audioIsFixed)
-                        .opacity(audioIsFixed ? 0.6 : 1.0)
+                    segmentDivider
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { audioEnabled.toggle() }
+                    } label: {
+                        segmentLabel(
+                            icon: (audioIsFixed || audioEnabled) ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                            value: audioIsFixed ? "Always On" : (audioEnabled ? "On" : "Off"),
+                            showChevron: false,
+                            isActive: audioIsFixed || audioEnabled
+                        )
                     }
+                    .buttonStyle(.plain)
+                    .disabled(audioIsFixed)
+                    .opacity(audioIsFixed ? 0.6 : 1.0)
                 }
             }
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.surfaceBorder, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 14)
         }
         .onChange(of: modelPickerEnabled) { _, enabled in
@@ -234,6 +239,9 @@ struct GenerationOptionsPanel: View {
         }
         .mask(
             HStack(spacing: 0) {
+                // Mirror the trailing edge treatment so the strip fades evenly on both sides.
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 36)
                 Color.black
                 LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
                     .frame(width: 36)
@@ -246,28 +254,22 @@ struct GenerationOptionsPanel: View {
     @State private var showModelPicker = false
 
     private var modelPill: some View {
-        VStack(spacing: 4) {
-            Text("MODEL")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(theme.textTertiary)
-                .kerning(0.4)
-            Button {
-                showModelPicker = true
-            } label: {
-                pillLabel(
-                    icon: "cpu",
-                    value: ModelCatalog.displayName(for: selectedModel),
-                    showChevron: true,
-                    isActive: false
-                )
-            }
-            .buttonStyle(.plain)
-            .sheet(isPresented: $showModelPicker) {
-                ModelPickerSheet(models: activeModels, selectedModel: $selectedModel)
-                    .presentationDetents([.height(modelPickerHeight), .medium])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(.ultraThinMaterial)
-            }
+        Button {
+            showModelPicker = true
+        } label: {
+            segmentLabel(
+                icon: "cpu",
+                value: ModelCatalog.displayName(for: selectedModel),
+                showChevron: true,
+                isActive: false
+            )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showModelPicker) {
+            ModelPickerSheet(models: activeModels, selectedModel: $selectedModel)
+                .presentationDetents([.height(modelPickerHeight), .medium])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.ultraThinMaterial)
         }
     }
 
@@ -280,54 +282,56 @@ struct GenerationOptionsPanel: View {
 
     // MARK: - Generic menu pill (Picker-based)
 
-    private func menuPill<Content: View>(
+    private func menuSegment<Content: View>(
         _ label: String,
         icon: String,
         value: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(spacing: 4) {
-            Text(label.uppercased())
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(theme.textTertiary)
-                .kerning(0.4)
-            Menu {
-                Section(label) {
-                    content()
-                }
-            } label: {
-                pillLabel(icon: icon, value: value, showChevron: true, isActive: false)
+        Menu {
+            Section(label) {
+                content()
             }
-            .menuOrder(.fixed)
-            .buttonStyle(.plain)
+        } label: {
+            segmentLabel(icon: icon, value: value, showChevron: true, isActive: false)
         }
+        .menuOrder(.fixed)
+        .buttonStyle(.plain)
     }
 
-    // MARK: - Pill label
+    // MARK: - Segment label
 
+    private var segmentDivider: some View {
+        Rectangle()
+            .fill(theme.divider)
+            .frame(width: 0.5, height: 36)
+    }
 
-    private func pillLabel(icon: String, value: String, showChevron: Bool, isActive: Bool) -> some View {
-        HStack(spacing: 4) {
+    private func segmentLabel(icon: String, value: String, showChevron: Bool, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isActive ? accent : theme.textSecondary)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isActive ? AnyShapeStyle(LinearGradient.brandPrimary) : AnyShapeStyle(theme.textSecondary))
                 .frame(width: 15, alignment: .center)
                 .contentTransition(.symbolEffect(.replace))
             Text(value)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
                 .contentTransition(.opacity)
             if showChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(theme.textTertiary)
+                .foregroundStyle(theme.textTertiary)
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
-        .background(isActive ? accent.opacity(0.16) : theme.surface)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(isActive ? accent.opacity(0.45) : theme.surfaceBorder, lineWidth: 1))
+        .padding(.leading, 11)
+        .padding(.trailing, 13)
+        .padding(.vertical, 9)
+        .background {
+            if isActive {
+                LinearGradient.brandPrimary.opacity(0.14)
+            }
+        }
     }
 }
 

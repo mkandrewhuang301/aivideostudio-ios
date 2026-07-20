@@ -70,6 +70,14 @@ final class EditorInteractionTests: XCTestCase {
         }
     }
 
+    func testClipReorderRequiresDragAfterLongPress() {
+        XCTAssertFalse(TimelineTrackView.shouldActivateClipReorder(translation: 0))
+        XCTAssertFalse(TimelineTrackView.shouldActivateClipReorder(translation: 3.99))
+        XCTAssertFalse(TimelineTrackView.shouldActivateClipReorder(translation: -3.99))
+        XCTAssertTrue(TimelineTrackView.shouldActivateClipReorder(translation: 4))
+        XCTAssertTrue(TimelineTrackView.shouldActivateClipReorder(translation: -4))
+    }
+
     func testCommittedCoverMarkerTracksOldFrameUntilSelectionCompletes() {
         let viewport: CGFloat = 320
         let px: CGFloat = 40
@@ -103,6 +111,33 @@ final class EditorInteractionTests: XCTestCase {
         )
     }
 
+    func testTextOverlayCenterKeepsRotatedBoundsInsideVideo() {
+        let center = TextOverlayCanvasGeometry.constrainedCenter(
+            proposed: CGPoint(x: 310, y: 170),
+            contentSize: CGSize(width: 80, height: 32),
+            rotationDegrees: 30,
+            canvasSize: CGSize(width: 320, height: 180)
+        )
+
+        let radians = CGFloat(30.0 * .pi / 180)
+        let halfWidth = (80 * abs(cos(radians)) + 32 * abs(sin(radians))) / 2
+        let halfHeight = (80 * abs(sin(radians)) + 32 * abs(cos(radians))) / 2
+
+        XCTAssertEqual(center.x, 320 - halfWidth, accuracy: 0.0001)
+        XCTAssertEqual(center.y, 180 - halfHeight, accuracy: 0.0001)
+    }
+
+    func testOversizedTextOverlayFallsBackToCanvasCenter() {
+        let center = TextOverlayCanvasGeometry.constrainedCenter(
+            proposed: CGPoint(x: 300, y: 170),
+            contentSize: CGSize(width: 400, height: 200),
+            rotationDegrees: 0,
+            canvasSize: CGSize(width: 320, height: 180)
+        )
+
+        XCTAssertEqual(center, CGPoint(x: 160, y: 90))
+    }
+
     func testVideoCacheRejectsErrorBodiesBeforeInstallingThemAsMP4() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -126,8 +161,16 @@ final class EditorInteractionTests: XCTestCase {
     func testPendingExportIsRegisteredUnderItsRealGenerationID() {
         let manager = GenerationManager()
 
-        manager.registerPendingExport(id: "export-generation", aspectRatio: "16:9")
-        manager.registerPendingExport(id: "export-generation", aspectRatio: "16:9")
+        manager.registerPendingExport(
+            id: "export-generation",
+            projectId: "studio-project",
+            aspectRatio: "16:9"
+        )
+        manager.registerPendingExport(
+            id: "export-generation",
+            projectId: "studio-project",
+            aspectRatio: "16:9"
+        )
 
         XCTAssertEqual(manager.generations.count, 1)
         XCTAssertEqual(manager.generations.first?.id, "export-generation")

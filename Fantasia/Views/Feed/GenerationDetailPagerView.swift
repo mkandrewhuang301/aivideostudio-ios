@@ -14,9 +14,21 @@ struct GenerationDetailPagerView: View {
     @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
 
+    // Windowed paging (2026-07-19): the sheet used to build its TabView over the ENTIRE feed,
+    // which made the pull-up feel slow on large libraries. Only pages near the current one are
+    // materialized; the window re-centers as the user swipes toward either edge.
+    @State private var windowStart: Int = 0
+    @State private var windowEnd: Int = 0
+    private let windowRadius = 10
+
+    private var windowedItems: [GenerationItem] {
+        guard !items.isEmpty, windowStart <= windowEnd else { return [] }
+        return Array(items[windowStart...windowEnd])
+    }
+
     var body: some View {
         TabView(selection: $currentId) {
-            ForEach(items) { item in
+            ForEach(windowedItems) { item in
                 GenerationDetailSheet(item: item, isPresented: $isPresented)
                     .environment(authManager)
                     .environment(generationManager)
@@ -37,5 +49,17 @@ struct GenerationDetailPagerView: View {
         .presentationBackground(theme.background)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .onAppear { centerWindow(on: currentId, expandingOnly: false) }
+        .onChange(of: currentId) { _, newId in centerWindow(on: newId, expandingOnly: true) }
+    }
+
+    private func centerWindow(on id: String, expandingOnly: Bool) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        if !expandingOnly || idx - windowStart < 3 {
+            windowStart = max(0, idx - windowRadius)
+        }
+        if !expandingOnly || windowEnd - idx < 3 {
+            windowEnd = min(items.count - 1, idx + windowRadius)
+        }
     }
 }
