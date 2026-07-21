@@ -118,9 +118,12 @@ struct AddAudioSheet: View {
                 }
             }
         }
+        // Exactly MP3 / M4A / WAV — the set the backend's ALLOWED_AUDIO_MIMES accepts and the
+        // copy below advertises (sketch 007 decision). `.audio` must NOT appear here: it's the
+        // parent UTType and would let users pick AIFF/FLAC/CAF files the server then rejects.
         .fileImporter(
             isPresented: $showFileImporter,
-            allowedContentTypes: [.audio, .mp3, .wav, .mpeg4Audio]
+            allowedContentTypes: [.mp3, .mpeg4Audio, .wav]
         ) { result in
             Task { await handleImportedFile(result) }
         }
