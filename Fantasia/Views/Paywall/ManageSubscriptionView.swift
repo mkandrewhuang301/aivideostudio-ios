@@ -44,7 +44,7 @@ struct ManageSubscriptionView: View {
             .accessibilityLabel("Close")
         }
         .padding(.horizontal, 24)
-        .padding(.top, 12)
+        .padding(.top, 28)
         .padding(.bottom, 20)
     }
 }

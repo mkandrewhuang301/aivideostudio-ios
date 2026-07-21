@@ -82,7 +82,7 @@ struct TierPlanSelectorView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if showAppStoreManage {
                         manageHero
-                            .padding(.top, 22)
+                            .padding(.top, 28)
                     } else {
                         Text(currentInfo.descriptor)
                             .font(.system(size: 13))
@@ -103,7 +103,7 @@ struct TierPlanSelectorView: View {
                     footer
                         .padding(.top, 16)
                 }
-                .padding(.horizontal, showAppStoreManage ? 16 : 20)
+                .padding(.horizontal, showAppStoreManage ? 24 : 20)
                 .padding(.bottom, 24)
             }
         }
@@ -187,7 +187,7 @@ struct TierPlanSelectorView: View {
         .frame(height: manageSegHeight)
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(theme.surfaceBorder, lineWidth: 1))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 24)
     }
 
     /// Frosted glass: blur + ~9% white fill, a 16% border, a soft top sheen, and a drop shadow.
@@ -244,15 +244,13 @@ struct TierPlanSelectorView: View {
 
     @ViewBuilder
     private func manageTabLabel(_ tier: String, isSelected: Bool) -> some View {
+        // Pro and Creator carry their identity colors at all times (not just when selected);
+        // Basic stays neutral until selected.
         let label = Text(tier).font(.system(size: 14, weight: .semibold))
-        if isSelected {
-            switch tier {
-            case "Pro":     label.foregroundStyle(accent)
-            case "Creator": label.foregroundStyle(creatorGradient)
-            default:        label.foregroundStyle(theme.textPrimary)
-            }
-        } else {
-            label.foregroundStyle(theme.textSecondary)
+        switch tier {
+        case "Pro":     label.foregroundStyle(accent)
+        case "Creator": label.foregroundStyle(creatorGradient)
+        default:        label.foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
         }
     }
 
@@ -349,7 +347,7 @@ struct TierPlanSelectorView: View {
                     .tracking(1.35)
                     .foregroundStyle(theme.textSecondary)
             }
-            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
