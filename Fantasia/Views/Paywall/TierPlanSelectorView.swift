@@ -156,10 +156,9 @@ struct TierPlanSelectorView: View {
         }
     }
 
-    /// Frosted sliding-pill segmented control (locked V1 manage design —
-    /// ~/gen-redesign-mockups/manage-subscription-interactive.html, 2026-07-18).
-    /// The pill is a material-backed frosted panel that slides between tabs; the selected
-    /// tab's label takes its tier identity color (Pro = solid accent, Creator = gradient).
+    /// Sliding-pill segmented control — Tinder-style liquid-glass lens on iOS 26+, frosted
+    /// panel below that (V1 manage design — ~/gen-redesign-mockups/manage-subscription-interactive.html).
+    /// The pill slides between tabs; Pro/Creator labels keep their identity colors at all times.
     private let manageSegHeight: CGFloat = 42
 
     private var manageTabBar: some View {
@@ -167,13 +166,13 @@ struct TierPlanSelectorView: View {
             let tabWidth = (geo.size.width - 6) / CGFloat(PlanCatalog.tierOrder.count)
             let index = CGFloat(PlanCatalog.tierOrder.firstIndex(of: selectedTier) ?? 1)
             ZStack(alignment: .topLeading) {
-                frostedPill
-                    .frame(width: tabWidth, height: manageSegHeight - 6)
+                slidingPill
+                    .frame(width: tabWidth, height: manageSegHeight + 6)
                     .scaleEffect(
                         x: isManagePillExpanded ? 1.14 : 1,
                         y: isManagePillExpanded ? 1.06 : 1
                     )
-                    .offset(x: 3 + tabWidth * index, y: 3)
+                    .offset(x: 3 + tabWidth * index, y: -3)
 
                 HStack(spacing: 0) {
                     ForEach(PlanCatalog.tierOrder, id: \.self) { tier in
@@ -188,6 +187,19 @@ struct TierPlanSelectorView: View {
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(theme.surfaceBorder, lineWidth: 1))
         .padding(.horizontal, 24)
+    }
+
+    /// Tinder-style liquid-glass lens on iOS 26+ — a capsule with real refraction of the
+    /// content beneath it, slightly oversized so it bulges past the control's top/bottom
+    /// edges like Tinder's tab lens. The hand-built frosted panel is the pre-iOS 26 fallback.
+    @ViewBuilder
+    private var slidingPill: some View {
+        if #available(iOS 26.0, *) {
+            Color.clear
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            frostedPill
+        }
     }
 
     /// Frosted glass: blur + ~9% white fill, a 16% border, a soft top sheen, and a drop shadow.
@@ -645,12 +657,12 @@ struct TierPlanSelectorView: View {
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 3)
-                                    .background(LinearGradient.brandPrimary, in: RoundedRectangle(cornerRadius: 5))
+                                    .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 5))
                             }
                             if let total = data.annualTotalPrice {
                                 Text(total)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(theme.textSecondary)
+                                    .foregroundStyle(.white.opacity(0.75))
                             }
                         }
                         Spacer(minLength: 8)
@@ -658,16 +670,16 @@ struct TierPlanSelectorView: View {
                             Text(data.price + "/mo")
                                 .font(techFont(.body, weight: .bold))
                                 .tracking(monoTracking)
-                                .foregroundStyle(LinearGradient.brandPrimary)
+                                .foregroundStyle(.white)
                             if let strike = data.strikethroughMonthlyPrice {
                                 Text(strike)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(theme.textSecondary)
+                                    .foregroundStyle(.white.opacity(0.65))
                                     .strikethrough(true)
                             }
                         }
                     }
-                    .foregroundStyle(theme.textPrimary)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                 }
             }
@@ -676,10 +688,10 @@ struct TierPlanSelectorView: View {
         }
         .buttonStyle(.plain)
         .background {
-            LinearGradient.brandPrimary.opacity(0.22)
+            LinearGradient.brandPrimary
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(LinearGradient.brandPrimary.opacity(0.5), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         .disabled(isAnyPurchasePending)
         .accessibilityLabel("\(isCurrent ? "Switch to" : "Get") Annual, \(data.price) per month")
     }
@@ -745,7 +757,7 @@ struct TierPlanSelectorView: View {
                 } else {
                     HStack {
                         Text("Get Monthly")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 15, weight: .bold))
                         Spacer(minLength: 8)
                         Text(data.price + "/mo")
                             .font(techFont(.body, weight: .bold))
@@ -759,8 +771,9 @@ struct TierPlanSelectorView: View {
             .frame(height: 58)
         }
         .buttonStyle(.plain)
-        .background(theme.elevatedBackground, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.surfaceBorder, lineWidth: 1))
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.22), lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
         .disabled(isAnyPurchasePending)
         .accessibilityLabel("Get Monthly, \(data.price) per month")
     }
