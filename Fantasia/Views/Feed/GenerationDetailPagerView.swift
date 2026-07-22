@@ -10,6 +10,7 @@ struct GenerationDetailPagerView: View {
     let items: [GenerationItem]
     @State var currentId: String
     @Binding var isPresented: Bool
+    var leftSwipeShowsNewer = false
     @Environment(AuthManager.self) private var authManager
     @Environment(GenerationManager.self) private var generationManager
     @Environment(ThemeManager.self) private var theme
@@ -23,7 +24,11 @@ struct GenerationDetailPagerView: View {
 
     private var windowedItems: [GenerationItem] {
         guard !items.isEmpty, windowStart <= windowEnd else { return [] }
-        return Array(items[windowStart...windowEnd])
+        let window = Array(items[windowStart...windowEnd])
+        // The Create feed is newest-first, while a page-style TabView advances to the next array
+        // element on a left swipe. Reverse only its pager window so left reveals a newer item
+        // and right reveals an older one without changing the order of cards in the feed.
+        return leftSwipeShowsNewer ? Array(window.reversed()) : window
     }
 
     var body: some View {

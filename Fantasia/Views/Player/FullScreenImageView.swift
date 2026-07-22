@@ -5,7 +5,8 @@
 import SwiftUI
 
 struct FullScreenImageView: View {
-    let item: GenerationItem
+    private let imageURL: URL?
+    private let cacheKey: String
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var theme
 
@@ -22,6 +23,19 @@ struct FullScreenImageView: View {
     // SwiftUI DragGesture predictedEndTranslation approximation — recalibrated accordingly.
     private let dismissVelocityThreshold: CGFloat = 1200
     private let exitDistance: CGFloat = 900
+
+    init(item: GenerationItem) {
+        imageURL = item.completedMediaUrl.flatMap(URL.init(string:))
+        cacheKey = item.id
+    }
+
+    /// Opens an arbitrary reference image with the same zoom and dismiss behavior as a
+    /// generated image. The stable cache key avoids coupling image identity to rotating
+    /// presigned URLs.
+    init(imageURL: URL, cacheKey: String) {
+        self.imageURL = imageURL
+        self.cacheKey = cacheKey
+    }
 
     /// 0...1 progress of an in-flight swipe-to-dismiss drag (only active when unzoomed).
     /// Divisor is larger than the 120pt dismiss-distance threshold so the live fade lags
@@ -113,9 +127,11 @@ struct FullScreenImageView: View {
         .nameAsReferenceAlert()
         .onAppear {
             Task {
-                if let cached = await ThumbnailCache.shared.image(for: item.id) {
+                if let cached = await ThumbnailCache.shared.image(for: cacheKey) {
                     loadedImage = cached
                 } else {
+                    // Never stretch the card's deliberately tiny thumbnail to full screen.
+                    // Keep the loading state visible until the original source has decoded.
                     await fetchAndCacheImage()
                 }
             }
@@ -216,16 +232,16 @@ struct FullScreenImageView: View {
     // MARK: - Load
 
     private func fetchAndCacheImage() async {
-        guard let urlString = item.completedMediaUrl, let url = URL(string: urlString) else { return }
+        guard let imageURL else { return }
         isLoading = true
         defer { isLoading = false }
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
+        guard let (data, _) = try? await URLSession.shared.data(from: imageURL),
               let image = UIImage(data: data) else { return }
         // T20: same decode-off-render-path fix as GenerationDetailSheet.loadCachedImage —
         // UIImage(data:) decodes lazily on first draw, which could otherwise stall the main
         // thread during presentation and eat the initial dismiss-swipe touch.
         let prepared = await image.byPreparingForDisplay() ?? image
-        ThumbnailCache.shared[item.id] = prepared
+        ThumbnailCache.shared[cacheKey] = prepared
         loadedImage = prepared
     }
 }

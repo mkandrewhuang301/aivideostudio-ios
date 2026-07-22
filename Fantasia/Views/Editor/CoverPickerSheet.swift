@@ -71,6 +71,9 @@ struct CoverPickerSheet: View {
     @State private var expectedPrecisePreviewVersion: UInt?
     @State private var measuredDisplayVersion: UInt?
     @State private var stripDragStartTime: Double?
+    @State private var previousStripProposedTime: Double?
+    @State private var wasInsideCoverSnapZone = false
+    @State private var coverSnapFeedbackTrigger = 0
     @State private var scrubFrameLadder = ScrubFrameLadder()
     @State private var showsScrubFrame = false
 
@@ -90,6 +93,9 @@ struct CoverPickerSheet: View {
     private let stripCellWidth: CGFloat = 46
     private let stripCellHeight: CGFloat = 64
     private let stripMarkerHeight: CGFloat = 12
+    /// Intentionally smaller than the 7pt marker: nearby passes resolve exactly to the saved
+    /// cover frame without making the rest of the filmstrip feel magnetic.
+    private let coverFrameSnapDistance: CGFloat = 3
 
     private var ladderFrame: UIImage? {
         guard showsScrubFrame else { return nil }
@@ -108,7 +114,6 @@ struct CoverPickerSheet: View {
               result.quality == .precise,
               result.version == expectedPrecisePreviewVersion,
               result.version == measuredDisplayVersion,
-              abs(selectedCoverTime - scrubbedTime) < 0.000_1,
               canvasDisplaySize.width > 0,
               canvasDisplaySize.height > 0
         else { return false }
@@ -298,6 +303,7 @@ struct CoverPickerSheet: View {
             .clipped()
             .contentShape(Rectangle())
             .gesture(stripDragGesture(stripPx: px))
+            .sensoryFeedback(.selection, trigger: coverSnapFeedbackTrigger)
             .onAppear {
                 if stripCellCount != count {
                     stripCellCount = count
@@ -338,11 +344,27 @@ struct CoverPickerSheet: View {
         viewportWidth / 2 + CGFloat(committedTime - scrubbedTime) * pixelsPerSecond
     }
 
+    static func snappedScrubTime(
+        proposedTime: Double,
+        committedTime: Double,
+        pixelsPerSecond: CGFloat,
+        snapDistancePoints: CGFloat
+    ) -> Double {
+        guard pixelsPerSecond > 0, snapDistancePoints >= 0 else { return proposedTime }
+        let distance = abs(CGFloat(proposedTime - committedTime) * pixelsPerSecond)
+        return distance <= snapDistancePoints ? committedTime : proposedTime
+    }
+
     private func stripDragGesture(stripPx: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if stripDragStartTime == nil {
                     stripDragStartTime = scrubbedTime
+                    previousStripProposedTime = scrubbedTime
+                    wasInsideCoverSnapZone = isInsideCoverSnapZone(
+                        time: scrubbedTime,
+                        stripPx: stripPx
+                    )
                     showsScrubFrame = true
                     errorMessage = nil
                     // A precise request already decoding may finish during this drag. Invalidate
@@ -354,16 +376,49 @@ struct CoverPickerSheet: View {
                 }
                 let start = stripDragStartTime ?? scrubbedTime
                 let next = start - value.translation.width / stripPx
-                scrubbedTime = min(max(0, next), totalDuration)
+                let proposedTime = min(max(0, next), totalDuration)
+                let isInsideSnapZone = isInsideCoverSnapZone(
+                    time: proposedTime,
+                    stripPx: stripPx
+                )
+                let crossedMarker = previousStripProposedTime.map {
+                    ($0 - selectedCoverTime) * (proposedTime - selectedCoverTime) < 0
+                } ?? false
+
+                // One crisp selection tick per encounter. The crossing fallback also catches a
+                // very fast drag whose sampled positions happen to leap over the tiny snap zone.
+                if !wasInsideCoverSnapZone && (isInsideSnapZone || crossedMarker) {
+                    coverSnapFeedbackTrigger &+= 1
+                }
+
+                previousStripProposedTime = proposedTime
+                wasInsideCoverSnapZone = isInsideSnapZone
+                scrubbedTime = Self.snappedScrubTime(
+                    proposedTime: proposedTime,
+                    committedTime: selectedCoverTime,
+                    pixelsPerSecond: stripPx,
+                    snapDistancePoints: coverFrameSnapDistance
+                )
             }
             .onEnded { _ in
                 stripDragStartTime = nil
+                previousStripProposedTime = nil
+                wasInsideCoverSnapZone = false
                 // Browsing alone does not move the dot. The bottom Cover action explicitly
                 // confirms the current frame and moves the marker there.
                 // 13-26 M5: one PRECISE (zero-tolerance) render at the final resting time — the
                 // during-drag loop uses fast keyframe-near frames, this lands the exact frame.
                 requestPreview(at: scrubbedTime, quality: .precise)
             }
+    }
+
+    private func isInsideCoverSnapZone(time: Double, stripPx: CGFloat) -> Bool {
+        Self.snappedScrubTime(
+            proposedTime: time,
+            committedTime: selectedCoverTime,
+            pixelsPerSecond: stripPx,
+            snapDistancePoints: coverFrameSnapDistance
+        ) == selectedCoverTime
     }
 
     // MARK: - Bottom tabs
@@ -444,7 +499,7 @@ struct CoverPickerSheet: View {
         stripFrames = []
         stripCellCount = 0
         sourceGenerators.removeAll()
-        guard let (built, builtVideoComposition, builtRanges, _) = await EditorCompositionBuilder.build(
+        guard let (built, builtVideoComposition, _, builtRanges, _) = await EditorCompositionBuilder.build(
             clips: project.clips, aspectRatio: project.aspectRatio
         ) else {
             isLoadingComposition = false

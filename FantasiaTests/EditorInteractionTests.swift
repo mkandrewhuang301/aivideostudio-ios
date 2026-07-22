@@ -2,6 +2,35 @@ import XCTest
 @testable import Fantasia
 
 final class EditorInteractionTests: XCTestCase {
+    func testGenerationCardDetailButtonMeetsMinimumTapTarget() {
+        XCTAssertGreaterThanOrEqual(GenerationCardView.detailButtonMinimumHitSize, 44)
+    }
+
+    func testProjectClipVolumeDefaultsToFullForLegacyPayloads() throws {
+        let data = Data(#"""
+        {
+            "id":"legacy",
+            "sort_order":0,
+            "media_type":"video",
+            "trim_start_seconds":0,
+            "trim_end_seconds":3,
+            "original_duration_seconds":3,
+            "width":1920,
+            "height":1080
+        }
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(ProjectClip.self, from: data)
+        XCTAssertEqual(decoded.volume, 1)
+    }
+
+    func testClipVolumeIsClampedAtPlaybackBoundary() {
+        XCTAssertEqual(EditorCompositionBuilder.normalizedVolume(-1), 0)
+        XCTAssertEqual(EditorCompositionBuilder.normalizedVolume(0.42), 0.42)
+        XCTAssertEqual(EditorCompositionBuilder.normalizedVolume(2), 1)
+        XCTAssertEqual(EditorCompositionBuilder.normalizedVolume(.nan), 1)
+    }
+
     private func overlay(
         _ id: String,
         row: Int?,
@@ -78,6 +107,158 @@ final class EditorInteractionTests: XCTestCase {
         XCTAssertTrue(TimelineTrackView.shouldActivateClipReorder(translation: -4))
     }
 
+    func testClipUnderPlayheadMovesToFollowingClipAfterBoundary() {
+        let clips = [
+            clip("first", order: 0, duration: 4),
+            clip("second", order: 1, duration: 3)
+        ]
+
+        XCTAssertEqual(TimelineTrackView.clipID(at: 3.999, in: clips), "first")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 4, in: clips), "first")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 4.001, in: clips), "second")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 6.999, in: clips), "second")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 7, in: clips), "second")
+    }
+
+    func testClipUnderPlayheadUsesTrimmedDurationsAndSortOrder() {
+        let later = clip("later", order: 1, duration: 5, trimStart: 1, trimEnd: 3.5)
+        let first = clip("first", order: 0, duration: 2)
+
+        XCTAssertEqual(TimelineTrackView.clipID(at: 1.999, in: [later, first]), "first")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 2, in: [later, first]), "first")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 2.001, in: [later, first]), "later")
+        XCTAssertEqual(TimelineTrackView.clipID(at: 4.5, in: [later, first]), "later")
+    }
+
+    func testClipBoundaryDetentHoldsBeforeEnteringNextClip() {
+        let atBoundary = TimelineTrackView.scrubProjection(
+            startTime: 3.5,
+            translationX: -20,
+            pxPerSecond: 40,
+            boundaries: [4]
+        )
+        let insideDetent = TimelineTrackView.scrubProjection(
+            startTime: 3.5,
+            translationX: -27.9,
+            pxPerSecond: 40,
+            boundaries: [4]
+        )
+        let pastDetent = TimelineTrackView.scrubProjection(
+            startTime: 3.5,
+            translationX: -32,
+            pxPerSecond: 40,
+            boundaries: [4]
+        )
+
+        XCTAssertEqual(atBoundary.time, 4, accuracy: 0.0001)
+        XCTAssertEqual(atBoundary.heldBoundary, 4)
+        XCTAssertEqual(insideDetent.time, 4, accuracy: 0.0001)
+        XCTAssertEqual(insideDetent.heldBoundary, 4)
+        XCTAssertEqual(pastDetent.time, 4.1, accuracy: 0.0001)
+        XCTAssertNil(pastDetent.heldBoundary)
+    }
+
+    func testClipBoundaryDetentWorksInReverse() {
+        let held = TimelineTrackView.scrubProjection(
+            startTime: 4.5,
+            translationX: 24,
+            pxPerSecond: 40,
+            boundaries: [4]
+        )
+        let cleared = TimelineTrackView.scrubProjection(
+            startTime: 4.5,
+            translationX: 32,
+            pxPerSecond: 40,
+            boundaries: [4]
+        )
+
+        XCTAssertEqual(held.time, 4, accuracy: 0.0001)
+        XCTAssertEqual(held.heldBoundary, 4)
+        XCTAssertEqual(cleared.time, 3.9, accuracy: 0.0001)
+        XCTAssertNil(cleared.heldBoundary)
+    }
+
+    func testFastMomentumStillVisitsEveryCrossedClipBoundary() {
+        XCTAssertEqual(
+            TimelineTrackView.boundariesCrossed(from: 1, to: 8, boundaries: [2, 4, 6]),
+            [2, 4, 6]
+        )
+        XCTAssertEqual(
+            TimelineTrackView.boundariesCrossed(from: 8, to: 1, boundaries: [2, 4, 6]),
+            [6, 4, 2]
+        )
+        XCTAssertEqual(
+            TimelineTrackView.boundariesCrossed(from: 4, to: 6, boundaries: [2, 4, 6]),
+            [6]
+        )
+    }
+
+    func testAllImageCompositionKeepsItsLogicalScrubDuration() async throws {
+        let clip = ProjectClip(
+            id: "still",
+            sortOrder: 0,
+            url: nil,
+            mediaType: "image",
+            trimStartSeconds: 0,
+            trimEndSeconds: nil,
+            originalDurationSeconds: 3,
+            width: 1920,
+            height: 1080
+        )
+
+        let built = await EditorCompositionBuilder.build(clips: [clip], aspectRatio: "original")
+        let result = try XCTUnwrap(built)
+
+        XCTAssertFalse(result.isDegraded)
+        XCTAssertEqual(
+            EditorCompositionBuilder.playableDuration(
+                compositionDuration: result.composition.duration.seconds,
+                ranges: result.ranges
+            ),
+            3,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(try XCTUnwrap(result.ranges.first?.end), 3, accuracy: 0.001)
+    }
+
+    func testLeadingImageMakesMixedProjectUseLogicalPlaybackClock() {
+        let still = ProjectClip(
+            id: "still",
+            sortOrder: 0,
+            url: nil,
+            mediaType: "image",
+            trimStartSeconds: 0,
+            trimEndSeconds: 3,
+            originalDurationSeconds: 3,
+            width: 1920,
+            height: 1080
+        )
+        let video = clip("video", order: 1, duration: 5)
+
+        XCTAssertTrue(EditorCompositionBuilder.requiresLogicalPlaybackClock(clips: [still, video]))
+        XCTAssertFalse(EditorCompositionBuilder.requiresLogicalPlaybackClock(clips: [video]))
+    }
+
+    private func clip(
+        _ id: String,
+        order: Int,
+        duration: Double,
+        trimStart: Double = 0,
+        trimEnd: Double? = nil
+    ) -> ProjectClip {
+        ProjectClip(
+            id: id,
+            sortOrder: order,
+            url: nil,
+            mediaType: "video",
+            trimStartSeconds: trimStart,
+            trimEndSeconds: trimEnd,
+            originalDurationSeconds: duration,
+            width: 1920,
+            height: 1080
+        )
+    }
+
     func testCommittedCoverMarkerTracksOldFrameUntilSelectionCompletes() {
         let viewport: CGFloat = 320
         let px: CGFloat = 40
@@ -108,6 +289,41 @@ final class EditorInteractionTests: XCTestCase {
                 viewportWidth: viewport
             ),
             160
+        )
+    }
+
+    func testCoverFrameSnapUsesOnlyTinyThreePointWindow() {
+        let committedTime = 2.0
+        let px: CGFloat = 40
+
+        XCTAssertEqual(
+            CoverPickerSheet.snappedScrubTime(
+                proposedTime: committedTime + 2.9 / Double(px),
+                committedTime: committedTime,
+                pixelsPerSecond: px,
+                snapDistancePoints: 3
+            ),
+            committedTime
+        )
+        XCTAssertEqual(
+            CoverPickerSheet.snappedScrubTime(
+                proposedTime: committedTime - 2.9 / Double(px),
+                committedTime: committedTime,
+                pixelsPerSecond: px,
+                snapDistancePoints: 3
+            ),
+            committedTime
+        )
+
+        let justOutside = committedTime + 3.01 / Double(px)
+        XCTAssertEqual(
+            CoverPickerSheet.snappedScrubTime(
+                proposedTime: justOutside,
+                committedTime: committedTime,
+                pixelsPerSecond: px,
+                snapDistancePoints: 3
+            ),
+            justOutside
         )
     }
 
@@ -176,5 +392,26 @@ final class EditorInteractionTests: XCTestCase {
         XCTAssertEqual(manager.generations.first?.id, "export-generation")
         XCTAssertEqual(manager.generations.first?.status, .pending)
         XCTAssertFalse(manager.generations.first?.isLocalPlaceholder ?? true)
+    }
+
+    @MainActor
+    func testStudioExportIsNeverPrunedByGenerationListReconciliation() throws {
+        let manager = GenerationManager()
+        manager.registerPendingExport(
+            id: "long-running-export",
+            projectId: "studio-project",
+            aspectRatio: "16:9"
+        )
+        let export = try XCTUnwrap(manager.generations.first)
+        let now = Date()
+
+        XCTAssertFalse(
+            GenerationManager.shouldReconcileListDeletion(
+                export,
+                freshIDs: [],
+                oldestFresh: now.addingTimeInterval(-3_600),
+                recentCutoff: now.addingTimeInterval(3_600)
+            )
+        )
     }
 }

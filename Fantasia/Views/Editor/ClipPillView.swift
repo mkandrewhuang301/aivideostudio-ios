@@ -169,6 +169,15 @@ struct ClipPillView: View {
         .scaleEffect(isBeingDragged ? 1.06 : 1.0)
         .shadow(color: .black.opacity(isBeingDragged ? 0.4 : 0), radius: isBeingDragged ? 10 : 0, y: isBeingDragged ? 4 : 0)
         .zIndex(isBeingDragged ? 10 : 0)
+        .overlay(alignment: .topLeading) {
+            if !isReordering {
+                clipDurationLabel
+                    .padding(.leading, 9)
+                    .padding(.top, 7)
+                    .frame(width: effectiveWidth, height: 58, alignment: .topLeading)
+                    .clipped()
+            }
+        }
         .overlay(alignment: .top) {
             if isBeingDragged {
                 durationBadge.offset(y: -22)
@@ -248,16 +257,9 @@ struct ClipPillView: View {
             // filling the uniform square, not the multi-cell stretched strip below.
             reorderThumb
         } else if clip.mediaType == "image" {
-            if let urlString = clip.url, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholderGlyph
-                    }
-                }
-            } else {
+            ZStack {
                 placeholderGlyph
+                CachedClipImageView(clip: clip, contentMode: .fill)
             }
         } else if !filmstripFrames.isEmpty {
             // 13-24 K2: SOURCE-anchored strip — cells are fixed to source time from t=0; the pill
@@ -299,16 +301,9 @@ struct ClipPillView: View {
     private var reorderThumb: some View {
         Group {
             if clip.mediaType == "image" {
-                if let urlString = clip.url, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            placeholderGlyph
-                        }
-                    }
-                } else {
+                ZStack {
                     placeholderGlyph
+                    CachedClipImageView(clip: clip, contentMode: .fill)
                 }
             } else if let firstFrame = filmstripFrames[0] {
                 Image(uiImage: firstFrame).resizable().scaledToFill()
@@ -327,6 +322,17 @@ struct ClipPillView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(Color.black.opacity(0.75), in: Capsule())
+    }
+
+    /// Every scene exposes its trimmed duration in the filmstrip, whether selected or not. A
+    /// text shadow preserves contrast over both bright and dark frames without obscuring them.
+    private var clipDurationLabel: some View {
+        Text(String(format: "%.1fs", duration))
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+            .fixedSize()
+            .allowsHitTesting(false)
     }
 
     private var placeholderGlyph: some View {
@@ -410,7 +416,11 @@ struct ClipPillView: View {
     // MARK: - Edge-handle trim (SC2)
 
     private var leftHandleGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        // The handle moves as the pill resizes. Measuring translation in the handle's default
+        // local coordinate space feeds that movement back into the next gesture sample, making
+        // the edge oscillate under the finger. The timelineBlock coordinate space is viewport-
+        // stable for the whole drag, so translation remains the finger's true displacement.
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineBlock"))
             .onChanged { value in
                 // Item 1: signal BEFORE the isZooming guard so the ancestor's trimmingClipId guard
                 // is set the instant this touch starts, regardless of the zoom-guard's early return.
@@ -441,7 +451,7 @@ struct ClipPillView: View {
     }
 
     private var rightHandleGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("timelineBlock"))
             .onChanged { value in
                 // Item 1: see leftHandleGesture's identical comment.
                 onTrimActiveChange(true)
@@ -505,5 +515,46 @@ struct ClipPillView: View {
             newClipTrimEnd: clip.trimEndSeconds,
             newClipSortOrder: clip.sortOrder + 1
         )
+    }
+}
+
+/// Still-image counterpart to the video composition/filmstrip cache path. Newly uploaded clips
+/// resolve to ProjectManager's seeded local file immediately; older/imported clips download once
+/// through ClipFileCache and then remain local for both the viewer and timeline thumbnail.
+struct CachedClipImageView: View {
+    let clip: ProjectClip
+    let contentMode: ContentMode
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                switch contentMode {
+                case .fit:
+                    Image(uiImage: image).resizable().scaledToFit()
+                case .fill:
+                    Image(uiImage: image).resizable().scaledToFill()
+                }
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: "\(clip.id)-\(clip.url ?? "")") {
+            image = nil
+            guard let urlString = clip.url,
+                  let remoteURL = URL(string: urlString)
+            else { return }
+
+            let resolvedURL = await ClipFileCache.shared.localURL(
+                clipId: clip.id,
+                remoteURL: remoteURL
+            )
+            if resolvedURL.isFileURL {
+                image = UIImage(contentsOfFile: resolvedURL.path)
+            } else if let (data, _) = try? await URLSession.shared.data(from: resolvedURL) {
+                image = UIImage(data: data)
+            }
+        }
     }
 }

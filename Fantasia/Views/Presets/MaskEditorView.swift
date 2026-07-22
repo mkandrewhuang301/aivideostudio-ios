@@ -7,10 +7,10 @@
 // is submitted — the backend's inline OpenAI gpt-image-2 mask-edit path (09.2-08) does the rest.
 //
 // Two entry points, one view (RESEARCH Open Question 4):
-//   - `.url(...)`  — from GenerationDetailSheet's "Edit" action on a completed image; the source
-//                    is that generation's own completed media URL.
-//   - `.pick`      — from the Home "Magic Editor" card; the user picks a photo from their library
-//                    first, then paints.
+//   - `.url(...)`  — from Remix on a prior Magic Editor generation; the source is that run's
+//                    original input photo.
+//   - `.pick`      — from the Home "Magic Editor" card; the user picks an image generation,
+//                    a photo from their library, or an image file first, then paints.
 //
 // CRITICAL (CLAUDE.md keyboard/composer freeze): this is a brand-new, standalone modal, exactly
 // like PresetInputSheet. It does NOT import or modify GenerateView / HighlightingTextView /
@@ -18,7 +18,6 @@
 // field below is a plain SwiftUI TextField.
 
 import SwiftUI
-import PhotosUI
 import PencilKit
 import AVFoundation
 import UIKit
@@ -36,13 +35,26 @@ enum MaskPalette {
     static let color: UIColor = .magenta
 }
 
+/// Presentation payload used when Remix restores a prior Magic Editor run. A unique identity lets
+/// repeated remixes of the same source URL reliably present a fresh editor session.
+struct MagicEditorRemixDraft: Identifiable {
+    let id = UUID()
+    let sourceURL: String
+    let prompt: String
+}
+
 struct MaskEditorView: View {
     enum Source {
-        case url(String)   // detail-sheet entry — an existing generation's completed media URL
-        case pick           // Home entry — user picks a photo from their library first
+        case url(String)   // Remix entry — an existing Magic Editor run's original source photo
+        case pick           // Home entry — user picks a generation, Photos image, or image file
     }
 
     let source: Source
+
+    init(source: Source, initialPrompt: String = "") {
+        self.source = source
+        _text = State(initialValue: initialPrompt)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var theme
@@ -67,7 +79,7 @@ struct MaskEditorView: View {
     @State private var isErasing = false
     private static let penSizes: [CGFloat] = [12, 20, 34]
 
-    @State private var text: String = ""
+    @State private var text: String
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     // Standalone modal's OWN plain TextField (NOT GenerateView's frozen composer) — a focus flag
@@ -90,9 +102,8 @@ struct MaskEditorView: View {
     /// Generate requires BOTH a painted region AND a non-empty description (prompt is required).
     private var canGenerate: Bool { hasStrokes && !trimmedPrompt.isEmpty && !isSubmitting }
 
-    // Home "pick a source photo" mode only.
-    @State private var showPhotosPicker = false
-    @State private var selectedPickerItem: PhotosPickerItem?
+    // Home "pick a source image" mode only. Reuses Studio's picker chrome in image-only mode.
+    @State private var showSourcePicker = false
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
 
@@ -130,9 +141,13 @@ struct MaskEditorView: View {
             // round trip isn't racing a sleeping instance (same pattern as PresetInputSheet.swift).
             await APIClient.shared.pingHealth()
         }
-        .photosPicker(isPresented: $showPhotosPicker, selection: $selectedPickerItem, matching: .images)
-        .onChange(of: selectedPickerItem) { _, newValue in
-            Task { await loadSourceFromPicker(newValue) }
+        .sheet(isPresented: $showSourcePicker) {
+            MediaPickerSheet(purpose: .imageEditor, onAdd: handleSourceSelection)
+                .environment(generationManager)
+                .environment(theme)
+                .presentationBackground(theme.background)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
         .alert("Couldn't load image", isPresented: Binding(
             get: { loadError != nil },
@@ -176,15 +191,15 @@ struct MaskEditorView: View {
             Text("Magic Editor")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(theme.textPrimary)
-            Text("Choose a photo, paint over what you want to change, and describe the edit.")
+            Text("Choose an image, paint over what you want to change, and describe the edit.")
                 .font(.subheadline)
                 .foregroundStyle(theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
             Button {
-                showPhotosPicker = true
+                showSourcePicker = true
             } label: {
-                Text("Choose Photo")
+                Text("Choose Image")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 190, height: 48)
@@ -455,18 +470,39 @@ struct MaskEditorView: View {
         }
     }
 
-    private func loadSourceFromPicker(_ item: PhotosPickerItem?) async {
-        guard let item else { return }
+    /// Resolves the image-only Studio picker result into the editor's in-memory source image.
+    /// Generation selections use the freshly signed completed-media URL already on the feed row;
+    /// Photos and Files selections arrive as local temporary image files.
+    private func handleSourceSelection(_ picked: [PickedMedia]) {
+        guard let selection = picked.first else { return }
+        switch selection {
+        case .generation(let id, let mediaType):
+            guard mediaType == "image",
+                  let url = generationManager.feedGenerations.first(where: { $0.id == id })?.completedMediaUrl
+            else {
+                loadError = "Couldn't load this generation."
+                return
+            }
+            Task { await loadSourceFromURL(url) }
+
+        case .upload(let url, let mediaType):
+            guard mediaType == "image" else {
+                loadError = "Choose an image to edit."
+                return
+            }
+            Task { await loadSourceFromFile(url) }
+        }
+    }
+
+    private func loadSourceFromFile(_ url: URL) async {
         isLoadingSource = true
         defer { isLoadingSource = false }
-        guard let data = try? await item.loadTransferable(type: Data.self),
+        guard let data = try? Data(contentsOf: url),
               let image = UIImage(data: data) else {
-            loadError = "Couldn't read the selected photo."
-            selectedPickerItem = nil
+            loadError = "Couldn't read the selected image."
             return
         }
         sourceImage = Self.prepareSourceImage(image)
-        selectedPickerItem = nil
     }
 
     /// Downsizes to satisfy gpt-image-2's output-size constraints (RESEARCH Pitfall 7: each edge

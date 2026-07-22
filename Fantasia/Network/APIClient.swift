@@ -256,6 +256,104 @@ actor APIClient {
         return try await submitGenerationBody(body)
     }
 
+    // POST /api/generations — Language Lessons format path. The body contains only user choices;
+    // formatResolver owns provider routing, code-switched TTS, and total-duration billing. The
+    // teacher's voice is implicit (voice belongs to the character — D-3) and `art_style_id` is
+    // only set for templates that ship an art picker (Cartoon — D-4).
+    func submitLessonGeneration(
+        formatId: String,
+        templateId: String,
+        prompt: String,
+        durationSeconds: Int,
+        learningLanguage: String,
+        speakLanguage: String,
+        teacherId: String,
+        artStyleId: String?
+    ) async throws -> GenerationSubmitResponse {
+        let body = LessonGenerationRequestBody(
+            formatId: formatId,
+            templateId: templateId,
+            prompt: prompt,
+            durationSeconds: durationSeconds,
+            learningLanguage: learningLanguage,
+            speakLanguage: speakLanguage,
+            teacherId: teacherId,
+            artStyleId: artStyleId
+        )
+        return try await submitGenerationBody(body)
+    }
+
+    // Long episodes upload straight from the local file to a one-object private R2 presigned URL.
+    // The service only authorizes/finalizes the object, so Railway never proxies gigabytes of
+    // media and the app never holds the source video in memory.
+    func uploadVideoSummarySource(
+        fileURL: URL,
+        mimeType: String,
+        fileName: String
+    ) async throws -> VideoSummaryUploadResponse {
+        let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        let intentBody = try JSONEncoder().encode(VideoSummaryUploadIntentRequest(
+            fileName: fileName,
+            mimeType: mimeType,
+            sizeBytes: fileSize
+        ))
+        let intent: VideoSummaryUploadIntentResponse = try await authorizedRequest(
+            path: "api/video-summaries/upload-intent",
+            method: "POST",
+            body: intentBody
+        )
+        guard let uploadURL = URL(string: intent.uploadUrl), uploadURL.scheme == "https" else {
+            throw APIError.unexpectedResponse(statusCode: -1, code: "INVALID_UPLOAD_URL")
+        }
+
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        for (header, value) in intent.requiredHeaders {
+            request.setValue(value, forHTTPHeaderField: header)
+        }
+
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 2 * 60 * 60
+        configuration.waitsForConnectivity = true
+        let uploadSession = URLSession(configuration: configuration)
+        defer { uploadSession.finishTasksAndInvalidate() }
+        let (_, response) = try await uploadSession.upload(for: request, fromFile: fileURL)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError.unexpectedResponse(statusCode: status, code: "DIRECT_UPLOAD_FAILED")
+        }
+        return try await authorizedRequest(
+            path: "api/video-summaries/upload/\(intent.id)/complete",
+            method: "POST"
+        )
+    }
+
+    func submitVideoSummary(
+        uploadId: String,
+        mode: String,
+        prompt: String?,
+        outputDurationSeconds: Int,
+        aspectRatio: String,
+        voiceId: String,
+        includeMusic: Bool
+    ) async throws -> VideoSummarySubmitResponse {
+        let body = VideoSummaryRequestBody(
+            uploadId: uploadId,
+            mode: mode,
+            prompt: prompt,
+            outputDurationSeconds: outputDurationSeconds,
+            aspectRatio: aspectRatio,
+            voiceId: voiceId,
+            includeMusic: includeMusic
+        )
+        return try await authorizedRequest(
+            path: "api/video-summaries",
+            method: "POST",
+            body: try JSONEncoder().encode(body)
+        )
+    }
+
     private func submitGenerationBody<Body: Encodable>(_ body: Body) async throws -> GenerationSubmitResponse {
         let bodyData = try JSONEncoder().encode(body)
         return try await authorizedRequest(path: "api/generations", method: "POST", body: bodyData)
@@ -596,12 +694,14 @@ actor APIClient {
         clipId: String,
         sortOrder: Int? = nil,
         trimStart: Double? = nil,
-        trimEnd: Double? = nil
+        trimEnd: Double? = nil,
+        volume: Double? = nil
     ) async throws -> ProjectClip {
         var body: [String: Any] = [:]
         if let sortOrder { body["sort_order"] = sortOrder }
         if let trimStart { body["trim_start_seconds"] = trimStart }
         if let trimEnd { body["trim_end_seconds"] = trimEnd }
+        if let volume { body["volume"] = volume }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let response: ClipResponse = try await projectRequest(
             path: "api/projects/\(projectId)/clips/\(clipId)", method: "PATCH", body: bodyData, expectedStatus: [200]
@@ -1044,11 +1144,104 @@ struct GenerationSubmitResponse: Decodable {
     }
 }
 
+struct VideoSummaryUploadResponse: Decodable {
+    let id: String
+    let mimeType: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mimeType = "mime_type"
+    }
+}
+
+private struct VideoSummaryUploadIntentRequest: Encodable {
+    let fileName: String
+    let mimeType: String
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case fileName = "file_name"
+        case mimeType = "mime_type"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+private struct VideoSummaryUploadIntentResponse: Decodable {
+    let id: String
+    let uploadUrl: String
+    let mimeType: String
+    let requiredHeaders: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case uploadUrl = "upload_url"
+        case mimeType = "mime_type"
+        case requiredHeaders = "required_headers"
+    }
+}
+
+struct VideoSummarySubmitResponse: Decodable {
+    let generationId: String
+    let status: String
+    let costCredits: Int
+    let sourceDurationSeconds: Double
+
+    enum CodingKeys: String, CodingKey {
+        case generationId = "generation_id"
+        case status
+        case costCredits = "cost_credits"
+        case sourceDurationSeconds = "source_duration_seconds"
+    }
+}
+
+private struct VideoSummaryRequestBody: Encodable {
+    let uploadId: String
+    let mode: String
+    let prompt: String?
+    let outputDurationSeconds: Int
+    let aspectRatio: String
+    let voiceId: String
+    let includeMusic: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case uploadId = "upload_id"
+        case mode, prompt
+        case outputDurationSeconds = "output_duration_seconds"
+        case aspectRatio = "aspect_ratio"
+        case voiceId = "voice_id"
+        case includeMusic = "include_music"
+    }
+}
+
 private struct VideoTranslationRequestBody: Encodable {
     let outputLanguage: String
 
     enum CodingKeys: String, CodingKey {
         case outputLanguage = "output_language"
+    }
+}
+
+// Language Lessons submission body. `art_style_id` is nil on non-Cartoon templates so the
+// synthesized Encodable omits it entirely.
+private struct LessonGenerationRequestBody: Encodable {
+    let formatId: String
+    let templateId: String
+    let prompt: String
+    let durationSeconds: Int
+    let learningLanguage: String
+    let speakLanguage: String
+    let teacherId: String
+    let artStyleId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case formatId = "format_id"
+        case templateId = "template_id"
+        case prompt
+        case durationSeconds = "duration_seconds"
+        case learningLanguage = "learning_language"
+        case speakLanguage = "speak_language"
+        case teacherId = "teacher_id"
+        case artStyleId = "art_style_id"
     }
 }
 
@@ -1150,6 +1343,9 @@ struct GenerationRequestBody: Encodable {
     // are JSON-encoded as `null`, the server's placeholder for a skipped OPTIONAL slot (never
     // compact this array; a shorter array would misalign every slot after the first gap).
     var presetInputUploadIds: [String?]? = nil
+    // Validated server-side against the selected preset's style grid. Optional so freeform and
+    // non-style presets keep their existing wire shape.
+    var styleId: String? = nil
     // Real picked-media duration for per-second presets (Motion Transfer, AI Influencer — D-18,
     // D-23). Distinct from `duration` above (that field is video-mode-only and unrelated to
     // presets). The server reads this exact wire key as a starting point only — it always
@@ -1186,6 +1382,7 @@ struct GenerationRequestBody: Encodable {
         case referenceVideoGenerationIds = "reference_video_generation_ids"
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
+        case styleId = "style_id"
         case maskUploadId = "mask_upload_id"
         case quality
     }

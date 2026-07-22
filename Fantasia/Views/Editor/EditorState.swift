@@ -39,14 +39,13 @@ final class EditorState {
     /// this back on failure — see EditorView's aspect-toggle handler).
     var aspectRatio: String
 
-    /// 13-22 i3: the ACTUAL AVComposition's real duration in seconds, set by EditorView right after
-    /// building the player (`composition.duration.seconds`). `totalDuration` below is the
-    /// project's LOGICAL duration (sum of trimmed clip durations) — the two can drift apart by a
-    /// few fractional seconds' rounding, and clip-row `HStack` spacing/pixel math has its own
-    /// approximation error. `clampTime(_:)` is the single source of truth every scrub/seek path
-    /// uses so the playhead can never reach a time the composition has no frame for (the "black
-    /// frame at the end" bug). Defaults to `.infinity` so clamping is a no-op (falls back to
-    /// `totalDuration` alone) before the first composition ever finishes building.
+    /// 13-22 i3: the editor's real playable duration, set by EditorView after building the player.
+    /// For video this follows `composition.duration.seconds`; for stills it also includes their
+    /// logical clip ranges because their pixels come from the image overlay rather than AVPlayer
+    /// samples. `totalDuration` below is the raw sum of trimmed clip durations — the two can drift
+    /// by a few fractional seconds' rounding, and clip-row pixel math has its own approximation
+    /// error. `clampTime(_:)` is the single source of truth every scrub/seek path uses. Defaults to
+    /// `.infinity` so clamping falls back to `totalDuration` before the first build finishes.
     var playableDuration: Double = .infinity
 
     var selection: EditorSelection = .none

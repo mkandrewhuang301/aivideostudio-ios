@@ -103,6 +103,9 @@ struct ProjectClip: Codable, Identifiable, Equatable {
     var trimStartSeconds: Double
     var trimEndSeconds: Double?
     var originalDurationSeconds: Double?
+    /// Linear source-audio gain for this clip. `1` is the original level and `0` is muted.
+    /// Older cached/API project payloads predate this field, so decoding must default to `1`.
+    var volume: Double
     // Plan 13-22 B1: pixel dimensions probed server-side (rotation-corrected), nullable — powers
     // the "Original" canvas aspect ratio (EditorView.aspectFraction resolves it from clips[0]).
     var width: Int?
@@ -116,8 +119,47 @@ struct ProjectClip: Codable, Identifiable, Equatable {
         case trimStartSeconds = "trim_start_seconds"
         case trimEndSeconds = "trim_end_seconds"
         case originalDurationSeconds = "original_duration_seconds"
+        case volume
         case width
         case height
+    }
+
+    init(
+        id: String,
+        sortOrder: Int,
+        url: String?,
+        mediaType: String,
+        trimStartSeconds: Double,
+        trimEndSeconds: Double?,
+        originalDurationSeconds: Double?,
+        volume: Double = 1,
+        width: Int?,
+        height: Int?
+    ) {
+        self.id = id
+        self.sortOrder = sortOrder
+        self.url = url
+        self.mediaType = mediaType
+        self.trimStartSeconds = trimStartSeconds
+        self.trimEndSeconds = trimEndSeconds
+        self.originalDurationSeconds = originalDurationSeconds
+        self.volume = volume
+        self.width = width
+        self.height = height
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sortOrder = try container.decode(Int.self, forKey: .sortOrder)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        mediaType = try container.decode(String.self, forKey: .mediaType)
+        trimStartSeconds = try container.decode(Double.self, forKey: .trimStartSeconds)
+        trimEndSeconds = try container.decodeIfPresent(Double.self, forKey: .trimEndSeconds)
+        originalDurationSeconds = try container.decodeIfPresent(Double.self, forKey: .originalDurationSeconds)
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        width = try container.decodeIfPresent(Int.self, forKey: .width)
+        height = try container.decodeIfPresent(Int.self, forKey: .height)
     }
 }
 

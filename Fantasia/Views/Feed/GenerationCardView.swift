@@ -12,6 +12,55 @@
 import SwiftUI
 import AVFoundation
 
+/// Reconstructs Magic Editor's user-facing selection from the persisted OpenAI alpha mask.
+/// The service mask is intentionally inverted (transparent = edit), so drawing the mask with
+/// destinationOut over magenta leaves color only where the user painted.
+struct MagicEditorInputThumbnail: View {
+    let sourceURL: URL?
+    let maskURL: URL?
+    let cacheKey: String
+
+    @State private var coloredMask: UIImage?
+
+    var body: some View {
+        ZStack {
+            CachedThumbnailImage(cacheKey: cacheKey + "-source", url: sourceURL)
+            if let coloredMask {
+                Image(uiImage: coloredMask)
+                    .resizable()
+                    .scaledToFill()
+                    .allowsHitTesting(false)
+            }
+        }
+        .clipped()
+        .task(id: maskURL) {
+            guard coloredMask == nil, let maskURL else { return }
+            let overlayKey = cacheKey + "-mask-overlay"
+            if let cached = await ThumbnailCache.shared.image(for: overlayKey) {
+                coloredMask = cached
+                return
+            }
+            guard let (data, _) = try? await URLSession.shared.data(from: maskURL),
+                  let mask = UIImage(data: data) else { return }
+            let smallMask = mask.preparingThumbnail(of: CGSize(width: 240, height: 240)) ?? mask
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let renderer = UIGraphicsImageRenderer(size: smallMask.size, format: format)
+            let overlay = renderer.image { context in
+                MaskPalette.color.withAlphaComponent(0.78).setFill()
+                context.fill(CGRect(origin: .zero, size: smallMask.size))
+                smallMask.draw(
+                    in: CGRect(origin: .zero, size: smallMask.size),
+                    blendMode: .destinationOut,
+                    alpha: 1
+                )
+            }
+            ThumbnailCache.shared[overlayKey] = overlay
+            coloredMask = overlay
+        }
+    }
+}
+
 /// Rough wall-clock expectation for a generation's duration, seconds. Constants are best-effort
 /// seeds — tune later against real Replicate timings; keep them in this one place.
 enum ProgressEstimator {
@@ -26,6 +75,8 @@ enum ProgressEstimator {
 }
 
 struct GenerationCardView: View {
+    static let detailButtonMinimumHitSize: CGFloat = 44
+
     let item: GenerationItem
     var onTapDetail: () -> Void      // tap prompt text → detail sheet (D-29)
     var onRemix: () -> Void          // D-35
@@ -62,6 +113,7 @@ struct GenerationCardView: View {
     @State private var presetForRemix: Preset?                         // drives fullScreenCover(item:)
     @State private var remixPrefillSlots: [PresetSlotInput?] = []
     @State private var isPreparingRemix = false
+    @State private var magicEditorRemixDraft: MagicEditorRemixDraft?
 
     private let accent = Color(red: 0.545, green: 0.427, blue: 0.839)
     /// Extra tap target below the prompt row — taps that land on the top of the media still
@@ -86,8 +138,8 @@ struct GenerationCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Aspect-ratio box (D-06: sized to requested aspect ratio)
-            // ×1.06 shaves ~6% off the media height (bottom-cropped via the top-aligned fill
-            // below) and hands it to the prompt box — card total height ≈ unchanged (2026-07-19).
+            // ×1.06 shaves ~6% off the media height and hands it to the prompt box — card
+            // total height ≈ unchanged (2026-07-19). The fill crop stays center-aligned below.
             Color.clear
                 .aspectRatio(cardAspectRatio * 1.06, contentMode: .fit)
                 // Hidden while the long-press preview is lifted so the lifted copy is the only
@@ -111,6 +163,8 @@ struct GenerationCardView: View {
                         onPreviewingChanged: { active in isMediaPreviewActive = active },
                         showsPlayIcon: !item.isImage
                     )
+                    .accessibilityLabel(item.isImage ? "Open image fullscreen" : "Open video fullscreen")
+                    .accessibilityAddTraits(.isButton)
                 }
                 // Extend prompt tap target into the top of the media — users often tap slightly
                 // below the truncated prompt and hit the image instead. Placed AFTER the menu
@@ -144,17 +198,39 @@ struct GenerationCardView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                // Favorite badge — mirrors LibraryThumbnailView's bottom-leading heart.
+                // Fullscreen pill matches the Kimi mockup: compact, dark, and anchored 8pt
+                // from the bottom-left. The UIKit media overlay still owns the actual tap so
+                // long-press and scroll arbitration remain unchanged.
                 .overlay(alignment: .bottomLeading) {
-                    if item.isFavorite {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                            .padding(10)
-                            .allowsHitTesting(false)
-                            .opacity(isMediaPreviewActive ? 0 : 1)
+                    HStack(spacing: 8) {
+                        if item.status == .completed, revealCompleted {
+                            Label("FULLSCREEN", systemImage: "viewfinder")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Color(red: 0.15, green: 0.16, blue: 0.25).opacity(0.92),
+                                    in: RoundedRectangle(cornerRadius: 5)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                                }
+                        }
+
+                        // Favorite badge — mirrors LibraryThumbnailView's heart while leaving
+                        // fullscreen as the leftmost control.
+                        if item.isFavorite {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                        }
                     }
+                    .padding(8)
+                    .allowsHitTesting(false)
+                    .opacity(isMediaPreviewActive ? 0 : 1)
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
@@ -172,7 +248,7 @@ struct GenerationCardView: View {
             HStack(spacing: 0) {
                 actionButton("arrow.2.squarepath", "Remix", action: handleRemixTap)
                 Rectangle().fill(theme.divider).frame(width: 0.5, height: 28)
-                actionButton("arrow.clockwise", "Regen", action: onRegenerate)
+                actionButton("arrow.clockwise", "Regen", action: handleRegenerateTap)
                 Rectangle().fill(theme.divider).frame(width: 0.5, height: 28)
                 if item.status == .failed {
                     actionButton("trash", "Delete", action: onRequestDelete, destructive: true)
@@ -199,14 +275,22 @@ struct GenerationCardView: View {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
             }
         }
+        .fullScreenCover(item: $magicEditorRemixDraft) { draft in
+            MaskEditorView(source: .url(draft.sourceURL), initialPrompt: draft.prompt)
+        }
 
-        // D-11/T-09.1-03: preset Remix reopens PresetInputSheet prefilled from this row's stored
-        // preset_input_upload_ids (re-signed via the existing GET /api/uploads reference
-        // machinery) — never the composer (remixGenerationRequested is never posted on this path).
+        // D-11/T-09.1-03: schema-driven preset Remix reopens PresetInputSheet prefilled from this
+        // row's stored preset_input_upload_ids. Magic Editor uses the full-screen mask canvas
+        // above because its freehand input cannot be represented by PresetInputSheet.
         // .sheet (not .fullScreenCover) so it swipe-down-dismisses like the generation detail
         // pullup (GenerationDetailPagerView) — user request 2026-07-08.
         .sheet(item: $presetForRemix) { preset in
-            PresetInputSheet(preset: preset, prefillSlots: remixPrefillSlots)
+            PresetInputSheet(
+                preset: preset,
+                prefillSlots: remixPrefillSlots,
+                prefillStyleId: item.params.styleId,
+                prefillAspectRatio: item.params.aspectRatio
+            )
                 .presentationBackground(theme.background)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
@@ -251,12 +335,12 @@ struct GenerationCardView: View {
     // Accent-ruled summary box. Preset rows never expose the server-expanded prompt; they use
     // the registry title and index-aligned input slots instead.
     private var detailSummaryButton: some View {
-        Button(action: onTapDetail) {
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(LinearGradient.brandPrimary)
-                    .frame(width: 3)
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(LinearGradient.brandPrimary)
+                .frame(width: 3)
 
+            HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     if item.isPreset {
                         Image(systemName: "sparkles")
@@ -280,39 +364,47 @@ struct GenerationCardView: View {
                             .foregroundStyle(theme.textPrimary)
                             .lineLimit(1)
                     }
-
                     Spacer(minLength: 8)
-                    if item.isPreset {
-                        presetInputThumbnailRow
-                    } else {
-                        referenceThumbnailRow
-                    }
                 }
-                .padding(.leading, 11)
-                .padding(.trailing, 10)
-                .padding(.vertical, 13)
-                // Always at least as tall as the with-references state (28pt thumb row) plus
-                // the ~12pt reclaimed from the media's bottom crop — same box height + tap
-                // target on every card, refs or not (2026-07-19).
-                .frame(minHeight: 40)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onTapDetail)
 
+                if item.isPreset {
+                    presetInputThumbnailRow
+                } else {
+                    referenceThumbnailRow
+                }
+            }
+            .padding(.leading, 11)
+            .padding(.trailing, 10)
+            .padding(.vertical, 13)
+            // Always at least as tall as the with-references state (28pt thumb row) plus
+            // the ~12pt reclaimed from the media's bottom crop — same box height + tap
+            // target on every card, refs or not (2026-07-19).
+            .frame(minHeight: 40)
+
+            Button(action: onTapDetail) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(theme.textTertiary)
-                    .frame(width: 38)
+                    // The visible trailing column spans the summary row, so its hit target must
+                    // span it too. A width-only frame left only the glyph-height strip tappable.
+                    .frame(minWidth: Self.detailButtonMinimumHitSize, maxHeight: .infinity)
+                    .contentShape(Rectangle())
                     .overlay(alignment: .leading) {
                         Rectangle()
                             .fill(theme.divider)
-                            .frame(width: 0.5, height: 44)
+                            .frame(width: 0.5, height: Self.detailButtonMinimumHitSize)
                     }
-                }
-            .frame(maxWidth: .infinity)
-            .background(theme.surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open generation details")
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var mediaDurationLabel: String? {
@@ -384,32 +476,47 @@ struct GenerationCardView: View {
                             .foregroundStyle(.white.opacity(0.9))
                     }
                 } else {
-                    CachedThumbnailImage(
-                        cacheKey: item.id + "-presetinput-\(thumbnail.slotIndex)",
-                        url: URL(string: thumbnail.url)
-                    )
+                    if item.params.presetId == "magic-editor", thumbnail.slotIndex == 0 {
+                        MagicEditorInputThumbnail(
+                            sourceURL: URL(string: thumbnail.url),
+                            maskURL: item.magicEditorMaskUrl.flatMap(URL.init(string:)),
+                            cacheKey: item.id + "-presetinput-\(thumbnail.slotIndex)"
+                        )
+                    } else {
+                        CachedThumbnailImage(
+                            cacheKey: item.id + "-presetinput-\(thumbnail.slotIndex)",
+                            url: URL(string: thumbnail.url)
+                        )
+                    }
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 40, height: 40)
 
             if let slotLabel = presetSlotLabel(at: thumbnail.slotIndex) {
                 Text(slotLabel)
-                    .font(.system(size: 6, weight: .heavy))
+                    // 7pt rasterized to too few device pixels for the all-caps SOURCE badge.
+                    // Keep the thumbnail compact, but render the label at a legible native size.
+                    .font(.system(size: 9, weight: .black, design: .rounded))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+                    .allowsTightening(true)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 1)
-                    .background(theme.elevatedBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 2))
+                    .shadow(color: .black.opacity(0.8), radius: 1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 3))
                     .padding(2)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.surfaceBorder, lineWidth: 0.5))
+        .frame(width: 40, height: 40)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.surfaceBorder, lineWidth: 0.5))
     }
 
     private func presetSlotLabel(at index: Int) -> String? {
         guard let slots = matchedPreset?.inputSchema?.slots, slots.indices.contains(index) else { return nil }
         let label = slots[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if item.params.presetId == "magic-editor" { return "EDIT" }
         return label.isEmpty ? nil : label.uppercased()
     }
 
@@ -506,7 +613,7 @@ struct GenerationCardView: View {
                 // box, allowsHitTesting(false) removes the oversized image from hit testing,
                 // and contentShape makes exactly the visible box tappable.
                 Color.clear
-                    .overlay(alignment: .top) {
+                    .overlay(alignment: .center) {
                         Group {
                             if let img = cachedImage {
                                 Image(uiImage: img)
@@ -525,7 +632,7 @@ struct GenerationCardView: View {
                 // D-16: static thumbnail + play icon overlay
                 // Same hit-test containment as the image branch above.
                 Color.clear
-                    .overlay(alignment: .top) {
+                    .overlay(alignment: .center) {
                         ZStack {
                             if item.usesTransparencyBackdrop {
                                 TransparencyBackdrop()
@@ -630,14 +737,70 @@ struct GenerationCardView: View {
         }
     }
 
-    /// Remix fork: preset rows never post `remixGenerationRequested` (which routes freeform
-    /// remix to the composer) — they reopen PresetInputSheet directly, prefilled from this row's
-    /// stored slot uploads. Freeform rows keep the existing composer-remix behavior unchanged.
+    /// Remix fork: Magic Editor restores its mask canvas; other preset rows reopen
+    /// PresetInputSheet with stored slot uploads; freeform rows retain the composer flow.
     private func handleRemixTap() {
-        if item.isPreset {
+        if item.params.presetId == "magic-editor" {
+            presentMagicEditorRemix()
+        } else if item.isPreset {
             presentPresetRemixSheet()
         } else {
             onRemix()
+        }
+    }
+
+    /// New Magic Editor rows can replay the exact persisted mask in one tap. Rows created before
+    /// mask ids were retained cannot be replayed exactly, so route them back to the editor instead
+    /// of sending the known-invalid empty-model request that previously made Regen appear dead.
+    private func handleRegenerateTap() {
+        if item.params.presetId == "magic-editor", item.params.maskUploadId == nil {
+            presentMagicEditorRemix()
+        } else {
+            onRegenerate()
+        }
+    }
+
+    /// Magic Editor has a freehand canvas rather than a schema-driven preset sheet. Restore the
+    /// original source photo (slot 0) and prompt so Remix returns to the state that produced this
+    /// generation. Prefer the exact freshly signed URL attached to the generation response;
+    /// MediaLibraryManager is only a compatibility fallback for older responses.
+    private func presentMagicEditorRemix() {
+        guard !isPreparingRemix else { return }
+
+        if let directSource = item.presetInputUrls?.first.flatMap({ $0 }), !directSource.isVideo {
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: directSource.url,
+                prompt: magicEditorPrompt ?? ""
+            )
+            return
+        }
+
+        if let loadedSource = presetInputThumbs.first(where: { $0.slotIndex == 0 && !$0.isVideo }) {
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: loadedSource.url,
+                prompt: magicEditorPrompt ?? ""
+            )
+            return
+        }
+
+        guard let ids = item.params.presetInputUploadIds,
+              let optionalSourceID = ids.first,
+              let sourceID = optionalSourceID else { return }
+
+        isPreparingRemix = true
+        Task {
+            defer { isPreparingRemix = false }
+            await mediaLibrary.load()
+            var source = mediaLibrary.items.first { $0.id == sourceID }
+            if source == nil {
+                await mediaLibrary.load(forceRefresh: true)
+                source = mediaLibrary.items.first { $0.id == sourceID }
+            }
+            guard let source, !source.isVideo else { return }
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: source.url,
+                prompt: magicEditorPrompt ?? ""
+            )
         }
     }
 
@@ -649,16 +812,31 @@ struct GenerationCardView: View {
         let ids = item.params.presetInputUploadIds ?? []
         Task {
             defer { isPreparingRemix = false }
-            var slots: [PresetSlotInput?] = Array(repeating: nil, count: ids.count)
-            await mediaLibrary.load()
-            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let directInputs = item.presetInputUrls ?? []
+            var slots: [PresetSlotInput?] = Array(repeating: nil, count: max(ids.count, directInputs.count))
+            let missingDirectIds = ids.enumerated().compactMap { index, id -> String? in
+                guard let id else { return nil }
+                let direct = directInputs.indices.contains(index) ? directInputs[index] : nil
+                return direct == nil ? id : nil
+            }
+            if !missingDirectIds.isEmpty {
+                await mediaLibrary.load()
+            }
+            var map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            if !Set(missingDirectIds).isSubset(of: Set(map.keys)) {
+                await mediaLibrary.load(forceRefresh: true)
+                map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
             // 09.1-11: `id` may be nil (empty optional slot) — leave that slot's entry nil in
             // `slots` so PresetInputSheet reopens with it correctly blank, not misaligned.
             for (index, id) in ids.enumerated() {
-                guard let id, let match = map[id] else { continue }
+                guard let id else { continue }
+                let direct = directInputs.indices.contains(index) ? directInputs[index] : nil
+                let match = map[id]
+                guard let url = direct?.url ?? match?.url else { continue }
                 slots[index] = PresetSlotInput(
-                    uploadId: match.id,
-                    url: match.url,
+                    uploadId: id,
+                    url: url,
                     thumbnail: nil,
                     isUploading: false,
                     durationSeconds: nil

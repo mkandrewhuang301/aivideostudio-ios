@@ -21,9 +21,9 @@ struct MainTabView: View {
     @AppStorage("hasFaceConsent") private var hasFaceConsent = false
     @State private var pendingFacePreset: Preset?
     // Magic Editor (09.2-10, SC4): the Home "Magic Editor" card routes to MaskEditorView (source
-    // photo picker mode) instead of PresetInputSheet — its schema-driven slot UI doesn't apply to
+    // image picker mode) instead of PresetInputSheet — its schema-driven slot UI doesn't apply to
     // a freehand mask paint. Preset identity only drives presentation; MaskEditorView.Source.pick
-    // starts its own PhotosPicker.
+    // starts the shared Studio-style Generations/Uploads picker in image-only mode.
     @State private var magicEditorPreset: Preset?
 
     /// Face-input presets require the one-time consent attestation before their PresetInputSheet
@@ -81,9 +81,15 @@ struct MainTabView: View {
                     }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(0)
-                    NavigationStack { StudioHubView() }
-                        .toolbar(.hidden, for: .tabBar)
-                        .tag(1)
+                    // safeAreaInset goes on the CONTENT inside the stack (same pattern as Home)
+                    // — applied to the NavigationStack itself the expanded inset doesn't reach
+                    // the hub's ScrollView and the "Studio" title renders under the top bar.
+                    NavigationStack {
+                        StudioHubView()
+                            .safeAreaInset(edge: .top, spacing: 0) { topBar() }
+                    }
+                    .toolbar(.hidden, for: .tabBar)
+                    .tag(1)
                     NavigationStack { GenerateView() }
                         .toolbar(.hidden, for: .tabBar)
                         .tag(2)
@@ -146,6 +152,10 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .referenceGenerationRequested)) { _ in
             selectedTab = 2
         }
+        // MediaPickerSheet empty-state "Generate a video" CTA → jump to Create.
+        .onReceive(NotificationCenter.default.publisher(for: .studioGenerateRequested)) { _ in
+            selectedTab = 2
+        }
         // D-D (09.2-13): any preset submit redirects to the Generate feed so the loading card shows.
         // Also close the Magic Editor cover here (it no longer self-dismisses — presenter-driven
         // close avoids a double-dismiss bounce; no-op for other presets whose item is already nil).
@@ -173,13 +183,23 @@ struct MainTabView: View {
                 .presentationDragIndicator(.hidden)
         }
         .sheet(item: $selectedFormat) { format in
-            ExplainerFormatSheet(format: format)
-                .presentationBackground(theme.background)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
+            // Each live format owns its sheet; route by registry id. Rows without a dedicated
+            // sheet fall back to the Explainer layout, which renders entirely from registry data.
+            Group {
+                if format.formatId == "video-explainer" {
+                    VideoExplainerFormatSheet(format: format)
+                } else if format.formatId == "language-lessons" {
+                    LanguageLessonFormatSheet(format: format)
+                } else {
+                    ExplainerFormatSheet(format: format)
+                }
+            }
+            .presentationBackground(theme.background)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
         }
-        // Magic Editor (09.2-10, SC4): "pick a source photo" mode — MaskEditorView owns its own
-        // PhotosPicker + paint canvas, unlike every other preset's schema-driven PresetInputSheet.
+        // Magic Editor (09.2-10, SC4): "pick a source image" mode — MaskEditorView owns its own
+        // image-only source picker + paint canvas, unlike every schema-driven PresetInputSheet.
         .fullScreenCover(item: $magicEditorPreset) { _ in
             MaskEditorView(source: .pick)
                 .environment(creditManager)
@@ -212,7 +232,7 @@ struct MainTabView: View {
     // MARK: - Shared top bar (used by all non-Generate tabs)
 
     // The bar itself (icons, logo, title, credit ring, tap targets) is identical everywhere —
-    // Home, Generate, and Library must look the same. `compact` ONLY trims the vertical padding
+    // Home, Studio, Cast, and Library must look the same. `compact` ONLY trims the vertical padding
     // for Library, whose date-header grid sits directly under the bar and otherwise reads as an
     // oversized gap above the first date row. It must never shrink the controls.
     private func topBar(compact: Bool = false) -> some View {

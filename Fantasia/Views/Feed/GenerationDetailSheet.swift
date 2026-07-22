@@ -8,6 +8,13 @@ import UIKit
 import Photos
 import AVFoundation
 
+/// A reference or preset input selected from the detail pull-over for full-screen inspection.
+private struct ReferenceMediaPreview: Identifiable {
+    let id: String
+    let url: URL
+    let isVideo: Bool
+}
+
 struct GenerationDetailSheet: View {
     let item: GenerationItem
     @Binding var isPresented: Bool
@@ -38,6 +45,7 @@ struct GenerationDetailSheet: View {
     @State private var isAnimating = false
     @State private var animateError: String? = nil
     @State private var showVideoTranslation = false
+    @State private var referencePreview: ReferenceMediaPreview?
 
     // D-4 (09.2-10 Task 3): preset Remix fork — mirrors GenerationCardView's own
     // presetRegistry/presetForRemix/remixPrefillSlots/matchedPreset exactly, so a preset row's
@@ -49,6 +57,7 @@ struct GenerationDetailSheet: View {
     @State private var remixPrefillSlots: [PresetSlotInput?] = []
     @State private var isPreparingRemix = false
     @State private var presetInputThumbs: [PresetInputThumbnail] = []
+    @State private var magicEditorRemixDraft: MagicEditorRemixDraft?
 
     private struct PresetInputThumbnail: Identifiable {
         let slotIndex: Int
@@ -94,44 +103,50 @@ struct GenerationDetailSheet: View {
 
                     // Full image/video preview
                     if item.isImage {
-                        Group {
+                        ZStack {
+                            theme.surface
+
                             if let img = cachedImage {
                                 Image(uiImage: img)
                                     .resizable()
-                                    .scaledToFit()
-                            } else {
-                                theme.surface
-                                    .frame(height: 220)
+                                    .scaledToFill()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                         }
+                        // Keep image detail previews square so portrait and landscape outputs
+                        // receive a balanced crop instead of the old wide ~16:9 window.
                         .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(alignment: .bottomLeading) { favoriteBadge }
+                        .overlay(alignment: .bottomLeading) { detailMediaBadges }
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
+                        .accessibilityLabel("Open image fullscreen")
+                        .accessibilityAddTraits(.isButton)
                         .task { await loadCachedImage() }
                     } else if let urlString = item.videoUrl, let videoUrl = URL(string: urlString) {
                         ZStack {
-                            Group {
-                                if let thumb = thumbnail {
-                                    Image(uiImage: thumb)
-                                        .resizable()
-                                        .scaledToFit()
-                                } else {
-                                    theme.surface
-                                        .frame(height: 220)
-                                }
+                            theme.surface
+
+                            if let thumb = thumbnail {
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
 
                             Image(systemName: "play.circle.fill")
                                 .font(.system(size: 44))
                                 .foregroundStyle(.white.opacity(0.9))
                         }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                         .contentShape(Rectangle())
                         .onTapGesture { showPlayer = true }
-                        .overlay(alignment: .bottomLeading) { favoriteBadge }
+                        .overlay(alignment: .bottomLeading) { detailMediaBadges }
+                        .accessibilityLabel("Open video fullscreen")
+                        .accessibilityAddTraits(.isButton)
                         .task { await generateThumbnail(from: videoUrl) }
                     } else {
                         RoundedRectangle(cornerRadius: 12)
@@ -213,8 +228,14 @@ struct GenerationDetailSheet: View {
                                 columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
                                 spacing: 8
                             ) {
-                                tileActionButton("arrow.2.squarepath", "Remix") {
-                                    handleRemix()
+                                if item.isImage {
+                                    tileActionButton("square.and.pencil", "Edit") {
+                                        presentImageEditor()
+                                    }
+                                } else {
+                                    tileActionButton("arrow.2.squarepath", "Remix") {
+                                        handleRemix()
+                                    }
                                 }
                                 tileActionButton("paperclip", "Reference") {
                                     handleReference()
@@ -350,17 +371,34 @@ struct GenerationDetailSheet: View {
                 FullScreenVideoPlayerView(videoUrl: url, generationId: item.id)
             }
         }
+        .fullScreenCover(item: $referencePreview) { preview in
+            if preview.isVideo {
+                FullScreenVideoPlayerView(videoUrl: preview.url, generationId: preview.id)
+            } else {
+                FullScreenImageView(
+                    imageURL: preview.url,
+                    cacheKey: preview.id + "-original-v2"
+                )
+            }
+        }
+        .fullScreenCover(item: $magicEditorRemixDraft) { draft in
+            MaskEditorView(source: .url(draft.sourceURL), initialPrompt: draft.prompt)
+        }
         // When Magic Editor (or any in-sheet submit) fires a generation, close this detail sheet so
         // the user lands on the Generate feed's loading card (MainTabView switches to tab 1 on the
         // same notification). Mirrors handleRemix()'s `isPresented = false`.
         .onReceive(NotificationCenter.default.publisher(for: .generationSubmitted)) { _ in
             isPresented = false
         }
-        // D-4 (09.2-10 Task 3): preset Remix reopens PresetInputSheet prefilled from this
-        // row's stored preset_input_upload_ids — never the composer. Mirrors GenerationCardView's
-        // own `.sheet(item: $presetForRemix)` exactly (same prefill contract).
+        // D-4 (09.2-10 Task 3): schema-driven preset Remix reopens PresetInputSheet prefilled
+        // from stored inputs. Magic Editor is presented separately in its mask canvas above.
         .sheet(item: $presetForRemix) { preset in
-            PresetInputSheet(preset: preset, prefillSlots: remixPrefillSlots)
+            PresetInputSheet(
+                preset: preset,
+                prefillSlots: remixPrefillSlots,
+                prefillStyleId: item.params.styleId,
+                prefillAspectRatio: item.params.aspectRatio
+            )
                 .environment(generationManager)
                 .environment(creditManager)
                 .environment(ratesManager)
@@ -429,18 +467,33 @@ struct GenerationDetailSheet: View {
 
     // MARK: - Action helpers
 
-    /// Small bottom-leading heart on the media preview, mirroring LibraryThumbnailView's badge.
-    /// Driven by the local `isFavorite` state so it flips instantly with the Favorite tile.
-    @ViewBuilder
-    private var favoriteBadge: some View {
-        if isFavorite {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 14, weight: .semibold))
+    /// Matches GenerationCardView's bottom-left fullscreen treatment. The whole preview owns
+    /// the tap, so the visual pill does not introduce a competing gesture recognizer.
+    private var detailMediaBadges: some View {
+        HStack(spacing: 8) {
+            Label("FULLSCREEN", systemImage: "viewfinder")
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                .padding(10)
-                .allowsHitTesting(false)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .background(
+                    Color(red: 0.15, green: 0.16, blue: 0.25).opacity(0.92),
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                }
+
+            if isFavorite {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+            }
         }
+        .padding(8)
+        .allowsHitTesting(false)
     }
 
     private func freeformPromptBox(prompt: String) -> some View {
@@ -475,7 +528,12 @@ struct GenerationDetailSheet: View {
                         HStack(spacing: 10) {
                             ForEach(Array(references.enumerated()), id: \.offset) { index, reference in
                                 VStack(alignment: .leading, spacing: 4) {
-                                    detailReferenceThumbnail(reference, index: index)
+                                    Button {
+                                        presentReference(reference, index: index)
+                                    } label: {
+                                        detailReferenceThumbnail(reference, index: index)
+                                    }
+                                    .buttonStyle(.plain)
                                     Text(referenceDisplayName(at: index, in: references))
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundStyle(LinearGradient.brandPrimary)
@@ -514,7 +572,12 @@ struct GenerationDetailSheet: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(presetInputThumbs) { thumbnail in
-                                detailPresetThumbnail(thumbnail)
+                                Button {
+                                    presentPresetInput(thumbnail)
+                                } label: {
+                                    detailPresetThumbnail(thumbnail)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -586,25 +649,37 @@ struct GenerationDetailSheet: View {
                             .foregroundStyle(.white)
                     }
                 } else {
-                    CachedThumbnailImage(
-                        cacheKey: item.id + "-detail-preset-input-\(thumbnail.slotIndex)",
-                        url: URL(string: thumbnail.url)
-                    )
+                    if item.params.presetId == "magic-editor", thumbnail.slotIndex == 0 {
+                        MagicEditorInputThumbnail(
+                            sourceURL: URL(string: thumbnail.url),
+                            maskURL: item.magicEditorMaskUrl.flatMap(URL.init(string:)),
+                            cacheKey: item.id + "-detail-preset-input-\(thumbnail.slotIndex)"
+                        )
+                    } else {
+                        CachedThumbnailImage(
+                            cacheKey: item.id + "-detail-preset-input-\(thumbnail.slotIndex)",
+                            url: URL(string: thumbnail.url)
+                        )
+                    }
                 }
             }
             .frame(width: 52, height: 52)
 
             if let label = presetSlotLabel(at: thumbnail.slotIndex) {
                 Text(label)
-                    .font(.system(size: 8, weight: .heavy))
+                    .font(.system(size: 10, weight: .black, design: .rounded))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+                    .allowsTightening(true)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
+                    .shadow(color: .black.opacity(0.8), radius: 1)
+                    .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(theme.elevatedBackground.opacity(0.88), in: RoundedRectangle(cornerRadius: 3))
+                    .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 3))
                     .padding(3)
             }
         }
+        .frame(width: 52, height: 52)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.surfaceBorder, lineWidth: 1))
     }
@@ -612,7 +687,26 @@ struct GenerationDetailSheet: View {
     private func presetSlotLabel(at index: Int) -> String? {
         guard let slots = matchedPreset?.inputSchema?.slots, slots.indices.contains(index) else { return nil }
         let label = slots[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if item.params.presetId == "magic-editor" { return "EDIT" }
         return label.isEmpty ? nil : label.uppercased()
+    }
+
+    private func presentPresetInput(_ thumbnail: PresetInputThumbnail) {
+        guard let url = URL(string: thumbnail.url) else { return }
+        referencePreview = ReferenceMediaPreview(
+            id: item.id + "-detail-preset-input-\(thumbnail.slotIndex)",
+            url: url,
+            isVideo: thumbnail.isVideo
+        )
+    }
+
+    private func presentReference(_ reference: GenerationReference, index: Int) {
+        guard let url = URL(string: reference.url) else { return }
+        referencePreview = ReferenceMediaPreview(
+            id: item.id + "-detail-reference-\(index)",
+            url: url,
+            isVideo: reference.isVideo
+        )
     }
 
     private var magicEditorPrompt: String? {
@@ -683,10 +777,22 @@ struct GenerationDetailSheet: View {
 
     // MARK: - Generation actions
 
+    /// Opens any completed photo generation directly in Magic Editor, using the generated
+    /// image as the editable source. Keep the edit prompt blank so the user describes the new
+    /// change rather than inheriting the prompt that created the original image.
+    private func presentImageEditor() {
+        guard item.isImage, let sourceURL = item.completedMediaUrl else { return }
+        magicEditorRemixDraft = MagicEditorRemixDraft(sourceURL: sourceURL, prompt: "")
+    }
+
     private func handleRemix() {
         // D-4: preset rows fork into the preset's own prefilled input sheet — never the
         // freeform composer (which would open blank; the backend nulls item.prompt on preset
         // runs). Freeform rows are completely unaffected below.
+        if item.params.presetId == "magic-editor" {
+            presentMagicEditorRemix()
+            return
+        }
         if item.isPreset, matchedPreset != nil {
             presentPresetRemixSheet()
             return
@@ -694,6 +800,49 @@ struct GenerationDetailSheet: View {
         generationManager.pendingRemix = item
         NotificationCenter.default.post(name: .remixGenerationRequested, object: nil)
         isPresented = false
+    }
+
+    /// Magic Editor Remix restores the source photo used by the original run instead of opening
+    /// the generic preset sheet. The generation-specific URL is preferred because it remains
+    /// available even when an older upload has fallen outside the general library's newest page.
+    private func presentMagicEditorRemix() {
+        guard !isPreparingRemix else { return }
+
+        if let directSource = item.presetInputUrls?.first.flatMap({ $0 }), !directSource.isVideo {
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: directSource.url,
+                prompt: magicEditorPrompt ?? ""
+            )
+            return
+        }
+
+        if let loadedSource = presetInputThumbs.first(where: { $0.slotIndex == 0 && !$0.isVideo }) {
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: loadedSource.url,
+                prompt: magicEditorPrompt ?? ""
+            )
+            return
+        }
+
+        guard let ids = item.params.presetInputUploadIds,
+              let optionalSourceID = ids.first,
+              let sourceID = optionalSourceID else { return }
+
+        isPreparingRemix = true
+        Task {
+            defer { isPreparingRemix = false }
+            await mediaLibrary.load()
+            var source = mediaLibrary.items.first { $0.id == sourceID }
+            if source == nil {
+                await mediaLibrary.load(forceRefresh: true)
+                source = mediaLibrary.items.first { $0.id == sourceID }
+            }
+            guard let source, !source.isVideo else { return }
+            magicEditorRemixDraft = MagicEditorRemixDraft(
+                sourceURL: source.url,
+                prompt: magicEditorPrompt ?? ""
+            )
+        }
     }
 
     // MARK: - Preset Remix fork (D-4, 09.2-10 Task 3)
@@ -708,16 +857,31 @@ struct GenerationDetailSheet: View {
         let ids = item.params.presetInputUploadIds ?? []
         Task {
             defer { isPreparingRemix = false }
-            var slots: [PresetSlotInput?] = Array(repeating: nil, count: ids.count)
-            await mediaLibrary.load()
-            let map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let directInputs = item.presetInputUrls ?? []
+            var slots: [PresetSlotInput?] = Array(repeating: nil, count: max(ids.count, directInputs.count))
+            let missingDirectIds = ids.enumerated().compactMap { index, id -> String? in
+                guard let id else { return nil }
+                let direct = directInputs.indices.contains(index) ? directInputs[index] : nil
+                return direct == nil ? id : nil
+            }
+            if !missingDirectIds.isEmpty {
+                await mediaLibrary.load()
+            }
+            var map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            if !Set(missingDirectIds).isSubset(of: Set(map.keys)) {
+                await mediaLibrary.load(forceRefresh: true)
+                map = Dictionary(mediaLibrary.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
             // `id` may be nil (empty optional slot, 09.1-11 Clothes Swap) — leave that slot's
             // entry nil so PresetInputSheet reopens with it correctly blank, not misaligned.
             for (index, id) in ids.enumerated() {
-                guard let id, let match = map[id] else { continue }
+                guard let id else { continue }
+                let direct = directInputs.indices.contains(index) ? directInputs[index] : nil
+                let match = map[id]
+                guard let url = direct?.url ?? match?.url else { continue }
                 slots[index] = PresetSlotInput(
-                    uploadId: match.id,
-                    url: match.url,
+                    uploadId: id,
+                    url: url,
                     thumbnail: nil,
                     isUploading: false,
                     durationSeconds: nil

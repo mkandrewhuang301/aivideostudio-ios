@@ -18,14 +18,12 @@
 // g04). EditorView sets the returned videoComposition on its AVPlayerItem (fullscreen shares that
 // same item); CoverPickerSheet sets it on its AVAssetImageGenerators so picked frames match.
 //
-// KNOWN LIMITATION (unchanged from the original buildComposition, 13-20): only VIDEO clips
-// contribute actual frames to the composition (AVFoundation has no simple "insert a still image
-// as a video segment" primitive without a custom AVVideoCompositor). An image clip still reserves
-// its trimmed duration on the virtual timeline so state.totalDuration/the ruler/scrubbing stay
-// correct, but the composition itself shows black (J4: an explicit background-only instruction —
-// previously the surrounding video content bled through) rather than the still — EditorView's
-// `currentImageClipURL` overlay compensates in the live inline preview; Export (server-side,
-// ffmpegProcessor.ts) renders images correctly regardless.
+// KNOWN LIMITATION: only VIDEO clips contribute actual frames to the composition (AVFoundation
+// has no simple "insert a still image as a video segment" primitive without a custom
+// AVVideoCompositor). Image clips therefore reserve a logical range and EditorView overlays the
+// still itself. EditorView uses `playableDuration(compositionDuration:ranges:)` so an all-image
+// composition's AVFoundation duration of zero does not pin every horizontal timeline drag at
+// 00:00. Export (server-side, ffmpegProcessor.ts) renders images directly.
 
 import AVFoundation
 import CoreGraphics
@@ -64,6 +62,7 @@ enum EditorCompositionBuilder {
     static func build(clips: [ProjectClip], aspectRatio: String) async -> (
         composition: AVMutableComposition,
         videoComposition: AVMutableVideoComposition?,
+        audioMix: AVAudioMix?,
         ranges: [ClipRange],
         isDegraded: Bool
     )? {
@@ -109,6 +108,7 @@ enum EditorCompositionBuilder {
         // gaps/overlaps, and EditorView overlays the actual still on top exactly as before.
         var instructions: [AVMutableVideoCompositionInstruction] = []
         var hasVideoSegment = false
+        var hasMissingVideoSegment = false
 
         for clip in sorted {
             let clipDuration = duration(of: clip)
@@ -127,6 +127,7 @@ enum EditorCompositionBuilder {
                 let asset = AVURLAsset(url: localURL)
                 let trimStart = CMTime(seconds: clip.trimStartSeconds, preferredTimescale: 600)
                 let timeRange = CMTimeRange(start: trimStart, duration: durationTime)
+                var insertedVideoSegment = false
                 do {
                     if let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first {
                         // Keep unlike source formats on separate composition tracks. A single
@@ -140,6 +141,7 @@ enum EditorCompositionBuilder {
                         )
                         try segmentTrack?.insertTimeRange(timeRange, of: assetVideoTrack, at: cursor)
                         hasVideoSegment = true
+                        insertedVideoSegment = segmentTrack != nil
                         if let segmentTrack {
                             // The layer instruction references the COMPOSITION's video track (the
                             // track the player actually renders), not the source asset's.
@@ -155,6 +157,9 @@ enum EditorCompositionBuilder {
                 } catch {
                     print("[EditorCompositionBuilder] insert error for clip \(clip.id): \(error)")
                 }
+                if !insertedVideoSegment { hasMissingVideoSegment = true }
+            } else if clip.mediaType == "video" {
+                hasMissingVideoSegment = true
             }
 
             cursor = cursor + durationTime
@@ -169,19 +174,19 @@ enum EditorCompositionBuilder {
         // above still advances. Never force an instruction's end backwards to a shorter (or zero)
         // composition duration: that creates an invalid CMTimeRange whose seconds surface as NaN.
         // The ProjectManager URL-refresh bridge will update the clips and trigger a clean rebuild.
-        guard composition.duration != .zero, composition.duration == cursor else {
+        guard !hasMissingVideoSegment else {
             print(
                 "[EditorCompositionBuilder] degraded build: inserted \(composition.duration.seconds)s of expected \(cursor.seconds)s — media unavailable (stale URLs?)"
             )
-            return (composition, nil, ranges, true)
+            return (composition, nil, makeAudioMix(audioTrack: audioTrack, clips: sorted), ranges, true)
         }
 
-        // Force the last instruction to end exactly at the composition's real duration so
-        // micro-gaps from CMTime rounding cannot leave uncovered ranges (→ black / .failed item).
-        if !instructions.isEmpty {
-            let lastIndex = instructions.count - 1
-            let lastStart = instructions[lastIndex].timeRange.start
-            instructions[lastIndex].timeRange = CMTimeRange(start: lastStart, end: composition.duration)
+        // AVFoundation's duration stops at the last real media sample, so a trailing image's
+        // logical instruction may begin at/after that end. Keep only the instruction domain the
+        // player item can actually consume; EditorView owns the still range beyond it.
+        instructions.removeAll { $0.timeRange.start >= composition.duration }
+        if let last = instructions.last {
+            last.timeRange = CMTimeRange(start: last.timeRange.start, end: composition.duration)
         }
 
         validateInstructionTiling(
@@ -199,7 +204,45 @@ enum EditorCompositionBuilder {
             videoComposition = vc
         }
 
-        return (composition, videoComposition, ranges, false)
+        return (composition, videoComposition, makeAudioMix(audioTrack: audioTrack, clips: sorted), ranges, false)
+    }
+
+    /// Builds the live preview's per-clip source-audio levels. All source audio is inserted into
+    /// one back-to-back composition track, so setting a gain at each clip boundary gives the
+    /// selected clip its own level without affecting music/audio-overlay tracks.
+    static func makeAudioMix(audioTrack: AVCompositionTrack?, clips: [ProjectClip]) -> AVAudioMix? {
+        guard let audioTrack else { return nil }
+
+        let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
+        var cursor = CMTime.zero
+        for clip in clips.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            parameters.setVolume(Float(normalizedVolume(clip.volume)), at: cursor)
+            cursor = cursor + CMTime(seconds: duration(of: clip), preferredTimescale: 600)
+        }
+
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        return mix
+    }
+
+    /// Persisted/API values are validated server-side, but clamp again at the playback boundary
+    /// so a stale cache or malformed legacy payload can never overdrive AVFoundation.
+    static func normalizedVolume(_ volume: Double) -> Double {
+        guard volume.isFinite else { return 1 }
+        return min(max(volume, 0), 1)
+    }
+
+    /// The scrub/playhead domain is the larger of AVFoundation's real-media duration and the
+    /// logical clip ranges. They differ for still images because still pixels are rendered by a
+    /// SwiftUI overlay rather than inserted as video samples.
+    static func playableDuration(compositionDuration: Double, ranges: [ClipRange]) -> Double {
+        max(compositionDuration.isFinite ? compositionDuration : 0, ranges.last?.end ?? 0)
+    }
+
+    /// AVPlayer is authoritative only when every playable range has media samples. A positive-
+    /// duration image is rendered by SwiftUI instead, so AVPlayer would skip that range on Play.
+    static func requiresLogicalPlaybackClock(clips: [ProjectClip]) -> Bool {
+        clips.contains { $0.mediaType == "image" && duration(of: $0) > 0 }
     }
 
     static func duration(of clip: ProjectClip) -> Double {

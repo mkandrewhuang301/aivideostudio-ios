@@ -129,7 +129,15 @@ final class ProjectManager {
         if let firstClipGenerationId {
             _ = try await APIClient.shared.importClipFromGeneration(projectId: created.id, generationId: firstClipGenerationId)
         } else if let firstClipUploadURL {
-            _ = try await APIClient.shared.uploadClip(projectId: created.id, fileURL: firstClipUploadURL, mediaType: firstClipMediaType)
+            let uploaded = try await APIClient.shared.uploadClip(
+                projectId: created.id,
+                fileURL: firstClipUploadURL,
+                mediaType: firstClipMediaType
+            )
+            // The picker file is already the exact source we just uploaded. Seed it under the
+            // server clip id before the editor can ask for the R2 URL, avoiding an immediate
+            // upload-then-download round trip on every newly created upload project.
+            await ClipFileCache.shared.seed(clipId: uploaded.id, sourceURL: firstClipUploadURL)
         }
         let full = try await APIClient.shared.getProject(id: created.id)
         loadedProject = full
@@ -161,7 +169,8 @@ final class ProjectManager {
         return true
     }
 
-    func openProject(id: String) async {
+    @discardableResult
+    func openProject(id: String) async -> Bool {
         isLoading = true
         loadError = nil
         defer { isLoading = false }
@@ -172,9 +181,12 @@ final class ProjectManager {
             }
             loadedProject = project
             persistEditProjectSnapshot(project)
+            mergeProjectThumbnailIntoSummary(project)
+            return true
         } catch {
             print("[ProjectManager] openProject error: \(error)")
             loadError = "Couldn't open this project."
+            return false
         }
     }
 
@@ -186,15 +198,29 @@ final class ProjectManager {
         guard let id = loadedProject?.id else { return }
         do {
             var project = try await APIClient.shared.getProject(id: id)
+            // A cache refresh for a previously-open project can finish after the user has moved
+            // to another one. Never let that stale response replace the new editor's state.
+            guard loadedProject?.id == id else { return }
             if project.lastExport == nil {
                 project.lastExport = loadedProject?.lastExport
                     ?? projects.first(where: { $0.id == id })?.lastExport
             }
             loadedProject = project
             persistEditProjectSnapshot(project)
+            mergeProjectThumbnailIntoSummary(project)
         } catch {
             print("[ProjectManager] refreshLoadedProjectURLs error: \(error)")
         }
+    }
+
+    /// A full project GET may contain a newly-created/default cover that an older cached list
+    /// row did not. Reconcile it immediately so closing the editor paints the real poster rather
+    /// than waiting for the Studio list's 60-second refresh window.
+    private func mergeProjectThumbnailIntoSummary(_ project: EditProject) {
+        guard let index = projects.firstIndex(where: { $0.id == project.id }),
+              projects[index].thumbnailUrl != project.thumbnailUrl else { return }
+        projects[index].thumbnailUrl = project.thumbnailUrl
+        persistSnapshot()
     }
 
     // MARK: - Delete (D-04 — reuses the existing swipe/long-press confirm-dialog pattern, no new UI)
@@ -284,16 +310,32 @@ final class ProjectManager {
 
     func uploadClip(fileURL: URL, mediaType: String) async throws {
         guard let id = loadedProject?.id else { return }
-        _ = try await APIClient.shared.uploadClip(projectId: id, fileURL: fileURL, mediaType: mediaType)
+        let uploaded = try await APIClient.shared.uploadClip(
+            projectId: id,
+            fileURL: fileURL,
+            mediaType: mediaType
+        )
+        await ClipFileCache.shared.seed(clipId: uploaded.id, sourceURL: fileURL)
         await refreshLoadedProjectURLs()
     }
 
-    func updateClip(clipId: String, sortOrder: Int? = nil, trimStart: Double? = nil, trimEnd: Double? = nil) async throws {
+    func updateClip(
+        clipId: String,
+        sortOrder: Int? = nil,
+        trimStart: Double? = nil,
+        trimEnd: Double? = nil,
+        volume: Double? = nil
+    ) async throws {
         guard let id = loadedProject?.id else { return }
         activeClipMutationCount += 1
         defer { activeClipMutationCount = max(0, activeClipMutationCount - 1) }
         _ = try await APIClient.shared.updateClip(
-            projectId: id, clipId: clipId, sortOrder: sortOrder, trimStart: trimStart, trimEnd: trimEnd
+            projectId: id,
+            clipId: clipId,
+            sortOrder: sortOrder,
+            trimStart: trimStart,
+            trimEnd: trimEnd,
+            volume: volume
         )
         await refreshLoadedProjectURLs()
     }

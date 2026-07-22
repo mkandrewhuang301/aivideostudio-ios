@@ -175,6 +175,15 @@ struct TimelineTrackView: View {
     private var playheadHeight: CGFloat { totalBlockHeight - playheadTopY }
 
     @State private var scrubDragStartTime: Double? = nil
+    // CapCut-style scrub physics. A normal drag remains exactly finger-tracked; only the small
+    // physical detent at clip seams changes that mapping. On release, SwiftUI's predicted end
+    // translation drives a short cancellable ease-out instead of stopping the strip dead.
+    @State private var scrubMomentumTask: Task<Void, Never>? = nil
+    @State private var scrubMomentumGeneration: UInt = 0
+    @State private var lastScrubDetentBoundary: Double? = nil
+    private let clipBoundaryDetentWidth: CGFloat = 8
+    private let minimumMomentumTranslation: CGFloat = 10
+    private let maximumMomentumTranslation: CGFloat = 720
     @State private var showAddMediaSheet = false
     @State private var isAddingClip = false
     @State private var showCoverPicker = false
@@ -304,6 +313,7 @@ struct TimelineTrackView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .onTapGesture {
+                            cancelScrubMomentum()
                             guard tapSelectionGate.acceptsTap() else { return }
                             state.select(.none)
                         }
@@ -441,6 +451,7 @@ struct TimelineTrackView: View {
         .onChange(of: tracksViewportGestureActive) { _, active in
             if !active { finishTracksGesture() }
         }
+        .onDisappear { cancelScrubMomentum() }
         .frame(height: totalBlockHeight)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddMediaSheet) {
@@ -467,20 +478,176 @@ struct TimelineTrackView: View {
                       trimmingClipId == nil,
                       !state.isZooming else { return }
                 guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                cancelScrubMomentum(keepScrubbing: true)
                 tapSelectionGate.beginMovement(.fixedRegionScrub)
                 state.isScrubbing = true
                 if scrubDragStartTime == nil { scrubDragStartTime = state.currentTime }
                 guard let startTime = scrubDragStartTime else { return }
-                let deltaTime = -value.translation.width / pxPerSecond
-                state.currentTime = state.clampTime(startTime + deltaTime)
+                applyFixedScrubProjection(startTime: startTime, translationX: value.translation.width)
             }
-            .onEnded { _ in finishFixedScrub() }
+            .onEnded { value in finishFixedScrub(endingValue: value) }
     }
 
-    private func finishFixedScrub() {
+    private func finishFixedScrub(endingValue: DragGesture.Value? = nil) {
         tapSelectionGate.endMovement(.fixedRegionScrub)
+        guard let startTime = scrubDragStartTime else { return }
         scrubDragStartTime = nil
+        if let endingValue, startScrubMomentum(from: startTime, endingValue: endingValue) {
+            return
+        }
+        lastScrubDetentBoundary = nil
         state.isScrubbing = tracksDragAxis == .horizontal
+    }
+
+    /// Converts physical drag distance into timeline time while inserting a short plateau at each
+    /// clip boundary. The plateau is the subtle "catch" in the reference: the old clip remains
+    /// selected at the seam, then selection advances only after the finger/momentum clears it.
+    struct ScrubProjection: Equatable {
+        let time: Double
+        let heldBoundary: Double?
+    }
+
+    static func scrubProjection(
+        startTime: Double,
+        translationX: CGFloat,
+        pxPerSecond: Double,
+        boundaries: [Double],
+        detentWidth: CGFloat = 8
+    ) -> ScrubProjection {
+        guard startTime.isFinite,
+              translationX.isFinite,
+              pxPerSecond.isFinite,
+              pxPerSecond > 0
+        else { return ScrubProjection(time: startTime, heldBoundary: nil) }
+
+        let rawMotion = -Double(translationX) / pxPerSecond
+        guard rawMotion != 0 else { return ScrubProjection(time: startTime, heldBoundary: nil) }
+
+        let direction = rawMotion > 0 ? 1.0 : -1.0
+        var remaining = abs(rawMotion)
+        var cursor = startTime
+        let detentSeconds = Double(max(detentWidth, 0)) / pxPerSecond
+        let epsilon = 0.000_001
+        let orderedBoundaries = boundaries
+            .filter { $0.isFinite && (direction > 0 ? $0 >= startTime - epsilon : $0 <= startTime + epsilon) }
+            .sorted { direction > 0 ? $0 < $1 : $0 > $1 }
+
+        for boundary in orderedBoundaries {
+            let travel = abs(boundary - cursor)
+            if remaining < travel {
+                return ScrubProjection(time: cursor + direction * remaining, heldBoundary: nil)
+            }
+
+            remaining -= travel
+            cursor = boundary
+            if remaining <= detentSeconds {
+                return ScrubProjection(time: boundary, heldBoundary: boundary)
+            }
+            remaining -= detentSeconds
+        }
+
+        return ScrubProjection(time: cursor + direction * remaining, heldBoundary: nil)
+    }
+
+    private func applyFixedScrubProjection(startTime: Double, translationX: CGFloat) {
+        applyFixedScrubProjection(fixedScrubProjection(startTime: startTime, translationX: translationX))
+    }
+
+    private func fixedScrubProjection(startTime: Double, translationX: CGFloat) -> ScrubProjection {
+        Self.scrubProjection(
+            startTime: startTime,
+            translationX: translationX,
+            pxPerSecond: pxPerSecond,
+            boundaries: state.clipBoundaries,
+            detentWidth: clipBoundaryDetentWidth
+        )
+    }
+
+    private func applyFixedScrubProjection(_ projection: ScrubProjection) {
+        state.currentTime = state.clampTime(projection.time)
+
+        if let boundary = projection.heldBoundary {
+            if lastScrubDetentBoundary != boundary {
+                lastScrubDetentBoundary = boundary
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+            return
+        }
+
+        lastScrubDetentBoundary = nil
+        selectClipUnderPlayheadIfNeeded()
+    }
+
+    /// Continues only the predicted remainder of a flick. The cubic ease-out gives a quick initial
+    /// response and an obvious slow finish, while the cap prevents one noisy velocity sample from
+    /// throwing the playhead across an entire long project.
+    private func startScrubMomentum(from startTime: Double, endingValue: DragGesture.Value) -> Bool {
+        let actual = endingValue.translation.width
+        var additional = endingValue.predictedEndTranslation.width - actual
+        guard abs(additional) >= minimumMomentumTranslation,
+              actual == 0 || additional == 0 || actual.sign == additional.sign
+        else { return false }
+
+        additional = min(max(additional, -maximumMomentumTranslation), maximumMomentumTranslation)
+        let duration = 0.28 + min(abs(additional) / maximumMomentumTranslation, 1) * 0.62
+        let frameCount = max(1, Int((duration * 60).rounded(.up)))
+
+        scrubMomentumGeneration &+= 1
+        let generation = scrubMomentumGeneration
+        state.isScrubbing = true
+        scrubMomentumTask = Task { @MainActor in
+            for frame in 1...frameCount {
+                guard !Task.isCancelled, scrubMomentumGeneration == generation else { return }
+                let progress = Double(frame) / Double(frameCount)
+                let easedProgress = 1 - pow(1 - progress, 3)
+                let virtualTranslation = actual + additional * CGFloat(easedProgress)
+                let projection = fixedScrubProjection(startTime: startTime, translationX: virtualTranslation)
+                let projectedTime = state.clampTime(projection.time)
+
+                // A very fast flick can advance more than the 8pt detent in one display frame.
+                // Explicitly visit every skipped seam so even those flicks retain the short catch
+                // before the next clip becomes selected.
+                let crossedBoundaries = Self.boundariesCrossed(
+                    from: state.currentTime,
+                    to: projectedTime,
+                    boundaries: state.clipBoundaries
+                )
+                for boundary in crossedBoundaries {
+                    guard !Task.isCancelled, scrubMomentumGeneration == generation else { return }
+                    applyFixedScrubProjection(ScrubProjection(time: boundary, heldBoundary: boundary))
+                    try? await Task.sleep(for: .milliseconds(70))
+                }
+                applyFixedScrubProjection(projection)
+                if frame < frameCount {
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+            }
+
+            guard scrubMomentumGeneration == generation else { return }
+            scrubMomentumTask = nil
+            lastScrubDetentBoundary = nil
+            state.isScrubbing = tracksDragAxis == .horizontal
+        }
+        return true
+    }
+
+    static func boundariesCrossed(from start: Double, to end: Double, boundaries: [Double]) -> [Double] {
+        guard start.isFinite, end.isFinite, start != end else { return [] }
+        if end > start {
+            return boundaries.filter { $0.isFinite && $0 > start && $0 <= end }.sorted()
+        }
+        return boundaries.filter { $0.isFinite && $0 < start && $0 >= end }.sorted(by: >)
+    }
+
+    private func cancelScrubMomentum(keepScrubbing: Bool = false) {
+        guard scrubMomentumTask != nil else { return }
+        scrubMomentumGeneration &+= 1
+        scrubMomentumTask?.cancel()
+        scrubMomentumTask = nil
+        lastScrubDetentBoundary = nil
+        if !keepScrubbing {
+            state.isScrubbing = tracksDragAxis == .horizontal || scrubDragStartTime != nil
+        }
     }
 
     // MARK: - Tracks viewport gesture (F13, Plan 13-21) — ONE background DragGesture over the
@@ -513,6 +680,7 @@ struct TimelineTrackView: View {
                     guard let startTime = tracksScrubStartTime else { return }
                     let deltaTime = -value.translation.width / pxPerSecond
                     state.currentTime = state.clampTime(startTime + deltaTime)
+                    selectClipUnderPlayheadIfNeeded()
                 case .vertical:
                     guard let startY = tracksScrollStartY else { return }
                     let newY = startY - value.translation.height
@@ -706,6 +874,39 @@ struct TimelineTrackView: View {
         state.project.clips.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// Returns the scene under a timeline playhead. The exact boundary belongs to the earlier
+    /// clip, matching `EditorState.displayTime(for:)`'s last-frame boundary contract; moving any
+    /// distance beyond it hands selection to the following clip. The final clip owns project end.
+    static func clipID(at time: Double, in clips: [ProjectClip]) -> String? {
+        guard time.isFinite else { return nil }
+        let ordered = clips.sorted { $0.sortOrder < $1.sortOrder }
+        guard !ordered.isEmpty else { return nil }
+
+        let playheadTime = max(0, time)
+        var cursor = 0.0
+        for (index, clip) in ordered.enumerated() {
+            let end = clip.trimEndSeconds
+                ?? clip.originalDurationSeconds
+                ?? clip.trimStartSeconds
+            cursor += max(0, end - clip.trimStartSeconds)
+            if playheadTime <= cursor || index == ordered.count - 1 {
+                return clip.id
+            }
+        }
+        return ordered.last?.id
+    }
+
+    /// Clip-following is intentionally conditional: horizontal scrubbing should move an existing
+    /// clip selection to the neighboring scene, but it must not replace a selected text, audio, or
+    /// caption item merely because the playhead crosses a clip boundary.
+    private func selectClipUnderPlayheadIfNeeded() {
+        guard case .clip = state.selection,
+              let clipID = Self.clipID(at: state.currentTime, in: state.project.clips),
+              state.selection != .clip(clipID)
+        else { return }
+        state.select(.clip(clipID))
+    }
+
     // 13-22 i12: while reorder mode is active, the clip row renders in `liveOrder`'s LOCAL preview
     // order instead of the server-authoritative `sortedClips` — SwiftUI's ForEach animates the
     // shuffle automatically whenever `liveOrder` changes (id-based diffing), which is exactly the
@@ -758,7 +959,16 @@ struct TimelineTrackView: View {
                         )
                     },
                     onReorderEnded: { commitReorder(clip: clip) },
-                    onTrimActiveChange: { active in trimmingClipId = active ? clip.id : nil }
+                    onTrimActiveChange: { active in
+                        if active {
+                            // A trim owns the fixed timeline until release. Stop any residual
+                            // scrub glide before it can move the strip beneath the handle.
+                            cancelScrubMomentum()
+                            trimmingClipId = clip.id
+                        } else if trimmingClipId == clip.id {
+                            trimmingClipId = nil
+                        }
+                    }
                 )
             }
         }
@@ -870,6 +1080,8 @@ struct TimelineTrackView: View {
     // previous clip, since clips are adjacent) — never moves the divider itself, only its content.
 
     private func selectClip(_ clip: ProjectClip) {
+        // A deliberate tap takes ownership immediately from any in-flight flick.
+        cancelScrubMomentum()
         let clips = sortedClips
         guard let index = clips.firstIndex(where: { $0.id == clip.id }) else {
             state.select(.clip(clip.id))

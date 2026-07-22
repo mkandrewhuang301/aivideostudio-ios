@@ -44,6 +44,13 @@ actor ClipFileCache {
         return cacheDirectory.appendingPathComponent(clipId).appendingPathExtension(ext)
     }
 
+    private static func cachedFileURL(clipId: String) -> URL? {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: cacheDirectory, includingPropertiesForKeys: nil
+        ) else { return nil }
+        return entries.first { $0.deletingPathExtension().lastPathComponent == clipId }
+    }
+
     /// Returns a local file URL for `clipId`, downloading it first if not already cached.
     /// Touches the file's access date on a cache hit (feeds the LRU prune below). On ANY error
     /// (download failure, disk-full, etc.) this returns `remoteURL` unchanged — callers never fail
@@ -56,12 +63,16 @@ actor ClipFileCache {
 
         let dest = Self.fileURL(clipId: clipId, remoteURL: remoteURL)
 
-        if FileManager.default.fileExists(atPath: dest.path) {
-            touchAccessDate(dest)
+        // Upload-seeded files keep the local picker's extension, which can differ from R2's
+        // normalized extension. Clip id is the immutable cache identity, so accept either.
+        if let cached = FileManager.default.fileExists(atPath: dest.path)
+            ? dest
+            : Self.cachedFileURL(clipId: clipId) {
+            touchAccessDate(cached)
             #if DEBUG
             print("[ClipFileCache] hit \(clipId)")
             #endif
-            return dest
+            return cached
         }
 
         if let existing = inFlight[clipId] {
@@ -103,6 +114,49 @@ actor ClipFileCache {
         inFlight[clipId] = task
         defer { inFlight[clipId] = nil }
         return await task.value
+    }
+
+    /// Seeds a newly uploaded Studio clip from the picker file already on device. Project
+    /// creation otherwise uploads the bytes to R2 and immediately downloads those same bytes
+    /// again before the first editor preview can paint. This local handoff makes that first open
+    /// cache-hot; future opens continue using the normal clip-id cache path above.
+    func seed(clipId: String, sourceURL: URL) {
+        guard FileManager.default.fileExists(atPath: sourceURL.path),
+              !Self.isCorruptPayload(at: sourceURL)
+        else { return }
+
+        if let cached = Self.cachedFileURL(clipId: clipId),
+           !Self.isCorruptPayload(at: cached) {
+            touchAccessDate(cached)
+            return
+        }
+
+        let ext = sourceURL.pathExtension.isEmpty ? "bin" : sourceURL.pathExtension
+        let destination = Self.cacheDirectory
+            .appendingPathComponent(clipId)
+            .appendingPathExtension(ext)
+        let staging = Self.cacheDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("seed")
+
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: staging)
+            guard !Self.isCorruptPayload(at: staging) else {
+                try? FileManager.default.removeItem(at: staging)
+                return
+            }
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: staging, to: destination)
+            enforceLRUCap()
+            #if DEBUG
+            print("[ClipFileCache] seeded \(clipId) from local upload")
+            #endif
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            #if DEBUG
+            print("[ClipFileCache] seed failed for \(clipId): \(error)")
+            #endif
+        }
     }
 
     /// One-time, actor-isolated repair for cache entries written before HTTP/payload validation

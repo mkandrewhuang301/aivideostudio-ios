@@ -53,9 +53,20 @@ struct ProjectTileView: View {
     @Environment(ThemeManager.self) private var theme
     @State private var isMediaPreviewActive = false
 
-    // Two 32pt controls + 6pt spacing + surrounding breathing room. This region passes through
-    // the UIKit card interaction so download/share taps reach the SwiftUI buttons beneath it.
-    private let exportActionsHitAreaSize = CGSize(width: 86, height: 48)
+    // Pass touches through the UIKit card interaction only when a real SwiftUI export control is
+    // present underneath. The old always-on 86x48 hole made the top-right of every Draft card
+    // completely untappable, which made opening a project appear to require a second tap.
+    private var exportActionsHitAreaSize: CGSize {
+        guard let status = project.lastExport?.status else { return .zero }
+        switch status {
+        case .completed:
+            return CGSize(width: 86, height: 48)
+        case .failed, .quarantined, .refunded:
+            return CGSize(width: 48, height: 48)
+        case .pending, .processing, .deleted:
+            return .zero
+        }
+    }
 
     private var displayTitle: String {
         guard let title = project.title, !title.isEmpty else { return "Untitled Project" }
@@ -124,6 +135,7 @@ struct ProjectTileView: View {
                 exportActions
                     .padding(8)
             }
+            .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder

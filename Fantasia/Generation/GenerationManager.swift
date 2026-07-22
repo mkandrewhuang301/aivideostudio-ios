@@ -267,10 +267,12 @@ final class GenerationManager {
             // fresh submission is never reconciled away before the server has caught up.
             let recentCutoff = Date().addingTimeInterval(-30)
             generations.removeAll { item in
-                !item.isLocalPlaceholder
-                    && !freshIDs.contains(item.id)
-                    && item.createdAt >= oldestFresh
-                    && item.createdAt < recentCutoff
+                Self.shouldReconcileListDeletion(
+                    item,
+                    freshIDs: freshIDs,
+                    oldestFresh: oldestFresh,
+                    recentCutoff: recentCutoff
+                )
             }
         }
 
@@ -294,6 +296,23 @@ final class GenerationManager {
         } else {
             generations.insert(contentsOf: newItems, at: 0)
         }
+    }
+
+    /// Studio compose rows are deliberately omitted from GET /generations and refreshed through
+    /// GET /generations/:id immediately after this list reconciliation. Never interpret their
+    /// absence from the list as deletion, or an export lasting beyond the replica-lag grace period
+    /// is removed before the by-id poll can observe its terminal status.
+    static func shouldReconcileListDeletion(
+        _ item: GenerationItem,
+        freshIDs: Set<String>,
+        oldestFresh: Date,
+        recentCutoff: Date
+    ) -> Bool {
+        !item.isLocalPlaceholder
+            && !item.isStudioCompose
+            && !freshIDs.contains(item.id)
+            && item.createdAt >= oldestFresh
+            && item.createdAt < recentCutoff
     }
 
     // Prepends items buffered by mergeLatest() while isInteracting was true.

@@ -50,6 +50,12 @@ struct GenerationParams: Codable, Equatable {
     // Swap). MUST stay `[String?]` (not `[String]`) — a `null` JSON element would otherwise throw
     // a decoding error for the entire GenerationItem.
     let presetInputUploadIds: [String?]?
+    // Validated style-grid choice used by the original preset run. Returned only for presets
+    // that declare a style grid so Remix can restore the same selection.
+    let styleId: String?
+    // Magic Editor only: owned alpha-mask upload id retained for exact Regen replay. The API
+    // separately returns a freshly signed URL for display; this id itself never expires.
+    let maskUploadId: String?
     // Format workers best-effort stamp the current multi-stage pipeline step. Absent on every
     // freeform/preset row and on older format rows, so existing decode paths remain unchanged.
     let stageLabel: String?
@@ -73,6 +79,8 @@ struct GenerationParams: Codable, Equatable {
         case height
         case presetId = "preset_id"
         case presetInputUploadIds = "preset_input_upload_ids"
+        case styleId = "style_id"
+        case maskUploadId = "mask_upload_id"
         case stageLabel = "stage_label"
         case tool
         case outputLanguage = "output_language"
@@ -90,6 +98,8 @@ struct GenerationParams: Codable, Equatable {
         height: Int?,
         presetId: String? = nil,
         presetInputUploadIds: [String?]? = nil,
+        styleId: String? = nil,
+        maskUploadId: String? = nil,
         stageLabel: String? = nil,
         tool: String? = nil,
         outputLanguage: String? = nil,
@@ -105,6 +115,8 @@ struct GenerationParams: Codable, Equatable {
         self.height = height
         self.presetId = presetId
         self.presetInputUploadIds = presetInputUploadIds
+        self.styleId = styleId
+        self.maskUploadId = maskUploadId
         self.stageLabel = stageLabel
         self.tool = tool
         self.outputLanguage = outputLanguage
@@ -129,6 +141,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
     // Presigned preset inputs, index-aligned to params.presetInputUploadIds. The backend returns
     // these directly so history cards are not limited by GET /uploads' newest-50 library window.
     let presetInputUrls: [GenerationReference?]?
+    let magicEditorMaskUrl: String?  // freshly signed internal mask URL; Magic Editor only
     let createdAt: Date
     let completedAt: Date?
     let failureReason: String?   // 'content_policy' | 'copyright' | 'generic_error' | nil (legacy rows)
@@ -145,6 +158,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         case videoUrl = "video_url"
         case referenceUrls = "reference_urls"
         case presetInputUrls = "preset_input_urls"
+        case magicEditorMaskUrl = "magic_editor_mask_url"
         case createdAt = "created_at"
         case completedAt = "completed_at"
         case failureReason = "failure_reason"
@@ -169,6 +183,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         videoUrl = try container.decodeIfPresent(String.self, forKey: .videoUrl)
         referenceUrls = try container.decodeIfPresent([GenerationReference].self, forKey: .referenceUrls)
         presetInputUrls = try container.decodeIfPresent([GenerationReference?].self, forKey: .presetInputUrls)
+        magicEditorMaskUrl = try container.decodeIfPresent(String.self, forKey: .magicEditorMaskUrl)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         failureReason = try container.decodeIfPresent(String.self, forKey: .failureReason)
@@ -198,6 +213,7 @@ struct GenerationItem: Codable, Identifiable, Equatable {
         self.videoUrl = nil
         self.referenceUrls = referenceUrls
         self.presetInputUrls = nil
+        self.magicEditorMaskUrl = nil
         self.createdAt = createdAt
         self.completedAt = nil
         self.failureReason = nil

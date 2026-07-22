@@ -116,6 +116,37 @@
       }
     },
     {
+      "format_id": "video-explainer",
+      "title": "Video Explainer",
+      "subtitle": "Turn a full video into a narrated highlight story",
+      "section": "formats",
+      "badge": "NEW",
+      "sort_order": 15,
+      "status": "live",
+      "flow": "video_summary",
+      "tile": {},
+      "voices": [
+        { "id": "Kore", "label": "Kore · Clear" },
+        { "id": "Zephyr", "label": "Zephyr · Bright" },
+        { "id": "Aoede", "label": "Aoede · Warm" },
+        { "id": "Puck", "label": "Puck · Energetic" },
+        { "id": "Charon", "label": "Charon · Deep" },
+        { "id": "Orus", "label": "Orus · Calm" }
+      ],
+      "voice_default": "Kore",
+      "output_durations": [30, 60, 90],
+      "aspect_ratios": ["9:16", "16:9"],
+      "pricing": {
+        "source_minute_credits": 8,
+        "output_second_credits": 1,
+        "minimum_credits": 149
+      },
+      "sheet": {
+        "description": "Upload a video and get a narrated edit whose words stay aligned to the source footage.",
+        "preparing_label": "Finding the story…"
+      }
+    },
+    {
       "format_id": "daily-verse",
       "title": "Daily Verse",
       "subtitle": "A daily scripture story, brought to life",
@@ -125,13 +156,127 @@
       "tile": {}
     },
     {
-      "format_id": "spanish-lessons",
-      "title": "Spanish Lessons",
-      "subtitle": "Short visual lessons that make Spanish stick",
+      "format_id": "language-lessons",
+      "title": "Language Lessons",
+      "subtitle": "Short visual lessons that make a new language stick",
       "section": "formats",
+      "badge": "NEW",
       "sort_order": 30,
-      "status": "soon",
-      "tile": {}
+      "status": "live",
+      "tile": {},
+      "templates": [
+        {
+          "id": "teacher",
+          "label": "Teacher",
+          "blurb": "A friendly teacher breaks it down",
+          "thumb_url": "formats/lesson-thumbs/teacher.jpg",
+          "cast_label": "Teacher"
+        },
+        {
+          "id": "cartoon",
+          "label": "Cartoon",
+          "blurb": "Slow, simple cartoon dialogue",
+          "thumb_url": "formats/lesson-thumbs/cartoon.jpg",
+          "cast_label": "Characters",
+          "art_styles": [
+            {
+              "id": "doodle",
+              "label": "Doodle",
+              "thumb_url": "formats/lesson-styles/doodle.jpg"
+            },
+            {
+              "id": "storybook",
+              "label": "Storybook",
+              "thumb_url": "formats/lesson-styles/storybook.jpg"
+            },
+            {
+              "id": "anime",
+              "label": "Anime",
+              "thumb_url": "formats/lesson-styles/anime.jpg"
+            },
+            {
+              "id": "paper",
+              "label": "Paper",
+              "thumb_url": "formats/lesson-styles/paper.jpg"
+            }
+          ]
+        },
+        {
+          "id": "mini_drama",
+          "label": "Mini Drama",
+          "blurb": "Immersive scenes, natural speed",
+          "thumb_url": "formats/lesson-thumbs/mini-drama.jpg",
+          "cast_label": "Characters"
+        }
+      ],
+      "teachers": [
+        {
+          "id": "marisol",
+          "name": "Marisol",
+          "art_url": "formats/teachers/marisol.jpg",
+          "voice_label": "Warm · Female",
+          "voice_sample_url": "formats/teachers/marisol-voice.mp3"
+        },
+        {
+          "id": "leo",
+          "name": "Leo",
+          "art_url": "formats/teachers/leo.jpg",
+          "voice_label": "Friendly · Male",
+          "voice_sample_url": "formats/teachers/leo-voice.mp3"
+        },
+        {
+          "id": "sofia",
+          "name": "Sofia",
+          "art_url": "formats/teachers/sofia.jpg",
+          "voice_label": "Bright · Female",
+          "voice_sample_url": "formats/teachers/sofia-voice.mp3"
+        },
+        {
+          "id": "kenji",
+          "name": "Kenji",
+          "art_url": "formats/teachers/kenji.jpg",
+          "voice_label": "Calm · Male",
+          "voice_sample_url": "formats/teachers/kenji-voice.mp3"
+        }
+      ],
+      "languages": [
+        { "id": "en", "label": "English" },
+        { "id": "es", "label": "Spanish" },
+        { "id": "zh-Hans", "label": "Chinese (Simplified)" },
+        { "id": "zh-Hant", "label": "Chinese (Traditional)" },
+        { "id": "ja", "label": "Japanese" },
+        { "id": "ko", "label": "Korean" },
+        { "id": "fr", "label": "French" },
+        { "id": "de", "label": "German" },
+        { "id": "it", "label": "Italian" },
+        { "id": "pt", "label": "Portuguese" },
+        { "id": "hi", "label": "Hindi" },
+        { "id": "ar", "label": "Arabic" }
+      ],
+      "duration_tiers": [
+        {
+          "seconds": 15,
+          "scene_count": 2,
+          "credits": 245
+        },
+        {
+          "seconds": 30,
+          "scene_count": 4,
+          "credits": 470
+        },
+        {
+          "seconds": 60,
+          "scene_count": 9,
+          "credits": 930
+        }
+      ],
+      "aspect_ratios": [
+        "9:16"
+      ],
+      "sheet": {
+        "description": "Pick a template, a teacher, and a topic — get a short lesson that sticks.",
+        "preparing_label": "Writing your lesson…"
+      }
     },
     {
       "format_id": "history-reimagined",

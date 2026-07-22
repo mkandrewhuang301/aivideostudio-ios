@@ -655,7 +655,8 @@ struct GenerateView: View {
             GenerationDetailPagerView(
                 items: generationManager.feedGenerations,
                 currentId: item.id,
-                isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })
+                isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } }),
+                leftSwipeShowsNewer: true
             )
         }
         // Swipe-to-delete confirmation (Issue 4) — shared by every SwipeToDeleteRow. The row
@@ -2114,7 +2115,11 @@ struct GenerateView: View {
 
     private func handleRegenerate(item: GenerationItem) async {
         let cost: Int
-        if item.isImage {
+        if item.params.presetId == "magic-editor" {
+            // Preset rows intentionally hide their provider model, so model-based lookup is 0.
+            // The original row already carries the authoritative flat preset charge.
+            cost = item.costCredits
+        } else if item.isImage {
             cost = ratesManager.imageCost(for: item.model)
         } else {
             let hasVideoRef = item.referenceUrls?.contains(where: { $0.isVideo }) ?? false
@@ -2132,14 +2137,22 @@ struct GenerateView: View {
 
     private func dispatchRegenerate(item: GenerationItem) async {
         guard let prompt = item.prompt else { return }
+        let isMagicEditor = item.params.presetId == "magic-editor"
+        if isMagicEditor {
+            guard (item.params.presetInputUploadIds?.first ?? nil) != nil,
+                  item.params.maskUploadId != nil else {
+                showError("This older edit can’t be regenerated because its saved selection is no longer available. Use Remix to choose the area again.")
+                return
+            }
+        }
         // FIX (2026-07-12): used to send only item.referenceUrls?.first — dropped every reference
         // past the first while still billing/behaving as if the full set was used. Send all of them,
         // split by type, same as dispatchGeneration()'s attachedReferences split.
         let refImages = item.referenceUrls?.filter { !$0.isVideo }.map { $0.url }
         let refVideos = item.referenceUrls?.filter { $0.isVideo }.map { $0.url }
-        let body = GenerationRequestBody(
+        var body = GenerationRequestBody(
             prompt: prompt,
-            model: item.model,
+            model: isMagicEditor ? "" : item.model,
             mediaType: item.isImage ? "image" : "video",
             duration: item.params.duration,
             resolution: item.params.resolution,
@@ -2155,6 +2168,13 @@ struct GenerateView: View {
             referenceImageGenerationIds: nil,
             referenceVideoGenerationIds: nil
         )
+        if isMagicEditor {
+            // Replay the server-owned preset inputs. Sending the original short-lived URLs would
+            // eventually fail; upload ids are ownership-checked and freshly signed server-side.
+            body.presetId = "magic-editor"
+            body.presetInputUploadIds = item.params.presetInputUploadIds
+            body.maskUploadId = item.params.maskUploadId
+        }
 
         // FIX (2026-07-12): this used to have no optimistic placeholder and swallow every error
         // silently (print-only) — a failed or slow regenerate gave the user nothing to look at.

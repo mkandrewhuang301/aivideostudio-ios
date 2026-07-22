@@ -144,6 +144,7 @@ struct FeedView: View {
     // D-36: UX pre-flight only — backend enforces credits atomically (CLAUDE.md Rule 1)
     // Image items return 0 here; image cost shown separately in the generate flow.
     private func estimatedCost(for item: GenerationItem) -> Int {
+        if item.params.presetId == "magic-editor" { return item.costCredits }
         guard !item.isImage else { return 0 }
         let ratePerSecond: Int = item.model.contains("mini") ? 5 : 10
         return (item.params.duration ?? 0) * ratePerSecond
@@ -152,9 +153,17 @@ struct FeedView: View {
     // Actual API dispatch (shared by direct path and confirmed-despite-low-credits path)
     private func dispatchRegenerate(item: GenerationItem) async {
         guard let prompt = item.prompt else { return }
-        let body = GenerationRequestBody(
+        let isMagicEditor = item.params.presetId == "magic-editor"
+        guard !isMagicEditor || (
+            (item.params.presetInputUploadIds?.first ?? nil) != nil &&
+            item.params.maskUploadId != nil
+        ) else {
+            print("[FeedView] regenerate unavailable: Magic Editor replay inputs are missing")
+            return
+        }
+        var body = GenerationRequestBody(
             prompt: prompt,
-            model: item.model,
+            model: isMagicEditor ? "" : item.model,
             mediaType: item.isImage ? "image" : "video",
             duration: item.params.duration,
             resolution: item.params.resolution,
@@ -170,6 +179,11 @@ struct FeedView: View {
             referenceImageGenerationIds: nil,
             referenceVideoGenerationIds: nil
         )
+        if isMagicEditor {
+            body.presetId = "magic-editor"
+            body.presetInputUploadIds = item.params.presetInputUploadIds
+            body.maskUploadId = item.params.maskUploadId
+        }
         do {
             _ = try await APIClient.shared.submitGeneration(body: body)
             await generationManager.refresh()
@@ -197,4 +211,8 @@ extension Notification.Name {
     // Posted by PresetInputSheet after a successful preset submit (09.2-13, D-D) — MainTabView
     // observes it and switches to the Generate feed so the loading card is visible.
     static let generationSubmitted = Notification.Name("generationSubmitted")
+    // Posted by MediaPickerSheet's empty-Generations "Generate a video" CTA — MainTabView
+    // observes it and switches to the Create tab (same idea as generationSubmitted, but nothing
+    // was submitted; the user just wants to go generate).
+    static let studioGenerateRequested = Notification.Name("studioGenerateRequested")
 }

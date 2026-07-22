@@ -27,4 +27,45 @@ final class PresetCostTests: XCTestCase {
         XCTAssertEqual(flat, .flat(credits: 2))
         XCTAssertEqual(perSecond, .perSecond(creditsPerSec: 5, maxSeconds: 30))
     }
+
+    func testPresetGenerationRequestEncodesSelectedStyle() throws {
+        var request = GenerationRequestBody(
+            prompt: "",
+            model: "",
+            mediaType: "image",
+            duration: nil,
+            resolution: nil,
+            aspectRatio: nil,
+            audioEnabled: nil,
+            imageAspectRatio: "1:1",
+            imageQuality: nil,
+            referenceImages: nil,
+            referenceVideos: nil,
+            referenceUploadIds: nil,
+            referenceImageUploadIds: nil,
+            referenceVideoUploadIds: nil,
+            referenceImageGenerationIds: nil,
+            referenceVideoGenerationIds: nil,
+            presetId: "hairstyle",
+            presetInputUploadIds: ["upload-photo"]
+        )
+        request.styleId = "bob"
+
+        let encoded = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["preset_id"] as? String, "hairstyle")
+        XCTAssertEqual(object["style_id"] as? String, "bob")
+    }
+
+    func testGenerationParamsDecodesPresetReplayChoices() throws {
+        let json = Data(
+            #"{"preset_id":"hairstyle","preset_input_upload_ids":["upload-photo"],"style_id":"bob","aspect_ratio":"2:3"}"#.utf8
+        )
+
+        let params = try JSONDecoder().decode(GenerationParams.self, from: json)
+        XCTAssertEqual(params.presetId, "hairstyle")
+        XCTAssertEqual(params.presetInputUploadIds, ["upload-photo"])
+        XCTAssertEqual(params.styleId, "bob")
+        XCTAssertEqual(params.aspectRatio, "2:3")
+    }
 }

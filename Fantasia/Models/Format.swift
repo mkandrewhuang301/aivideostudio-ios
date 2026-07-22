@@ -12,6 +12,7 @@ struct Format: Codable, Identifiable, Equatable {
     let badge: String?
     let sortOrder: Int
     let status: String
+    let flow: String?
     let tile: FormatTile
     let styleGrid: [FormatStyle]
     let voices: [FormatVoice]
@@ -19,7 +20,14 @@ struct Format: Codable, Identifiable, Equatable {
     let musicMoods: [String]
     let durationTiers: [FormatDurationTier]
     let aspectRatios: [String]
+    let outputDurations: [Int]
+    let pricing: FormatPricing?
     let sheet: FormatSheetMeta
+    // Language Lessons fields (client-safe only — voice ids, anchor keys, and prompts are
+    // server-only and never serialized). Empty on rows that don't ship them (Explainer, SOON).
+    let templates: [FormatTemplate]
+    let teachers: [FormatTeacher]
+    let languages: [FormatLanguage]
 
     var id: String { formatId }
     var isLive: Bool { status == "live" }
@@ -33,6 +41,7 @@ struct Format: Codable, Identifiable, Equatable {
         case badge
         case sortOrder = "sort_order"
         case status
+        case flow
         case tile
         case styleGrid = "style_grid"
         case voices
@@ -40,7 +49,12 @@ struct Format: Codable, Identifiable, Equatable {
         case musicMoods = "music_moods"
         case durationTiers = "duration_tiers"
         case aspectRatios = "aspect_ratios"
+        case outputDurations = "output_durations"
+        case pricing
         case sheet
+        case templates
+        case teachers
+        case languages
     }
 
     init(from decoder: Decoder) throws {
@@ -52,6 +66,7 @@ struct Format: Codable, Identifiable, Equatable {
         badge = try container.decodeIfPresent(String.self, forKey: .badge)
         sortOrder = try container.decode(Int.self, forKey: .sortOrder)
         status = try container.decode(String.self, forKey: .status)
+        flow = try container.decodeIfPresent(String.self, forKey: .flow)
         tile = try container.decodeIfPresent(FormatTile.self, forKey: .tile)
             ?? FormatTile(posterUrl: nil, loopUrl: nil)
 
@@ -64,8 +79,25 @@ struct Format: Codable, Identifiable, Equatable {
         musicMoods = try container.decodeIfPresent([String].self, forKey: .musicMoods) ?? []
         durationTiers = try container.decodeIfPresent([FormatDurationTier].self, forKey: .durationTiers) ?? []
         aspectRatios = try container.decodeIfPresent([String].self, forKey: .aspectRatios) ?? []
+        outputDurations = try container.decodeIfPresent([Int].self, forKey: .outputDurations) ?? []
+        pricing = try container.decodeIfPresent(FormatPricing.self, forKey: .pricing)
         sheet = try container.decodeIfPresent(FormatSheetMeta.self, forKey: .sheet)
             ?? FormatSheetMeta(description: subtitle ?? "", preparingLabel: "")
+        templates = try container.decodeIfPresent([FormatTemplate].self, forKey: .templates) ?? []
+        teachers = try container.decodeIfPresent([FormatTeacher].self, forKey: .teachers) ?? []
+        languages = try container.decodeIfPresent([FormatLanguage].self, forKey: .languages) ?? []
+    }
+}
+
+struct FormatPricing: Codable, Equatable {
+    let sourceMinuteCredits: Int
+    let outputSecondCredits: Int
+    let minimumCredits: Int
+
+    enum CodingKeys: String, CodingKey {
+        case sourceMinuteCredits = "source_minute_credits"
+        case outputSecondCredits = "output_second_credits"
+        case minimumCredits = "minimum_credits"
     }
 }
 
@@ -116,6 +148,72 @@ struct FormatSheetMeta: Codable, Equatable {
         case description
         case preparingLabel = "preparing_label"
     }
+}
+
+/// A Language Lessons visual template (Teacher / Cartoon / Mini Drama). `castLabel` drives the
+/// cast slot's caption ("Teacher" vs "Characters"); `artStyles` is the per-template look picker
+/// (Cartoon's Doodle/Storybook/Anime/Paper — D-4) and stays empty on templates without one.
+struct FormatTemplate: Codable, Equatable, Identifiable {
+    let id: String
+    let label: String
+    let blurb: String?
+    let thumbUrl: String?
+    let castLabel: String
+    let artStyles: [FormatStyle]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case blurb
+        case thumbUrl = "thumb_url"
+        case castLabel = "cast_label"
+        case artStyles = "art_styles"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
+        thumbUrl = try container.decodeIfPresent(String.self, forKey: .thumbUrl)
+        castLabel = try container.decodeIfPresent(String.self, forKey: .castLabel) ?? "Teacher"
+        artStyles = try container.decodeIfPresent([FormatStyle].self, forKey: .artStyles) ?? []
+    }
+}
+
+/// A curated teacher character. Client-safe shape only: the Gemini `voice_id` and anchor R2 key
+/// are server-only (stripped in CLIENT_FORMATS per D-3) — the client sees a display label and an
+/// optional short sample clip for the ▶ preview.
+struct FormatTeacher: Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let artUrl: String?
+    let voiceLabel: String
+    let voiceSampleUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case artUrl = "art_url"
+        case voiceLabel = "voice_label"
+        case voiceSampleUrl = "voice_sample_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        artUrl = try container.decodeIfPresent(String.self, forKey: .artUrl)
+        voiceLabel = try container.decodeIfPresent(String.self, forKey: .voiceLabel) ?? ""
+        voiceSampleUrl = try container.decodeIfPresent(String.self, forKey: .voiceSampleUrl)
+    }
+}
+
+/// A selectable language for the Learning / I speak pair. `id` is a BCP-47-ish code the server
+/// resolves (`en`, `es`, `zh-Hans`, …).
+struct FormatLanguage: Codable, Equatable, Identifiable {
+    let id: String
+    let label: String
 }
 
 struct FormatsResponse: Codable {

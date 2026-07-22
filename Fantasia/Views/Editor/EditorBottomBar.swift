@@ -28,6 +28,7 @@ struct EditorBottomBar: View {
 
     // MARK: - Contextual bar (a selection is active)
     let onSplit: () -> Void
+    let onVolume: () -> Void
     let onDone: () -> Void
     let onDeleteSelected: () -> Void
     let onEditText: () -> Void
@@ -106,6 +107,12 @@ struct EditorBottomBar: View {
     private var clipBar: some View {
         HStack(spacing: 0) {
             ctxTool(icon: "scissors", label: "Split", action: onSplit)
+            ctxTool(
+                icon: "speaker.wave.2",
+                label: "Volume",
+                isDisabled: !selectedClipHasAudio,
+                action: onVolume
+            )
             ctxTool(icon: "textformat", label: "Text", action: onAddText)
             ctxTool(icon: "trash", label: "Delete", color: destructive, action: onDeleteSelected)
             ctxTool(icon: "checkmark", label: "Done", action: onDone)
@@ -146,6 +153,11 @@ struct EditorBottomBar: View {
 
     // MARK: - Shared button styles
 
+    private var selectedClipHasAudio: Bool {
+        guard case .clip(let id) = state.selection else { return false }
+        return state.project.clips.first(where: { $0.id == id })?.mediaType == "video"
+    }
+
     private func tool(icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
@@ -161,7 +173,13 @@ struct EditorBottomBar: View {
         .accessibilityLabel(label)
     }
 
-    private func ctxTool(icon: String, label: String, color: Color = .white, action: @escaping () -> Void) -> some View {
+    private func ctxTool(
+        icon: String,
+        label: String,
+        color: Color = .white,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
@@ -172,7 +190,136 @@ struct EditorBottomBar: View {
             .foregroundStyle(color)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
+            .opacity(isDisabled ? 0.35 : 1)
         }
+        .disabled(isDisabled)
         .accessibilityLabel(label)
+    }
+}
+
+/// Compact native bottom sheet for the selected source clip's audio level. The 0–100% range
+/// mirrors AVFoundation's linear gain contract and avoids hidden clipping above the source level.
+struct ClipVolumeSheet: View {
+    @Binding var volume: Double
+    let onDone: () -> Void
+
+    private let panelBackground = Color(red: 0.075, green: 0.075, blue: 0.09)
+    private let accent = Color(red: 0.55, green: 0.35, blue: 1.0)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Clip Volume")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                Button(action: onDone) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Done")
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 8)
+
+            Divider().overlay(Color.white.opacity(0.08))
+
+            VStack(spacing: 18) {
+                HStack(spacing: 14) {
+                    Image(systemName: volume <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 19))
+                        .foregroundStyle(volume <= 0.001 ? .secondary : accent)
+                        .frame(width: 26)
+
+                    CircularThumbSlider(value: $volume, accent: accent)
+                        .accessibilityLabel("Clip volume")
+                        .accessibilityValue("\(Int((volume * 100).rounded())) percent")
+
+                    Text("\(Int((volume * 100).rounded()))%")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .frame(width: 48, alignment: .trailing)
+                }
+
+                HStack {
+                    Text("0%")
+                    Spacer()
+                    Button("Reset to 100%") { volume = 1 }
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text("100%")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+
+            Spacer(minLength: 8)
+        }
+        .foregroundStyle(.white)
+        .background(panelBackground.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// A compact volume slider with a solid circular thumb. The native slider adopts the system's
+/// glass capsule treatment on newer iOS releases, which is too visually heavy for this panel.
+private struct CircularThumbSlider: View {
+    @Binding var value: Double
+    let accent: Color
+
+    private let thumbDiameter: CGFloat = 16
+    private let trackHeight: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let travel = max(width - thumbDiameter, 0)
+            let normalizedValue = min(max(value, 0), 1)
+            let fillWidth = travel * normalizedValue
+            let thumbX = (thumbDiameter / 2) + fillWidth
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.14))
+                    .frame(width: travel, height: trackHeight)
+                    .offset(x: thumbDiameter / 2)
+
+                Capsule()
+                    .fill(accent)
+                    .frame(width: fillWidth, height: trackHeight)
+                    .offset(x: thumbDiameter / 2)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbDiameter, height: thumbDiameter)
+                    .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
+                    .position(x: thumbX, y: proxy.size.height / 2)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        guard travel > 0 else { return }
+                        let proposed = (gesture.location.x - (thumbDiameter / 2)) / travel
+                        let clamped = min(max(proposed, 0), 1)
+                        value = (clamped * 100).rounded() / 100
+                    }
+            )
+        }
+        .frame(height: 44)
+        .accessibilityElement()
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                value = min(value + 0.01, 1)
+            case .decrement:
+                value = max(value - 0.01, 0)
+            @unknown default:
+                break
+            }
+        }
     }
 }

@@ -82,6 +82,10 @@ struct CategoryView: View {
         }
         .contentMargins(.horizontal, 12, for: .scrollContent)
         .contentMargins(.top, 12, for: .scrollContent)
+        // Category pages are pushed inside MainTabView, whose custom tab bar overlays the
+        // NavigationStack. Keep the final row scrollable above that bar instead of trapping it
+        // underneath the overlay.
+        .contentMargins(.bottom, 110, for: .scrollContent)
         .background(theme.elevatedBackground.ignoresSafeArea())
         .navigationTitle(BrowseCategory.title(for: section))
         .navigationBarTitleDisplayMode(.large)
@@ -201,9 +205,11 @@ struct FormatCardView: View {
 
     private var palette: [Color] {
         switch format.formatId {
+        case "video-explainer":
+            [Color(red: 0.18, green: 0.71, blue: 0.82), Color(red: 0.24, green: 0.33, blue: 0.72)]
         case "daily-verse":
             [Color(red: 0.95, green: 0.58, blue: 0.28), Color(red: 0.62, green: 0.29, blue: 0.45)]
-        case "spanish-lessons":
+        case "spanish-lessons", "language-lessons":
             [Color(red: 0.16, green: 0.68, blue: 0.63), Color(red: 0.18, green: 0.39, blue: 0.72)]
         case "history-reimagined":
             [Color(red: 0.77, green: 0.32, blue: 0.36), Color(red: 0.38, green: 0.24, blue: 0.57)]
@@ -214,8 +220,9 @@ struct FormatCardView: View {
 
     private var symbol: String {
         switch format.formatId {
+        case "video-explainer": "text.bubble.fill"
         case "daily-verse": "book.closed.fill"
-        case "spanish-lessons": "character.book.closed.fill"
+        case "spanish-lessons", "language-lessons": "character.book.closed.fill"
         case "history-reimagined": "building.columns.fill"
         default: "sparkles"
         }

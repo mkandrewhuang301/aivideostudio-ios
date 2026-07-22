@@ -59,10 +59,10 @@ struct ProfileCreditSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     identityBlock
+                    creditsBlock
                     if authManager.currentUser?.isAnonymous == true {
                         signInNudge
                     }
-                    creditsBlock
                     menuSection
                     footer
                 }
@@ -149,12 +149,6 @@ struct ProfileCreditSheet: View {
     private var signInSheet: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
-                Image(systemName: "person.crop.circle.badge.checkmark")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 52, height: 52)
-                    .background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
-
                 VStack(spacing: 6) {
                     Text("Save your progress")
                         .font(.title3.weight(.semibold))

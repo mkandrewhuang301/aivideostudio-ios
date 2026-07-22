@@ -32,7 +32,13 @@ struct EditorView: View {
 
     @State private var state: EditorState
     @State private var player: AVPlayer?
+    @State private var activeCompositionAudioTrack: AVCompositionTrack?
     @State private var timeObserverToken: Any?
+    // AVPlayer skips timeline gaps that contain no media samples. Still-image clips intentionally
+    // live in exactly those gaps (their pixels are a SwiftUI overlay), so mixed image/video
+    // projects need a wall-clock driver while playing. Pure-video projects keep AVPlayer's native
+    // media clock below.
+    @State private var logicalPlaybackTask: Task<Void, Never>?
     @State private var playerItemStatusObservation: NSKeyValueObservation?
     @State private var playerItemFailureObservation: NSObjectProtocol?
     @State private var playerRebuildGeneration: UInt = 0
@@ -69,6 +75,10 @@ struct EditorView: View {
     // 13-19 Task A: default-bar Audio action opens the sheet here now (lifted up from
     // AudioTrackRow, which owned it before the bottom bar existed).
     @State private var showAddAudioSheet = false
+    @State private var showClipVolumeSheet = false
+    @State private var volumeEditingClipId: String?
+    @State private var clipVolumeDraft = 1.0
+    @State private var clipVolumeBeforeEditing = 1.0
     @State private var isCaptionsBusy = false
     @State private var barToastMessage: String?
     @State private var barToastTask: Task<Void, Never>?
@@ -104,12 +114,16 @@ struct EditorView: View {
             .background(canvasBackground.ignoresSafeArea())
             .preferredColorScheme(.dark)
             .toolbar(.hidden, for: .navigationBar)
-            .onAppear { Task { await rebuildPlayer() } }
+            .onAppear {
+                activatePlaybackAudioSession()
+                Task { await rebuildPlayer() }
+            }
             .onDisappear { tearDownPlayer() }
             .onChange(of: state.isPlaying) { _, isPlaying in handlePlayingChange(isPlaying) }
             .onChange(of: state.currentTime) { _, newValue in handleScrubSeek(newValue) }
             .onChange(of: state.isScrubbing) { _, isScrubbing in
                 if isScrubbing {
+                    stopLogicalPlaybackClock()
                     // A new generation prevents an older gesture's slow seek completion from
                     // leaking adaptive tolerance into this drag.
                     scrubSessionGeneration &+= 1
@@ -126,6 +140,9 @@ struct EditorView: View {
                 // still decoding, queue this behind it so that older completion cannot overwrite
                 // the precise landing frame.
                 requestPreciseScrubLanding(at: state.displayTime(for: state.currentTime))
+                if state.isPlaying, requiresLogicalPlaybackClock {
+                    startLogicalPlaybackClock()
+                }
             }
             .onChange(of: state.project.clips) { _, _ in Task { await rebuildPlayer() } }
             // Plan 13-26 M1 Fix A: cache-first open (ProjectManager.openProjectFromCache) hands
@@ -161,6 +178,17 @@ struct EditorView: View {
                     }
                 })
             }
+            .sheet(isPresented: $showClipVolumeSheet, onDismiss: commitClipVolumeChange) {
+                ClipVolumeSheet(volume: $clipVolumeDraft) {
+                    showClipVolumeSheet = false
+                }
+                .presentationDetents([.height(250)])
+                .presentationDragIndicator(.hidden)
+            }
+            .onChange(of: clipVolumeDraft) { _, newValue in
+                guard showClipVolumeSheet, let clipId = volumeEditingClipId else { return }
+                applyClipVolumePreview(clipId: clipId, volume: newValue)
+            }
             .overlay(alignment: .bottom) { barToastOverlay }
             // 13-22 i6.1: fullscreen now shares this SAME AVPlayer instance (no more separate
             // composition/player pair to reconcile) — the inline surface is simply occluded
@@ -171,6 +199,7 @@ struct EditorView: View {
                 FullscreenEditorPlayerView(
                     state: state,
                     player: player,
+                    clipRanges: clipRanges,
                     usesComposedVideoOutput: usesComposedVideoOutput,
                     videoOutputRenderer: videoOutputRenderer,
                     // Item 4 (round 2, Andrew review 2026-07-17): the SAME aspect fraction
@@ -236,6 +265,7 @@ struct EditorView: View {
             hasCaptionableMedia: hasCaptionableMedia,
             isCaptionsBusy: isCaptionsBusy,
             onSplit: performSplit,
+            onVolume: openSelectedClipVolume,
             onDone: { state.select(.none) },
             onDeleteSelected: deleteSelected,
             onEditText: requestEditSelectedText,
@@ -283,6 +313,14 @@ struct EditorView: View {
     // a long-GOP source proves slow, then the rest of that drag uses keyframe-friendly tolerance.
     // The final exact landing is serialized behind any active mid-drag seek.
     private func handleScrubSeek(_ newValue: Double) {
+        // Stills have no AVPlayer samples to decode. The shared clock and image overlay are the
+        // complete scrub path, so seeking the underlying (possibly zero-duration) composition
+        // only adds latency and can never change the displayed frame.
+        guard currentImageClip == nil else { return }
+        // While a mixed-media project is playing, the logical clock below owns progression and
+        // keeps AVPlayer aligned only at clip transitions / meaningful drift. Treating each
+        // display-link-like clock update as a user scrub would issue a seek every few frames.
+        guard !state.isPlaying || !requiresLogicalPlaybackClock || state.isScrubbing else { return }
         guard let player else { return }
         let playerSeconds = player.currentTime().seconds
         guard playerSeconds.isFinite else { return }
@@ -353,6 +391,11 @@ struct EditorView: View {
     }
 
     private func requestPreciseScrubLanding(at targetSeconds: Double) {
+        if currentImageClip != nil {
+            pendingScrubLandingTarget = nil
+            showsScrubFrame = false
+            return
+        }
         scrubLandingRequestVersion &+= 1
         pendingScrubLandingTarget = targetSeconds
         finishPreciseScrubLandingIfPossible()
@@ -413,7 +456,11 @@ struct EditorView: View {
     private func handlePlayingChange(_ isPlaying: Bool) {
         if isPlaying {
             currentPlayEnd = computePlayEnd()
-            player?.play()
+            if requiresLogicalPlaybackClock {
+                startLogicalPlaybackClock()
+            } else {
+                player?.play()
+            }
 #if DEBUG
             if let player {
                 let waitingReason = player.reasonForWaitingToPlay?.rawValue ?? "nil"
@@ -424,8 +471,103 @@ struct EditorView: View {
             }
 #endif
         } else {
+            stopLogicalPlaybackClock()
             player?.pause()
         }
+    }
+
+    /// Starts a monotonic project-timeline clock for any project containing a still. AVPlayer's
+    /// own timebase cannot be authoritative in that case because it jumps across sample-less
+    /// image ranges. The player remains paused under stills, then seeks/plays when the clock enters
+    /// a video range; the SwiftUI still overlay reads the same `state.currentTime` throughout.
+    private func startLogicalPlaybackClock() {
+        guard state.isPlaying,
+              !state.isScrubbing,
+              requiresLogicalPlaybackClock,
+              player != nil,
+              !clipRanges.isEmpty
+        else { return }
+
+        logicalPlaybackTask?.cancel()
+        let timelineStart = state.currentTime
+        let wallClockStart = CACurrentMediaTime()
+
+        synchronizePlayerWithLogicalClock(at: timelineStart, forceSeek: true)
+        logicalPlaybackTask = Task { @MainActor in
+            var activeClipID = clipRange(at: timelineStart)?.clipId
+
+            while !Task.isCancelled, state.isPlaying, !state.isScrubbing {
+                let elapsed = CACurrentMediaTime() - wallClockStart
+                let proposedTime = timelineStart + elapsed
+
+                if proposedTime >= currentPlayEnd - 0.001 {
+                    // Keep an image selected at its last visible instant instead of moving the
+                    // shared clock onto the next clip while stopping at an internal boundary.
+                    let landing = state.clampTime(state.displayTime(for: currentPlayEnd))
+                    state.currentTime = landing
+                    if currentImageClip == nil {
+                        let target = CMTime(seconds: landing, preferredTimescale: 600)
+                        if let player {
+                            await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                        }
+                    }
+                    state.isPlaying = false
+                    break
+                }
+
+                let nextTime = state.clampTime(proposedTime)
+                state.currentTime = nextTime
+
+                let nextClipID = clipRange(at: nextTime)?.clipId
+                let crossedClipBoundary = nextClipID != activeClipID
+                synchronizePlayerWithLogicalClock(at: nextTime, forceSeek: crossedClipBoundary)
+                activeClipID = nextClipID
+
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func stopLogicalPlaybackClock() {
+        logicalPlaybackTask?.cancel()
+        logicalPlaybackTask = nil
+    }
+
+    /// Pauses AVPlayer during still ranges and keeps it close to the wall-clock-owned timeline
+    /// during video ranges. A forced exact seek happens only when crossing a clip boundary; later
+    /// corrections require visible drift, avoiding a stream of redundant seeks during playback.
+    private func synchronizePlayerWithLogicalClock(at time: Double, forceSeek: Bool) {
+        guard let player else { return }
+        guard let range = clipRange(at: time),
+              let clip = state.project.clips.first(where: { $0.id == range.clipId })
+        else {
+            player.pause()
+            return
+        }
+
+        guard clip.mediaType == "video" else {
+            player.pause()
+            return
+        }
+
+        let playerSeconds = player.currentTime().seconds
+        if forceSeek || !playerSeconds.isFinite || abs(playerSeconds - time) > 0.15 {
+            let target = CMTime(seconds: time, preferredTimescale: 600)
+            player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        if state.isPlaying,
+           !state.isScrubbing,
+           (forceSeek || player.timeControlStatus == .paused) {
+            player.play()
+        }
+    }
+
+    private var requiresLogicalPlaybackClock: Bool {
+        EditorCompositionBuilder.requiresLogicalPlaybackClock(clips: state.project.clips)
+    }
+
+    private func clipRange(at time: Double) -> EditorCompositionBuilder.ClipRange? {
+        clipRanges.first { time >= $0.start && time < $0.end }
     }
 
 
@@ -687,14 +829,8 @@ struct EditorView: View {
                 // inside an IMAGE clip's [start, end) range, overlay the still directly so image
                 // clips are no longer a black hole in the live preview (export already renders
                 // them correctly server-side).
-                if let imageClipURL = currentImageClipURL {
-                    AsyncImage(url: imageClipURL) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFit()
-                        } else {
-                            Color.clear
-                        }
-                    }
+                if let imageClip = currentImageClip {
+                    CachedClipImageView(clip: imageClip, contentMode: .fit)
                 }
                 // Q1: the dense source-frame ladder is the visible scrub path. Serialized player
                 // seeks continue underneath so the final precise handoff starts nearby.
@@ -934,7 +1070,7 @@ struct EditorView: View {
         let rebuildGeneration = playerRebuildGeneration
         await refreshOriginalAspectFraction()
         guard rebuildGeneration == playerRebuildGeneration else { return }
-        guard let (composition, videoComposition, ranges, isDegraded) = await EditorCompositionBuilder.build(
+        guard let (composition, videoComposition, audioMix, ranges, isDegraded) = await EditorCompositionBuilder.build(
             clips: state.project.clips, aspectRatio: state.aspectRatio
         ) else { return }
         guard rebuildGeneration == playerRebuildGeneration else { return }
@@ -957,18 +1093,27 @@ struct EditorView: View {
         // 13-22 i3: the shared end-clamp's authoritative upper bound — the composition's REAL
         // duration, which can differ from state.totalDuration's logical sum by rounding/trim-math
         // slop. Every scrub/seek path now routes through state.clampTime(_:), which reads this.
-        state.playableDuration = composition.duration.seconds
+        state.playableDuration = EditorCompositionBuilder.playableDuration(
+            compositionDuration: composition.duration.seconds,
+            ranges: ranges
+        )
 
         let item = AVPlayerItem(asset: composition)
         // 13-23 J4: per-clip aspect-fit into the project canvas — a mixed-dimension clip renders
         // pillarboxed/letterboxed instead of stretched to the first clip's shape. Fullscreen
         // shares this same item (13-22 i6.1), so it inherits the treatment automatically.
         item.videoComposition = videoComposition
+        item.audioMix = audioMix
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ])
         item.add(output)
         let avPlayer = AVPlayer(playerItem: item)
+        // Studio is an intentional playback surface, not one of the app's silent autoplay
+        // thumbnails. Make that contract explicit so a reused/default player configuration can
+        // never leave imported clip audio muted.
+        avPlayer.isMuted = false
+        avPlayer.volume = 1
         // The editor composition is assembled entirely from validated local cache files. Waiting
         // to minimize network stalls can leave composition-backed playback parked indefinitely.
         avPlayer.automaticallyWaitsToMinimizeStalling = false
@@ -979,15 +1124,24 @@ struct EditorView: View {
         videoOutputReadinessObserver.reset()
         previewSurfaceReady = false
         player = avPlayer
+        activeCompositionAudioTrack = composition.tracks(withMediaType: .audio).first
         playerVideoOutput = output
         usesComposedVideoOutput = false
         videoOutputRenderer.configure(player: avPlayer, output: output)
         observePlayerItemStatus(item, on: avPlayer)
         observePlayerItemFailure(item, on: avPlayer)
 
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        // Drive the fixed-playhead timeline at display cadence. The old 100 ms observer moved the
+        // strip in ~4.4 pt steps at the default 44 pt/s zoom, so playback itself looked smooth
+        // while the editor tracks visibly ticked sideways. A 60 Hz media-time observer keeps that
+        // translation sub-point at the default zoom and stays idle automatically while paused.
+        let interval = CMTime(value: 1, timescale: 60)
         timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
             Task { @MainActor in
+                // Mixed image/video playback is driven by the monotonic logical clock. AVPlayer
+                // may report the first video sample immediately after Play, which is precisely
+                // the jump that clock prevents from overwriting the still-image playhead range.
+                guard !requiresLogicalPlaybackClock else { return }
                 // i4.2 (Plan 13-20), extended 13-22 i3: the divider can never read before 00:00 or
                 // past the composition's real playable end — playing/scrubbing to the end now
                 // settles at `playableDuration - 0.03` and HOLDS that last frame instead of
@@ -996,8 +1150,8 @@ struct EditorView: View {
                 if state.isPlaying, time.seconds >= currentPlayEnd - 0.05 {
                     state.isPlaying = false
                     // 13-26 M4: exact-landing seek — playback may have stopped a fraction of a
-                    // second into the next clip's black boundary zone (the 0.1s periodic observer
-                    // isn't frame-exact); land precisely on currentPlayEnd, nudged off a boundary
+                    // second into the next clip's black boundary zone (the periodic observer is
+                    // not frame-exact); land precisely on currentPlayEnd, nudged off a boundary
                     // if it sits on one, so the paused frame is always the earlier clip's last
                     // frame, never black.
                     let target = CMTime(seconds: state.displayTime(for: currentPlayEnd), preferredTimescale: 600)
@@ -1015,7 +1169,11 @@ struct EditorView: View {
         finishPreciseScrubLandingIfPossible()
         if state.isPlaying {
             currentPlayEnd = computePlayEnd()
-            avPlayer.play()
+            if requiresLogicalPlaybackClock {
+                startLogicalPlaybackClock()
+            } else {
+                avPlayer.play()
+            }
         }
     }
 
@@ -1040,13 +1198,11 @@ struct EditorView: View {
     /// i5.3: the image clip (if any) whose [start, end) range the playhead currently sits inside,
     /// resolved from `clipRanges` (the same cumulative-duration windows `buildComposition` already
     /// computes) — nil for video clips or when the playhead is outside every clip's range.
-    private var currentImageClipURL: URL? {
+    private var currentImageClip: ProjectClip? {
         guard let range = clipRanges.first(where: { state.currentTime >= $0.start && state.currentTime < $0.end }),
               let clip = state.project.clips.first(where: { $0.id == range.clipId }),
-              clip.mediaType == "image",
-              let urlString = clip.url,
-              let url = URL(string: urlString) else { return nil }
-        return url
+              clip.mediaType == "image" else { return nil }
+        return clip
     }
 
     private func observePlayerItemStatus(_ item: AVPlayerItem, on observedPlayer: AVPlayer) {
@@ -1061,7 +1217,7 @@ struct EditorView: View {
                     observedPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
                         Task { @MainActor in
                             guard player === observedPlayer, observedPlayer.currentItem === item else { return }
-                            if state.isPlaying { observedPlayer.play() }
+                            if state.isPlaying, currentImageClip == nil { observedPlayer.play() }
                         }
                     }
                 }
@@ -1112,7 +1268,7 @@ struct EditorView: View {
                 observedPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
                     Task { @MainActor in
                         guard player === observedPlayer else { return }
-                        if state.isPlaying { observedPlayer.play() }
+                        if state.isPlaying, currentImageClip == nil { observedPlayer.play() }
                     }
                 }
                 print("[EditorView] activated composed-frame playback fallback")
@@ -1121,6 +1277,7 @@ struct EditorView: View {
     }
 
     private func tearDownPlayerObserverOnly() {
+        stopLogicalPlaybackClock()
         playerItemStatusObservation = nil
         if let playerItemFailureObservation {
             NotificationCenter.default.removeObserver(playerItemFailureObservation)
@@ -1132,6 +1289,7 @@ struct EditorView: View {
         timeObserverToken = nil
         player?.pause()
         player = nil
+        activeCompositionAudioTrack = nil
         playerVideoOutput = nil
         usesComposedVideoOutput = false
         previewSurfaceReady = false
@@ -1147,6 +1305,19 @@ struct EditorView: View {
         titleErrorClearTask?.cancel()
         exportToastTask?.cancel()
         barToastTask?.cancel()
+        // Match FullScreenVideoPlayerView: release audio focus when the editor closes so music or
+        // podcasts interrupted by Studio can resume.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// The app's default ambient session obeys the hardware silent switch. Studio is a user-
+    /// initiated video editor/player, so its source-video audio must use movie playback just like
+    /// FullScreenVideoPlayerView does. Keeping this scoped to the editor avoids letting muted
+    /// Home/onboarding loops take over audio focus at app launch.
+    private func activatePlaybackAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
     }
 
     // MARK: - Bottom bar: default-bar actions (13-19 Task A)
@@ -1287,6 +1458,64 @@ struct EditorView: View {
     }
 
     // MARK: - Bottom bar: contextual actions (13-19 Task A/F)
+
+    private func openSelectedClipVolume() {
+        guard case .clip(let id) = state.selection,
+              let clip = state.project.clips.first(where: { $0.id == id }),
+              clip.mediaType == "video"
+        else { return }
+
+        volumeEditingClipId = id
+        clipVolumeBeforeEditing = EditorCompositionBuilder.normalizedVolume(clip.volume)
+        clipVolumeDraft = clipVolumeBeforeEditing
+        showClipVolumeSheet = true
+    }
+
+    private func applyClipVolumePreview(clipId: String, volume: Double) {
+        guard let item = player?.currentItem else { return }
+        var previewClips = state.project.clips
+        if let index = previewClips.firstIndex(where: { $0.id == clipId }) {
+            previewClips[index].volume = volume
+        }
+        item.audioMix = EditorCompositionBuilder.makeAudioMix(
+            audioTrack: activeCompositionAudioTrack,
+            clips: previewClips
+        )
+    }
+
+    private func commitClipVolumeChange() {
+        guard let clipId = volumeEditingClipId else { return }
+        let oldVolume = clipVolumeBeforeEditing
+        let newVolume = EditorCompositionBuilder.normalizedVolume(clipVolumeDraft)
+        volumeEditingClipId = nil
+
+        guard abs(newVolume - oldVolume) > 0.0001 else {
+            applyClipVolumePreview(clipId: clipId, volume: oldVolume)
+            return
+        }
+
+        if let index = state.project.clips.firstIndex(where: { $0.id == clipId }) {
+            state.project.clips[index].volume = newVolume
+        }
+
+        Task {
+            do {
+                try await projectManager.updateClip(clipId: clipId, volume: newVolume)
+                syncProjectFromManager()
+                state.history.record(UndoableAction(
+                    label: "Clip volume",
+                    undo: { try await projectManager.updateClip(clipId: clipId, volume: oldVolume) },
+                    redo: { try await projectManager.updateClip(clipId: clipId, volume: newVolume) }
+                ))
+            } catch {
+                if let index = state.project.clips.firstIndex(where: { $0.id == clipId }) {
+                    state.project.clips[index].volume = oldVolume
+                }
+                applyClipVolumePreview(clipId: clipId, volume: oldVolume)
+                showBarToast("Couldn't change volume")
+            }
+        }
+    }
 
     /// Split — dispatches per selected-asset type. Converts the GLOBAL playhead time into the
     /// asset's own LOCAL time first (cumulative-duration walk for clips; startOffsetSeconds-

@@ -1,8 +1,8 @@
 // MediaPickerSheet.swift
 // Fantasia
 // Phase 13, Plan 10: the shared "Add Media" picker (D-08/D-09) — a segmented Generations/Uploads
-// sheet reused VERBATIM at both the Studio hub "+" (new project, plan 09) and the in-editor
-// timeline "+" (append clip, plan 12). Returns the ordered picked items to its caller via
+// sheet reused at both the Studio hub "+" (new project, plan 09), the in-editor timeline "+"
+// (append clip, plan 12), and Magic Editor in a constrained image-only mode. Returns picked items via
 // `onAdd`; the CALLER performs the actual import network calls (createProject /
 // importClipFromGeneration / uploadClip on ProjectManager, plan 08) — this sheet has zero
 // backend-mutation awareness of its own, beyond MediaPrepService's local HEVC transcode for the
@@ -51,9 +51,18 @@ enum PickedMedia: Identifiable, Equatable {
 }
 
 struct MediaPickerSheet: View {
+    enum Purpose {
+        case studio
+        case imageEditor
+    }
+
     @Environment(ThemeManager.self) private var theme
     @Environment(GenerationManager.self) private var generationManager
     @Environment(\.dismiss) private var dismiss
+
+    /// Studio keeps its existing mixed-media, ordered multi-select behavior. Magic Editor reuses
+    /// the same picker chrome in a single-select, image-only mode.
+    var purpose: Purpose = .studio
 
     /// Fires once, with the full ordered selection, when the user taps "Add {N}" — the sheet
     /// dismisses itself immediately after. The caller performs the actual import network calls.
@@ -88,10 +97,16 @@ struct MediaPickerSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                switch activeTab {
-                case .generations: generationsTab
-                case .uploads: uploadsTab
+                // The tab content MUST claim all remaining height — without this the whole VStack
+                // collapses to its intrinsic size and the sheet's contents cluster in the vertical
+                // center of the screen instead of reading as a top-anchored pullover.
+                Group {
+                    switch activeTab {
+                    case .generations: generationsTab
+                    case .uploads: uploadsTab
+                    }
                 }
+                .frame(maxHeight: .infinity)
 
                 addButton
             }
@@ -103,7 +118,10 @@ struct MediaPickerSheet: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .foregroundStyle(theme.textPrimary)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 30, height: 30)
+                            .background(theme.surface, in: Circle())
                     }
                     .accessibilityLabel("Close")
                 }
@@ -120,7 +138,7 @@ struct MediaPickerSheet: View {
         }
         .fileImporter(
             isPresented: $showFileImporter,
-            allowedContentTypes: [.movie, .image]
+            allowedContentTypes: purpose == .imageEditor ? [.image] : [.movie, .image]
         ) { result in
             Task { await handleImportedFile(result) }
         }
@@ -128,24 +146,21 @@ struct MediaPickerSheet: View {
 
     // MARK: - Header
 
+    // Title only — the segmented control already communicates what the two tabs are for, and the
+    // old subtitle wrapped to two lines and pushed the content down.
     private var header: some View {
-        VStack(spacing: 4) {
-            Text("Add Media")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
-            Text("Pick from your generations or upload from your device.")
-                .font(.system(size: 14))
-                .foregroundStyle(theme.textSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.top, 16)
-        .padding(.horizontal, 24)
+        Text(purpose == .imageEditor ? "Choose Image" : "Add Media")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(theme.textPrimary)
+            .padding(.top, 16)
     }
 
     // MARK: - Generations tab
 
     private var eligibleGenerations: [GenerationItem] {
-        generationManager.feedGenerations.filter { $0.status == .completed }
+        generationManager.feedGenerations.filter {
+            $0.status == .completed && (purpose == .studio || $0.isImage)
+        }
     }
 
     @ViewBuilder
@@ -161,8 +176,9 @@ struct MediaPickerSheet: View {
                     ForEach(eligibleGenerations) { item in
                         GenerationPickerTile(
                             item: item,
+                            tileAspectRatio: purpose == .imageEditor ? 1 : 9.0 / 16.0,
                             isSelected: isSelected(.generation(id: item.id, mediaType: item.mediaType.rawValue)),
-                            onTap: { toggleGeneration(item) }
+                            onTap: { selectGeneration(item) }
                         )
                     }
                 }
@@ -171,25 +187,53 @@ struct MediaPickerSheet: View {
         }
     }
 
+    // No icon tile (Andrew 2026-07-20) — text + a way forward. "Generate a video" dismisses and
+    // posts studioGenerateRequested; MainTabView listens and switches to the Create tab.
     private var emptyGenerationsState: some View {
-        VStack(spacing: 8) {
-            Text("No generations yet")
-                .font(.system(size: 16, weight: .semibold))
+        VStack(spacing: 10) {
+            Text(purpose == .imageEditor ? "No image generations yet" : "No generations yet")
+                .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(theme.textPrimary)
-            Text("Generate a video or image first, then come back to add it here.")
+            Text(
+                purpose == .imageEditor
+                    ? "Choose an image from Photos or Files instead."
+                    : "Your finished videos and images will show up here, ready to edit."
+            )
                 .font(.system(size: 14))
                 .foregroundStyle(theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
+            Button {
+                if purpose == .imageEditor {
+                    activeTab = .uploads
+                } else {
+                    dismiss()
+                    NotificationCenter.default.post(name: .studioGenerateRequested, object: nil)
+                }
+            } label: {
+                Label(
+                    purpose == .imageEditor ? "Choose Your Own" : "Generate a video",
+                    systemImage: purpose == .imageEditor ? "photo.on.rectangle" : "sparkles"
+                )
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 11)
+                    .background(studioAccent, in: Capsule())
+                    .shadow(color: studioAccent.opacity(0.35), radius: 8, x: 0, y: 4)
+            }
+            .buttonStyle(PressableButtonStyle())
+            .padding(.top, 8)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 64)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func toggleGeneration(_ item: GenerationItem) {
+    private func selectGeneration(_ item: GenerationItem) {
         let media = PickedMedia.generation(id: item.id, mediaType: item.mediaType.rawValue)
         if let index = selected.firstIndex(of: media) {
             selected.remove(at: index)
+        } else if purpose == .imageEditor {
+            selected = [media]
         } else {
             selected.append(media)
         }
@@ -210,6 +254,11 @@ struct MediaPickerSheet: View {
                 uploadSourceButtons
 
                 if !selectedUploads.isEmpty {
+                    Text("SELECTED · \(selectedUploads.count)")
+                        .font(.system(size: 10, weight: .heavy))
+                        .tracking(1.3)
+                        .foregroundStyle(theme.textTertiary)
+
                     LazyVGrid(
                         columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)],
                         spacing: 6
@@ -217,6 +266,7 @@ struct MediaPickerSheet: View {
                         ForEach(selectedUploads) { media in
                             UploadPickerTile(
                                 thumbnail: uploadThumbnails[media.id],
+                                tileAspectRatio: purpose == .imageEditor ? 1 : 9.0 / 16.0,
                                 onRemove: { removeUpload(media) }
                             )
                         }
@@ -239,35 +289,58 @@ struct MediaPickerSheet: View {
     }
 
     private var uploadSourceButtons: some View {
-        VStack(spacing: 10) {
-            PhotosPicker(selection: $photosPickerItem, matching: .any(of: [.images, .videos])) {
-                uploadSourceRow(icon: "photo.on.rectangle", title: "Photos & Videos")
+        VStack(spacing: 12) {
+            PhotosPicker(
+                selection: $photosPickerItem,
+                matching: purpose == .imageEditor ? .images : .any(of: [.images, .videos])
+            ) {
+                uploadSourceRow(
+                    icon: "photo.on.rectangle",
+                    title: purpose == .imageEditor ? "Photos" : "Photos & Videos",
+                    subtitle: "Pick from your camera roll"
+                )
             }
             Button {
                 showFileImporter = true
             } label: {
-                uploadSourceRow(icon: "folder", title: "Files")
+                uploadSourceRow(icon: "folder", title: "Files", subtitle: "Browse on-device and iCloud files")
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func uploadSourceRow(icon: String, title: String) -> some View {
-        HStack(spacing: 10) {
+    // Source cards (was a skinny icon+label row): accent-tinted icon tile + title + one-line
+    // subtitle reads as a tappable destination instead of a form row.
+    private func uploadSourceRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(studioAccent)
-            Text(title)
-                .font(.system(size: 14))
-                .foregroundStyle(theme.textPrimary)
+                .frame(width: 44, height: 44)
+                .background(studioAccent.opacity(0.15), in: RoundedRectangle(cornerRadius: 13))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .stroke(studioAccent.opacity(0.28), lineWidth: 1)
+                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.textSecondary)
+            }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.textSecondary)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.textTertiary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .padding(16)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(theme.surfaceBorder, lineWidth: 1)
+        }
     }
 
     /// Photos-tab entry point (T-13-26): reads the picked item's raw bytes, then hands off to the
@@ -298,6 +371,7 @@ struct MediaPickerSheet: View {
     /// `.upload` `PickedMedia`. Images need no transcode; they're written straight to a temp file
     /// and thumbnailed in-memory.
     private func appendUpload(data: Data, isVideo: Bool) async {
+        guard purpose == .studio || !isVideo else { return }
         isPreparingUpload = true
         defer { isPreparingUpload = false }
         let tmpURL = FileManager.default.temporaryDirectory
@@ -318,7 +392,12 @@ struct MediaPickerSheet: View {
             }
         } else {
             let media = PickedMedia.upload(url: tmpURL, mediaType: "image")
-            selected.append(media)
+            if purpose == .imageEditor {
+                selected = [media]
+                uploadThumbnails.removeAll()
+            } else {
+                selected.append(media)
+            }
             uploadThumbnails[media.id] = UIImage(data: data)
         }
     }
@@ -341,7 +420,7 @@ struct MediaPickerSheet: View {
             onAdd(selected)
             dismiss()
         } label: {
-            Text("Add \(selected.count)")
+            Text(purpose == .imageEditor ? "Use Image" : "Add \(selected.count)")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(selected.isEmpty ? theme.textTertiary : .white)
                 .frame(maxWidth: .infinity)
@@ -364,6 +443,7 @@ struct MediaPickerSheet: View {
 /// (video only), checkmark + accent-outline overlay when selected.
 private struct GenerationPickerTile: View {
     let item: GenerationItem
+    let tileAspectRatio: CGFloat
     let isSelected: Bool
     let onTap: () -> Void
 
@@ -371,7 +451,7 @@ private struct GenerationPickerTile: View {
 
     var body: some View {
         Color.black
-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
+            .aspectRatio(tileAspectRatio, contentMode: .fit)
             .overlay {
                 if let thumbnail {
                     Image(uiImage: thumbnail)
@@ -448,11 +528,12 @@ private struct GenerationPickerTile: View {
 /// removal is the only interaction, unlike the Generations tile's tap-to-toggle).
 private struct UploadPickerTile: View {
     let thumbnail: UIImage?
+    let tileAspectRatio: CGFloat
     let onRemove: () -> Void
 
     var body: some View {
         Color.black
-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
+            .aspectRatio(tileAspectRatio, contentMode: .fit)
             .overlay {
                 if let thumbnail {
                     Image(uiImage: thumbnail)

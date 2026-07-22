@@ -62,6 +62,7 @@ struct FullscreenEditorPlayerView: View {
     /// the (should-never-happen) case fullscreen opens before EditorView.rebuildPlayer() has ever
     /// finished once.
     let player: AVPlayer?
+    let clipRanges: [EditorCompositionBuilder.ClipRange]
     let usesComposedVideoOutput: Bool
     let videoOutputRenderer: EditorVideoOutputRenderer
     /// Item 4 (round 2): the project-canvas aspect fraction (width/height), identical to what
@@ -111,6 +112,13 @@ struct FullscreenEditorPlayerView: View {
                     // space proposed to both overlay GeometryReaders. Do not move it back onto
                     // the safe-area-ignoring video view with `.overlay` (see file header).
                     ZStack {
+                        // Image clips have no AVPlayer samples; use the same still overlay as the
+                        // inline editor so fullscreen playback also holds the image until its
+                        // logical range ends.
+                        if let imageClip = currentImageClip {
+                            CachedClipImageView(clip: imageClip, contentMode: .fit)
+                        }
+
                         // Preview-only surface — none of TextOverlayCanvasView's editing gestures
                         // can fire here, so `onError` remains an API-consistency hook.
                         TextOverlayCanvasView(state: state, showsControls: false, onError: onError)
@@ -220,7 +228,6 @@ struct FullscreenEditorPlayerView: View {
     private func togglePlayback(player: AVPlayer) {
         if state.isPlaying {
             state.pause()
-            player.pause()
         } else {
             // Replay from the top if we're already sitting at (or past) the end — mirrors CapCut/
             // every video app's "tap play after it finished" convention.
@@ -230,7 +237,6 @@ struct FullscreenEditorPlayerView: View {
                 player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
             }
             state.play()
-            player.play()
         }
     }
 
@@ -263,5 +269,15 @@ struct FullscreenEditorPlayerView: View {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private var currentImageClip: ProjectClip? {
+        guard let range = clipRanges.first(where: {
+            state.currentTime >= $0.start && state.currentTime < $0.end
+        }),
+        let clip = state.project.clips.first(where: { $0.id == range.clipId }),
+        clip.mediaType == "image"
+        else { return nil }
+        return clip
     }
 }

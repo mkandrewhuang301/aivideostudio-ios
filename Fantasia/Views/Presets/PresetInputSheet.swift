@@ -51,6 +51,9 @@ struct PresetInputSheet: View {
 
     @State private var slotInputs: [PresetSlotInput?]
     @State private var text: String = ""
+    // Local to this standalone preset sheet; does not use or modify GenerateView's frozen
+    // composer/keyboard positioning. Tracking focus lets outside taps dismiss the plain field.
+    @FocusState private var isTextFocused: Bool
     @State private var selectedStyleId: String?
     // Client-side only, purely organizational — never sent to the server, no auto-detection
     // from the uploaded photo (deliberate: see 2026-07-07 notes/
@@ -117,7 +120,12 @@ struct PresetInputSheet: View {
     ///   - prefillSlots: existing upload ids/urls/thumbnails to preload per slot index — used by
     ///     Remix (Plan 08) to reopen this same sheet prefilled from a prior run's stored inputs,
     ///     never by routing through the composer.
-    init(preset: Preset, prefillSlots: [PresetSlotInput?] = []) {
+    init(
+        preset: Preset,
+        prefillSlots: [PresetSlotInput?] = [],
+        prefillStyleId: String? = nil,
+        prefillAspectRatio: String? = nil
+    ) {
         self.preset = preset
         let count = preset.inputSchema?.slots.count ?? 0
         var initial = Array<PresetSlotInput?>(repeating: nil, count: count)
@@ -125,7 +133,11 @@ struct PresetInputSheet: View {
             initial[index] = value
         }
         _slotInputs = State(initialValue: initial)
-        _selectedAspectRatio = State(initialValue: preset.sheet?.defaultAspectRatio)
+        let allowedStyleIds = Set(preset.inputSchema?.styleGrid?.map(\.id) ?? [])
+        _selectedStyleId = State(initialValue: prefillStyleId.flatMap { allowedStyleIds.contains($0) ? $0 : nil })
+        let allowedRatios = Set(preset.sheet?.aspectRatios ?? [])
+        let restoredRatio = prefillAspectRatio.flatMap { allowedRatios.contains($0) ? $0 : nil }
+        _selectedAspectRatio = State(initialValue: restoredRatio ?? preset.sheet?.defaultAspectRatio)
     }
 
     var body: some View {
@@ -148,6 +160,14 @@ struct PresetInputSheet: View {
                     .padding(.top, 20)
                     .padding(.bottom, 140)
                 }
+            }
+            // Preset text fields should dismiss like a native scrolling form: the keyboard follows
+            // a swipe and settles down when released. This changes dismissal only, never layout.
+            .scrollDismissesKeyboard(.interactively)
+            // Child controls (including the TextField) retain their own tap handling; a tap on the
+            // surrounding preset content clears focus and dismisses the keyboard.
+            .onTapGesture {
+                isTextFocused = false
             }
             .ignoresSafeArea(edges: .top)
 
@@ -531,7 +551,7 @@ struct PresetInputSheet: View {
     private func slotTile(index: Int, slot: PresetSlot, style: SlotTileStyle) -> some View {
         let input = index < slotInputs.count ? slotInputs[index] : nil
         let height: CGFloat = style == .large ? 220 : 160
-        let hasFilledMedia = input?.thumbnail != nil
+        let hasFilledMedia = input?.thumbnail != nil || input?.url != nil
 
         // ZStack, not a single Button: the 2026-07-12 remove (x) button below must be a SIBLING
         // to the main tap-to-reopen-picker Button, not nested inside its label — a Button nested
@@ -551,7 +571,7 @@ struct PresetInputSheet: View {
                             RoundedRectangle(cornerRadius: 16)
                                 .strokeBorder(
                                     theme.surfaceBorder,
-                                    style: input?.thumbnail == nil
+                                    style: !hasFilledMedia
                                         ? StrokeStyle(lineWidth: 1.25, dash: [6, 5])
                                         : StrokeStyle(lineWidth: 1)
                                 )
@@ -573,6 +593,39 @@ struct PresetInputSheet: View {
                                     .resizable()
                                     .scaledToFill()
                                     .allowsHitTesting(false)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(alignment: .topTrailing) {
+                                if slot.kind == "video", let duration = input?.durationSeconds {
+                                    Text(durationLabel(duration))
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.black.opacity(0.55), in: Capsule())
+                                        .padding(8)
+                                }
+                            }
+                    } else if let remoteURLString = input?.url,
+                              let remoteURL = URL(string: remoteURLString) {
+                        // Remix restores a retained upload id + freshly signed URL, not the
+                        // original in-memory UIImage. Render that remote media directly so the
+                        // slot visibly contains the exact source the prior run used.
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: height)
+                            .overlay {
+                                if slot.kind == "video" {
+                                    CachedVideoFrameThumbnail(
+                                        cacheKey: "preset-remix-\(input?.uploadId ?? remoteURLString)-video",
+                                        videoURL: remoteURL
+                                    )
+                                } else {
+                                    CachedThumbnailImage(
+                                        cacheKey: "preset-remix-\(input?.uploadId ?? remoteURLString)-image",
+                                        url: remoteURL
+                                    )
+                                }
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .overlay(alignment: .topTrailing) {
@@ -866,6 +919,7 @@ struct PresetInputSheet: View {
                     .font(.body)
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1...4)
+                    .focused($isTextFocused)
                     .padding(12)
                     .background(theme.surface, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(
@@ -1315,6 +1369,10 @@ struct PresetInputSheet: View {
            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
+        if let styles = schema.styleGrid, !styles.isEmpty,
+           !styles.contains(where: { $0.id == selectedStyleId }) {
+            return false
+        }
         return true
     }
 
@@ -1491,7 +1549,7 @@ struct PresetInputSheet: View {
 
         // D-11: the client never constructs or sends the expanded template — only preset_id +
         // the slot upload ids. The server's presetResolver middleware owns prompt/model/media_type.
-        let body = GenerationRequestBody(
+        var body = GenerationRequestBody(
             prompt: "",
             model: preset.model ?? "",
             mediaType: preset.mediaType,
@@ -1513,6 +1571,7 @@ struct PresetInputSheet: View {
             estimatedDurationSeconds: estimatedDurationSecondsForSubmission,
             quality: (isAIInfluencerPreset && qualityTier == .pro) ? "pro" : nil
         )
+        body.styleId = selectedStyleId
 
         // Optimistic UI (mirrors GenerateView.dispatchGeneration): drop a pending placeholder
         // into GenerationManager immediately — the run then rides the existing pending-card
